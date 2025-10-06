@@ -28,7 +28,7 @@ Ready-made demonstrations live in `examples/`:
 - `ellipse_depth5.py` – launches rays from one focus of an elliptical mirror and shows five internal reflections converging on the conjugate focus.
 - `cartesian_dioptrique_focus.py` – traces refraction through a single Cartesian dioptrique from object distance `z0` to image distance `zi`.
 - `cartesian_singlet_focus.py` – combines two matched Cartesian dioptriques into a stigmatic singlet, highlighting the object, intermediate, and final focal points.
-- `high_aperture_singlet.py` – fires a wide (≈40°) fan of rays into a thick Cartesian singlet so you can inspect non-paraxial behaviour.
+- `high_aperture_singlet.py` – fires a wide (≈40°) fan of rays into a thick Cartesian singlet so you can inspect non-paraxial behaviour. Try `Scene2DViewer(line_method="agg")` for anti-aliased segments.
 
 Execute an example with:
 
@@ -36,7 +36,7 @@ Execute an example with:
 python examples/ellipse_depth5.py
 ```
 
-The VisPy window supports pan/zoom via mouse interactions. Pass `extend_mode="axis"` to `Scene2DViewer.draw_rays` when you want each refracted branch to continue until it crosses the optical axis.
+The VisPy window supports pan/zoom via mouse interactions. Pass `extend_mode="axis"` to `Scene2DViewer.draw_rays` when you want each refracted branch to continue until it crosses the optical axis. For a crisper look, initialise the viewer with `line_method="agg"` (anti-aliased software rendering) or stick with the default `"gl"` renderer for speed.
 
 ### Programmatic Use
 
@@ -58,6 +58,10 @@ The tracer automatically flips surface normals based on incident direction and c
 - `CartesianSinglet` – wraps two compatible Cartesian dioptriques separated by a specified thickness, producing a matched front/back pair for lens studies.
 
 Both are discretised into polylines, so increasing `samples` tightens accuracy for large apertures.
+
+### Offline Renders
+
+Run `python scripts/render_snapshots.py` to export reference images (both GL and AGG line rendering) into the `renders/` directory. The helper uses the new `Scene2DViewer.save()` API, so feel free to adapt it for your own scenes.
 
 ## Repository Layout
 

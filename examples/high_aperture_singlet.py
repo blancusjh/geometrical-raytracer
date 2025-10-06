@@ -58,7 +58,7 @@ def main() -> None:
     tree = tracer.trace([source])
 
     x_max = thickness + z_image + 1.0
-    viewer = Scene2DViewer(x_lims=(-7.0, x_max), y_lims=(-4.0, 4.0))
+    viewer = Scene2DViewer(x_lims=(-7.0, x_max), y_lims=(-4.0, 4.0), line_method="agg")
     viewer.draw_surfaces([front, back])
     viewer.draw_rays(tree, width=0.9, extend_mode="axis", show_misses=False)
 
