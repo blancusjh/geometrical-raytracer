@@ -57,21 +57,30 @@ def main() -> None:
     tracer = RayTracer2D([front, back], config)
     tree = tracer.trace([source])
 
+    ray_alpha = 0.5
+
     x_max = thickness + z_image + 1.0
     viewer = Scene2DViewer(x_lims=(-7.0, x_max), y_lims=(-4.0, 4.0), line_method="agg")
+    # viewer = Scene2DViewer(x_lims=(-7.0, x_max), y_lims=(-4.0, 4.0), line_method="gl")
     viewer.draw_surfaces([front, back])
-    viewer.draw_rays(tree, width=0.9, extend_mode="axis", show_misses=False)
+    viewer.draw_rays(
+        tree,
+        width=0.35,
+        extend_mode="axis",
+        show_misses=False,
+        hit_color=(1.0, 1.0, 0.0, ray_alpha),
+    )
 
     object_pt = np.array([-z_object, 0.0])
     intermediate_pt = np.array([z_intermediate, 0.0])
     final_pt = np.array([thickness + z_image, 0.0])
-    markers = np.vstack([object_pt, intermediate_pt, final_pt])
-    colors = np.array([
-        [0.3, 0.9, 0.3, 1.0],
-        [1.0, 0.5, 0.1, 1.0],
-        [0.1, 0.7, 1.0, 1.0],
-    ])
-    scene.visuals.Markers(pos=markers, size=9, face_color=colors, parent=viewer.view.scene)
+    #markers = np.vstack([object_pt, intermediate_pt, final_pt])
+    #colors = np.array([
+    #    [0.3, 0.9, 0.3, 1.0],
+    #    [1.0, 0.5, 0.1, 1.0],
+    #    [0.1, 0.7, 1.0, 1.0],
+    #])
+    #scene.visuals.Markers(pos=markers, size=9, face_color=colors, parent=viewer.view.scene)
 
     viewer.run()
 

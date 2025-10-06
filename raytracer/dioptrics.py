@@ -89,7 +89,9 @@ class SigmaCurve:
     ni: float
     t_shift: float = 0.0
 
+
     def lambdify(self) -> tuple[Callable[[float], float], Callable[[float], float]]:
+
         z0 = self.z0 - self.t_shift
         zi = self.zi - self.t_shift
         n0 = self.n0

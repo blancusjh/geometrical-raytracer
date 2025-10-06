@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import numpy as np
 from vispy import app, scene
@@ -11,11 +11,15 @@ from vispy.color import Color
 from vispy.io import write_png
 
 from .geometry import Surface2D
-from .rays import RayTree
+from .rays import RayNode, RayTree
+from ._vis import ConstantAlphaLine
 
 
 def _stack_segments(segments: Sequence[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+
     """Stack polyline segments and return positions/connect indices."""
+
+
     if not segments:
         raise ValueError("segments must be non-empty")
     pos_list: list[np.ndarray] = []
@@ -55,19 +59,41 @@ class Scene2DViewer:
         bgcolor: str | tuple[float, float, float, float] = "black",
         line_method: str = "gl",
         antialias: bool = True,
+        agg_alpha: float | None = None,
+        agg_width_scale: float = 1.0,
+        surface_width: float = 0.6,
+        agg_alpha_floor: float = 0.0,
+        agg_alpha_softness: float = 0.0,
+
     ) -> None:
         self.canvas = scene.SceneCanvas(keys="interactive", show=show, bgcolor=bgcolor, size=size)
         self.view = self.canvas.central_widget.add_view()
-        self.view.camera = scene.cameras.PanZoomCamera(aspect=1.0)
         if show_axis:
             scene.visuals.XYZAxis(parent=self.view.scene)
+
+     
+        self.view.camera = scene.cameras.PanZoomCamera(aspect=1.0)
         self.view.camera.set_range(x=x_lims, y=y_lims)
+        #self.view.camera = 'turntable'
 
         method = line_method.lower()
         if method not in {"gl", "agg"}:
             raise ValueError("line_method must be 'gl' or 'agg'")
         self._line_method = method
         self._antialias = bool(antialias)
+        if self._line_method == "agg":
+            self._agg_alpha = float(agg_alpha) if agg_alpha is not None else None
+            if self._agg_alpha is not None:
+                self._agg_alpha = float(np.clip(self._agg_alpha, 0.0, 1.0))
+            self._agg_width_scale = float(agg_width_scale) if agg_width_scale > 0 else 1.0
+            self._agg_alpha_floor = float(np.clip(agg_alpha_floor, 0.0, 1.0))
+            self._agg_alpha_softness = float(np.clip(agg_alpha_softness, 0.0, 1.0))
+        else:
+            self._agg_alpha = None
+            self._agg_width_scale = 1.0
+            self._agg_alpha_floor = 0.0
+            self._agg_alpha_softness = 0.0
+        self._surface_width = float(surface_width)
 
         self._surface_visuals: list[scene.VisualNode] = []
         self._ray_visuals: list[scene.VisualNode] = []
@@ -79,6 +105,16 @@ class Scene2DViewer:
         for visual in visuals:
             visual.parent = None
         setattr(self, attr, [])
+
+    def _color_rgba(self, color: Color | str | Sequence[float] | np.ndarray) -> np.ndarray:
+        rgba = np.array(color, dtype=np.float32, copy=True) if isinstance(color, np.ndarray) else np.array(Color(color).rgba, dtype=np.float32, copy=True)
+        if rgba.ndim == 1:
+            if self._line_method == "agg" and self._agg_alpha is not None:
+                rgba[3] = min(rgba[3], self._agg_alpha)
+            return rgba
+        if self._line_method == "agg" and self._agg_alpha is not None:
+            rgba[:, 3] = np.minimum(rgba[:, 3], self._agg_alpha)
+        return rgba
 
     # ---------------------------------------------------------------- surfaces
     def draw_surfaces(self, surfaces: list[Surface2D]) -> None:
@@ -103,42 +139,59 @@ class Scene2DViewer:
             line = scene.visuals.Line(
                 pos=pos,
                 connect=connect,
-                color=Color("white").rgba,
-                width=1.8,
+                color=self._color_rgba(Color("white")),
+                width=self._surface_width,
                 antialias=self._antialias,
                 method="gl",
                 parent=self.view.scene,
             )
             self._surface_visuals.append(line)
         else:
-            color = Color("white").rgba
-            for seg in segments:
-                line = scene.visuals.Line(
-                    pos=seg,
-                    color=color,
-                    width=1.8,
-                    antialias=self._antialias,
-                    method="agg",
-                    parent=self.view.scene,
-                )
-                self._surface_visuals.append(line)
+            base_color = self._color_rgba(Color("white"))
+            line = ConstantAlphaLine(
+                pos=segments,
+                color=[np.array(base_color, copy=True) for _ in segments],
+                width=self._surface_width * self._agg_width_scale,
+                antialias=float(self._antialias),
+                alpha_floor=self._agg_alpha_floor,
+                alpha_softness=self._agg_alpha_softness,
+                parent=self.view.scene,
+            )
+            self._surface_visuals.append(line)
 
     # --------------------------------------------------------------------- rays
     def draw_rays(
         self,
         tree: RayTree,
         tail_length: float = 12.0,
-        width: float = 1.2,
+        width: float = 0.35,
         extend_mode: str = "none",
         extend_length: float = 0.0,
         axis_y: float = 0.0,
         show_misses: bool = True,
+        *,
+        color_resolver: Callable[[RayNode], Sequence[float]] | None = None,
+        hit_color: Color | str | Sequence[float] = "yellow",
+        miss_color: Color | str | Sequence[float] = "orange",
     ) -> None:
         self._clear_visuals("_ray_visuals")
         self._clear_visuals("_marker_visuals")
 
-        miss_color = Color("orange").rgba.astype(np.float32)
-        hit_color = Color("yellow").rgba.astype(np.float32)
+        default_miss = self._color_rgba(miss_color)
+        default_hit = self._color_rgba(hit_color)
+
+        def resolve_rgba(node: RayNode, fallback: np.ndarray) -> np.ndarray:
+            if color_resolver is None:
+                return np.array(fallback, copy=True)
+            raw = np.array(color_resolver(node), dtype=np.float32)
+            if raw.ndim == 1:
+                if raw.size == 3:
+                    raw = np.concatenate((raw, [1.0]))
+                if raw.size != 4:
+                    raise ValueError("color_resolver must return an RGB or RGBA array")
+            else:
+                raise ValueError("color_resolver must return a 1D RGB/RGBA array")
+            return self._color_rgba(raw)
         extend_mode = extend_mode.lower()
 
         segment_entries: list[tuple[np.ndarray, np.ndarray]] = []
@@ -152,10 +205,10 @@ class Scene2DViewer:
                 if not show_misses:
                     continue
                 end = start + direction * float(tail_length)
-                color = miss_color
+                color = resolve_rgba(node, default_miss)
             else:
                 hit_point = np.asarray(node.intersection.point, dtype=np.float32)
-                color = hit_color
+                color = resolve_rgba(node, default_hit)
                 hit_positions.append(hit_point)
                 end = hit_point
 
@@ -198,16 +251,18 @@ class Scene2DViewer:
             )
             self._ray_visuals.append(line)
         else:
-            for seg, color in segment_entries:
-                line = scene.visuals.Line(
-                    pos=seg,
-                    color=color,
-                    width=width,
-                    antialias=self._antialias,
-                    method="agg",
-                    parent=self.view.scene,
-                )
-                self._ray_visuals.append(line)
+            segments = [seg for seg, _ in segment_entries]
+            colors = [np.array(color, copy=True) for _, color in segment_entries]
+            line = ConstantAlphaLine(
+                pos=segments,
+                color=colors,
+                width=width,
+                antialias=float(self._antialias),
+                alpha_floor=self._agg_alpha_floor,
+                alpha_softness=self._agg_alpha_softness,
+                parent=self.view.scene,
+            )
+            self._ray_visuals.append(line)
 
         if hit_positions:
             markers = scene.visuals.Markers(

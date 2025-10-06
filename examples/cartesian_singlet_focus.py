@@ -57,9 +57,22 @@ def main() -> None:
     tracer = RayTracer2D([front, back], config)
     tree = tracer.trace([source])
 
-    viewer = Scene2DViewer(x_lims=(-65.0, thickness + z_image + 5.0), y_lims=(-6.0, 6.0))
+    ray_alpha = 0.55
+
+    viewer = Scene2DViewer(
+        x_lims=(-65.0, thickness + z_image + 5.0),
+        y_lims=(-6.0, 6.0),
+        line_method="agg",
+    )
+    # viewer = Scene2DViewer(x_lims=(-65.0, thickness + z_image + 5.0), y_lims=(-6.0, 6.0), line_method="gl")
     viewer.draw_surfaces([front, back])
-    viewer.draw_rays(tree, width=1.0, extend_mode="axis", show_misses=False)
+    viewer.draw_rays(
+        tree,
+        width=0.35,
+        extend_mode="axis",
+        show_misses=False,
+        hit_color=(1.0, 1.0, 0.0, ray_alpha),
+    )
 
     object_pt = np.array([-z_object, 0.0])
     intermediate_pt = np.array([z_intermediate, 0.0])
