@@ -1,0 +1,181 @@
+
+import numpy as np
+from vispy import app, scene
+
+
+# ============================================================
+# PHYSICS FIRST: universal optical laws
+# ============================================================
+def normalize(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    v = np.asarray(v, dtype=float)
+    n = np.linalg.norm(v)
+    if n <= eps:
+        raise ValueError("Cannot normalize zero-length vector.")
+    return v / n
+
+
+def reflect(d_in: np.ndarray, n: np.ndarray) -> np.ndarray:
+    """Law of reflection: d_out = d_in - 2 (d_in·n) n"""
+    d_in = normalize(d_in)
+    n = normalize(n)
+    d_out = d_in - 2 * np.dot(d_in, n) * n
+    return normalize(d_out)
+
+
+# ============================================================
+# Mathematics of conics
+# ============================================================
+def quadratic_coeffs_from_ep(e: float, p: float):
+    A = 1.0 - e**2
+    B = 0.0
+    C = 1.0
+    D = 2.0 * e * p
+    E = 0.0
+    F = -p**2
+    return (A, B, C, D, E, F)
+
+
+class ConicalDioptrique:
+    """Conic section in polar coordinates: r(θ) = p / (1 + e cos θ)."""
+
+    def __init__(self, e: float, p: float):
+        self.e = float(e)
+        self.p = float(p)
+        self.coeffs = quadratic_coeffs_from_ep(e, p)
+
+    def r(self, theta: float):
+        denom = 1.0 + self.e * np.cos(theta)
+        if abs(denom) < 1e-12:
+            return None
+        return self.p / denom
+
+    def as_points(self, N=800, theta_span=(-np.pi, np.pi)):
+        thetas = np.linspace(theta_span[0], theta_span[1], N)
+        r_values = [self.r(theta) for theta in thetas]
+        r_values = np.array([np.nan if v is None else v for v in r_values])
+        x = r_values * np.cos(thetas)
+        y = r_values * np.sin(thetas)
+        return np.column_stack((x, y))
+
+    def normal(self, Q: np.ndarray) -> np.ndarray:
+        """Normal to implicit conic at Q."""
+        x, y = Q
+        A, B, C, D, E, F = self.coeffs
+        nx = 2*A*x + B*y + D
+        ny = B*x + 2*C*y + E
+        return normalize(np.array([nx, ny]))
+
+    def intersect_ray(self, P: np.ndarray, d: np.ndarray):
+        """Intersection of ray with conic. Returns point or None."""
+        x0, y0 = P
+        dx, dy = d
+        A, B, C, D, E, F = self.coeffs
+
+        a = A*dx*dx + B*dx*dy + C*dy*dy
+        b = 2*A*x0*dx + B*(x0*dy + y0*dx) + 2*C*y0*dy + D*dx + E*dy
+        c = A*x0*x0 + B*x0*y0 + C*y0*y0 + D*x0 + E*y0 + F
+
+        eps = 1e-12
+        lam = None
+
+        if abs(a) < eps:
+            if abs(b) >= eps:
+                lam_candidate = -c / b
+                if lam_candidate >= 0:
+                    lam = lam_candidate
+        else:
+            disc = b*b - 4*a*c
+            if disc >= -eps:
+                if disc < 0: disc = 0.0
+                sqrt_disc = np.sqrt(disc)
+                lam1 = (-b - sqrt_disc) / (2*a)
+                lam2 = (-b + sqrt_disc) / (2*a)
+                candidates = [val for val in (lam1, lam2) if val >= 0]
+                if candidates:
+                    lam = min(candidates)
+
+        if lam is None:
+            return None
+        return P + lam*d
+
+
+# ============================================================
+# Light source
+# ============================================================
+class Source:
+    def __init__(self, P, d=None):
+        self.P = np.array(P, dtype=float)
+        if d is None:
+            self.d = np.array([1.0, 0.0])
+        else:
+            self.d = normalize(d)
+
+    def cast_cone(self, N, delta_theta):
+        rays = []
+        alpha0 = np.arctan2(self.d[1], self.d[0])
+        half = delta_theta/2
+        thetas = np.linspace(-half, half, N)
+        for theta in thetas:
+            angle = alpha0 + theta
+            d_rot = np.array([np.cos(angle), np.sin(angle)])
+            rays.append((self.P, d_rot))
+        return rays
+
+
+# ============================================================
+# Canvas utils
+# ============================================================
+def setup_canvas(x_lims=(-6, 6), y_lims=(-6, 6)):
+    canvas = scene.SceneCanvas(keys='interactive', show=True, bgcolor='black', size=(900, 700))
+    view = canvas.central_widget.add_view()
+    view.camera = scene.cameras.PanZoomCamera(aspect=1)
+    scene.visuals.XYZAxis(parent=view.scene)
+    view.camera.set_range(x=x_lims, y=y_lims)
+    return canvas, view
+
+
+def draw_line(view, pts, color='white', width=2):
+    if pts.size != 0:
+        scene.visuals.Line(pos=pts, color=color, parent=view.scene, width=width)
+
+
+def draw_point(view, Q, color='red', size=8):
+    scene.visuals.Markers(pos=np.array([Q]), size=size, face_color=color, parent=view.scene)
+
+
+# ============================================================
+# DEMO: reflection from ellipse (or circle for e=0)
+# ============================================================
+if __name__ == '__main__':
+    canvas, view = setup_canvas()
+
+    # Define ellipse: e=0 (circle), p = radius
+    e, p = 0.5, 3.0
+
+
+    conic = ConicalDioptrique(e, p)
+    draw_line(view, conic.as_points(N=1000), color='white')
+
+    # Source at the "focus" (for e=0, focus = center)
+    src = Source(P=np.array([0.1, 0.0]))
+
+    # Emit rays in a cone
+    rays = src.cast_cone(N=20, delta_theta=np.pi/4)
+
+    # Trace rays
+    for P, d in rays:
+        Q = conic.intersect_ray(P, d)
+        if Q is None: 
+            continue
+        n = conic.normal(Q)
+        d_refl = reflect(d, n)
+
+        # Draw incoming
+        draw_line(view, np.array([P, Q]), color='yellow')
+        draw_point(view, Q, color='red', size=6)
+
+        # Draw reflected ray
+        Q_far = Q + 10*d_refl
+        draw_line(view, np.array([Q, Q_far]), color='cyan')
+
+    app.run()
