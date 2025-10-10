@@ -8,7 +8,8 @@ from typing import Callable
 import numpy as np
 
 from .geometry import Surface2D
-from .rays import Intersection2D, Ray, normalize
+from .rays import RayND, normalize
+from .surfaces import SurfaceIntersection
 
 _EPS_RHO = 1e-9
 _MAX_RHO = 1e6
@@ -179,8 +180,15 @@ def intersection_between_curves(
     return rho1, rho2
 
 
+class SampledSurface2D(Surface2D):
+    """Base class for surfaces defined via discrete sampling."""
+
+    def __init__(self, *, surface_id: str) -> None:
+        super().__init__(parameter_dimension=2, surface_id=surface_id)
+
+
 @dataclass
-class CartesianDioptrique(Surface2D):
+class CartesianDioptrique(SampledSurface2D):
     """Piecewise-linear approximation of a Cartesian dioptric surface."""
 
     z0: float
@@ -194,6 +202,7 @@ class CartesianDioptrique(Surface2D):
     surface_id: str = "cartesian_dioptrique"
 
     def __post_init__(self) -> None:
+        SampledSurface2D.__init__(self, surface_id=self.surface_id)
         if self.samples < 2:
             raise ValueError("samples must be >= 2")
         self.z0 = float(self.z0)
@@ -249,9 +258,13 @@ class CartesianDioptrique(Surface2D):
         lower_segment[0] = self._axis_point[0]
         self._lower_segment = lower_segment
 
-    def first_intersection(self, ray: Ray) -> Optional[Intersection2D]:
-        best_hit: Optional[Intersection2D] = None
+    def solve_intersection(self, ray: RayND) -> SurfaceIntersection | None:
+        if ray.dimension != 2:
+            raise ValueError("CartesianDioptrique expects a 2D ray")
         best_distance = np.inf
+        best_point: Optional[np.ndarray] = None
+        best_normal: Optional[np.ndarray] = None
+        best_meta: Optional[dict[str, float]] = None
         origin = ray.origin
         direction = ray.direction
 
@@ -280,14 +293,41 @@ class CartesianDioptrique(Surface2D):
             if np.dot(normal, midpoint - self._centroid) < 0.0:
                 normal = -normal
             best_distance = t
-            best_hit = Intersection2D(
-                point=hit_point,
-                normal=normalize(normal),
-                distance=float(t),
-                surface_id=self.surface_id,
-                surface=self,
-            )
-        return best_hit
+            best_point = hit_point
+            best_normal = normalize(normal)
+            best_meta = {"segment_index": float(i), "segment_parameter": float(u)}
+
+        if best_point is None or best_normal is None:
+            return None
+
+        return SurfaceIntersection(
+            distance=float(best_distance),
+            parameters=np.asarray(best_point, dtype=float),
+            point=np.asarray(best_point, dtype=float),
+            normal=best_normal,
+            meta=best_meta,
+        )
+
+    def point_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+        return np.asarray(parameters, dtype=float)
+
+    def normal_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+        point = np.asarray(parameters, dtype=float)
+        pts = self._polyline
+        distances = np.linalg.norm(pts - point, axis=1)
+        idx = int(np.argmin(distances))
+        if idx == len(pts) - 1:
+            idx -= 1
+        segment = pts[idx + 1] - pts[idx]
+        seg_norm = np.linalg.norm(segment)
+        if seg_norm <= 1e-12:
+            return np.array([0.0, 1.0])
+        tangent = segment / seg_norm
+        normal = np.array([tangent[1], -tangent[0]])
+        midpoint = (pts[idx] + pts[idx + 1]) / 2.0
+        if np.dot(normal, midpoint - self._centroid) < 0.0:
+            normal = -normal
+        return normalize(normal)
 
     def polyline_segments(self) -> list[np.ndarray]:
         return [self._upper_segment, self._lower_segment]

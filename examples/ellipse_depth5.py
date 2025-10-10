@@ -31,7 +31,8 @@ def main() -> None:
     )
 
     primary_focus = ellipse.focus.copy()
-    major_axis_dir = ellipse._R @ np.array([1.0, 0.0])
+    major_axis_dir = ellipse.frame.direction_to_world(np.array([1.0, 0.0]))
+    major_axis_dir = major_axis_dir / np.linalg.norm(major_axis_dir)
     focal_offset = np.sqrt(semi_major ** 2 - semi_minor ** 2)
     secondary_focus = primary_focus - 2.0 * focal_offset * major_axis_dir
 

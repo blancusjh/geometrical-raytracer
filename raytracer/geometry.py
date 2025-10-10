@@ -1,13 +1,14 @@
-"""Geometric surfaces and intersection helpers for 2D tracing."""
+"""Geometric surface primitives built on the dimension-agnostic core."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
-from .rays import Intersection2D, Ray, normalize
+from .rays import RayND, normalize
+from .surfaces import LocalFrame, SurfaceIntersection, SurfaceND
 
 
 def quadratic_coeffs_from_ep(e: float, p: float) -> tuple[float, float, float, float, float, float]:
@@ -21,83 +22,23 @@ def quadratic_coeffs_from_ep(e: float, p: float) -> tuple[float, float, float, f
     return (A, B, C, D, E, F)
 
 
-class Surface2D:
-    """Abstract base for planar optical elements."""
+class Surface2D(SurfaceND):
+    """Abstract base class for 2D surfaces embedded in the plane."""
 
-    surface_id: str
-
-    def first_intersection(self, ray: Ray) -> Optional[Intersection2D]:
-        raise NotImplementedError
+    def __init__(self, *, parameter_dimension: int | None = None, surface_id: str = "surface2d") -> None:
+        super().__init__(dimension=2, parameter_dimension=parameter_dimension or 2, surface_id=surface_id)
 
     def polyline(self, samples: int = 512) -> np.ndarray:
         raise NotImplementedError
 
 
 @dataclass
-class ConicalDioptrique(Surface2D):
-    """General conic with focus at *focus* and optical axis rotated by *angle*."""
+class ConicProfile:
+    """Reusable solver for conic sections expressed in quadratic form."""
 
-    e: float
-    p: float
-    focus: np.ndarray = field(default_factory=lambda: np.zeros(2))
-    angle: float = 0.0
-    surface_id: str = "conic"
+    coeffs: Tuple[float, float, float, float, float, float]
 
-    def __post_init__(self) -> None:
-        self.focus = np.asarray(self.focus, dtype=float)
-        self.angle = float(self.angle)
-        cos_a = np.cos(self.angle)
-        sin_a = np.sin(self.angle)
-        self._R = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
-        self._RT = self._R.T
-        self.coeffs = quadratic_coeffs_from_ep(self.e, self.p)
-
-    def r(self, theta: float) -> Optional[float]:
-        denom = 1.0 + self.e * np.cos(theta)
-        if abs(denom) <= 1e-12:
-            return None
-        return self.p / denom
-
-    def as_points(
-        self,
-        samples: int = 800,
-        theta_span: tuple[float, float] = (-np.pi, np.pi),
-        r_clip: float = 1e3,
-    ) -> np.ndarray:
-        thetas = np.linspace(theta_span[0], theta_span[1], samples)
-        rs = [self.r(theta) for theta in thetas]
-        rs = np.array([np.nan if val is None else val for val in rs])
-        rs = np.clip(rs, -r_clip, r_clip)
-        pts_local = np.column_stack((rs * np.cos(thetas), rs * np.sin(thetas)))
-        pts_world = (self._R @ pts_local.T).T + self.focus
-        pts_world = pts_world[~np.isnan(pts_world).any(axis=1)]
-        return pts_world
-
-    def first_intersection(self, ray: Ray) -> Optional[Intersection2D]:
-        origin_local = self._to_local_point(ray.origin)
-        direction_local = self._to_local_direction(ray.direction)
-
-        result = self._intersect_local(origin_local, direction_local)
-        if result is None:
-            return None
-
-        point_local, distance = result
-        point_world = self._to_world_point(point_local)
-        normal_local = self._normal_local(point_local)
-        normal_world = normalize(self._R @ normal_local)
-
-        return Intersection2D(
-            point=point_world,
-            normal=normal_world,
-            distance=float(distance),
-            surface_id=self.surface_id,
-            surface=self,
-        )
-
-    def polyline(self, samples: int = 512) -> np.ndarray:
-        return self.as_points(samples=samples)
-
-    def _intersect_local(self, origin: np.ndarray, direction: np.ndarray) -> Optional[tuple[np.ndarray, float]]:
+    def intersect(self, origin: np.ndarray, direction: np.ndarray, eps: float = 1e-12) -> Tuple[np.ndarray, float] | None:
         x0, y0 = origin
         dx, dy = direction
         A, B, C, D, E, F = self.coeffs
@@ -106,8 +47,7 @@ class ConicalDioptrique(Surface2D):
         b = 2.0 * A * x0 * dx + B * (x0 * dy + y0 * dx) + 2.0 * C * y0 * dy + D * dx + E * dy
         c = A * x0 * x0 + B * x0 * y0 + C * y0 * y0 + D * x0 + E * y0 + F
 
-        eps = 1e-12
-        lam: Optional[float] = None
+        lam: float | None = None
 
         if abs(a) < eps:
             if abs(b) >= eps:
@@ -128,24 +68,87 @@ class ConicalDioptrique(Surface2D):
         if lam is None:
             return None
 
-        point_local = origin + lam * direction
-        return point_local, lam
+        point = origin + lam * direction
+        return point, float(lam)
 
-    def _normal_local(self, point_local: np.ndarray) -> np.ndarray:
-        x, y = point_local
+    def normal(self, point: np.ndarray) -> np.ndarray:
+        x, y = point
         A, B, C, D, E, _ = self.coeffs
         nx = 2.0 * A * x + B * y + D
         ny = B * x + 2.0 * C * y + E
-        return normalize(np.array([nx, ny]))
+        return normalize(np.array([nx, ny], dtype=float))
 
-    def _to_local_point(self, point: np.ndarray) -> np.ndarray:
-        return self._RT @ (point - self.focus)
 
-    def _to_world_point(self, point_local: np.ndarray) -> np.ndarray:
-        return self._R @ point_local + self.focus
+@dataclass
+class ConicalDioptrique(Surface2D):
+    """General conic defined in polar form with an optional rotated frame."""
 
-    def _to_local_direction(self, direction: np.ndarray) -> np.ndarray:
-        return self._RT @ direction
+    e: float
+    p: float
+    focus: np.ndarray = field(default_factory=lambda: np.zeros(2))
+    angle: float = 0.0
+    surface_id: str = "conic"
+
+    def __post_init__(self) -> None:
+        Surface2D.__init__(self, parameter_dimension=2, surface_id=self.surface_id)
+        self.focus = np.asarray(self.focus, dtype=float)
+        self.angle = float(self.angle)
+        cos_a = np.cos(self.angle)
+        sin_a = np.sin(self.angle)
+        rotation = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
+        self.frame = LocalFrame(origin=self.focus, rotation=rotation)
+        self.coeffs = quadratic_coeffs_from_ep(self.e, self.p)
+        self.profile = ConicProfile(self.coeffs)
+
+    def r(self, theta: float) -> Optional[float]:
+        denom = 1.0 + self.e * np.cos(theta)
+        if abs(denom) <= 1e-12:
+            return None
+        return self.p / denom
+
+    def as_points(
+        self,
+        samples: int = 800,
+        theta_span: tuple[float, float] = (-np.pi, np.pi),
+        r_clip: float = 1e3,
+    ) -> np.ndarray:
+        thetas = np.linspace(theta_span[0], theta_span[1], samples)
+        rs = np.array([self.r(theta) for theta in thetas], dtype=float)
+        rs = np.where(np.isfinite(rs), np.clip(rs, -r_clip, r_clip), np.nan)
+        pts_local = np.column_stack((rs * np.cos(thetas), rs * np.sin(thetas)))
+        valid = [self.frame.to_world(pt) for pt in pts_local if not np.isnan(pt).any()]
+        if not valid:
+            return np.empty((0, 2), dtype=float)
+        return np.array(valid, dtype=float)
+
+    def polyline(self, samples: int = 512) -> np.ndarray:
+        return self.as_points(samples=samples)
+
+    # SurfaceND contract -------------------------------------------------------
+    def point_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+        return self.frame.to_world(parameters)
+
+    def normal_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+        normal_local = self.profile.normal(parameters)
+        return normalize(self.frame.direction_to_world(normal_local))
+
+    def solve_intersection(self, ray: RayND) -> SurfaceIntersection | None:
+        if ray.dimension != 2:
+            raise ValueError("ConicalDioptrique expects a 2D ray")
+        origin_local = self.frame.to_local(ray.origin)
+        direction_local = self.frame.direction_to_local(ray.direction)
+        result = self.profile.intersect(origin_local, direction_local)
+        if result is None:
+            return None
+        point_local, lam = result
+        point_world = self.frame.to_world(point_local)
+        normal_world = normalize(self.frame.direction_to_world(self.profile.normal(point_local)))
+        return SurfaceIntersection(
+            distance=lam,
+            parameters=np.asarray(point_local, dtype=float),
+            point=point_world,
+            normal=normal_world,
+        )
 
 
 class EllipseConic(ConicalDioptrique):
