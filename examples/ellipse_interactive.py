@@ -52,8 +52,9 @@ class InteractiveEllipseDemo:
             'aperture': 80.0,           # degrees
             'samples': 500,
             'max_generations': 3,
-            'ray_width': 0.05,          # match slider min below
+            'ray_width': 0.001,          # match slider min below
             'ray_intensity': 1.0,
+            'sigma_factor': 0.5,
         }
 
         self.cached_tree = None
@@ -62,7 +63,7 @@ class InteractiveEllipseDemo:
         # Viewer + render config
         render_config = RenderConfig(
             ray_width=self.params['ray_width'],
-            sigma_factor=0.5,
+            sigma_factor=self.params['sigma_factor'],
             accumulation_mode='squared',     # additive sqrt accumulation
             default_intensity=self.params['ray_intensity'],
             weight_scale=1.0,                # alpha from color acts as weight
@@ -96,9 +97,18 @@ class InteractiveEllipseDemo:
         self.controller.add_slider(SliderConfig('aperture', 10.0, 180.0, self.params['aperture'], step=5.0, format_str="{:.1f}°"))
         self.controller.add_slider(SliderConfig('samples', 50, 2000, self.params['samples'], step=50, format_str="{:.0f}"))
         self.controller.add_slider(SliderConfig('max_generations', 1, 10, self.params['max_generations'], step=1, format_str="{:.0f}"))
-        # IMPORTANT: keep slider min ≤ initial value
-        self.controller.add_slider(SliderConfig('ray_width', 0.05, 2.0, self.params['ray_width'], step=0.05, format_str="{:.2f}"))
+
+        self.controller.add_slider(SliderConfig('ray_width', 0.001, 2.0, self.params['ray_width'], step=0.01, format_str="{:.4f}"))
+
         self.controller.add_slider(SliderConfig('ray_intensity', 0.1, 5.0, self.params['ray_intensity'], step=0.1, format_str="{:.2f}"))
+        self.controller.add_slider(SliderConfig('sigma_factor', 0.1, 2.0, self.params['sigma_factor'], step=0.05, format_str="{:.2f}"))
+
+        self.controller.enable_numeric_overlay(
+            ['samples', 'ray_width', 'sigma_factor'],
+            format_overrides={'samples': '{:.0f}', 'ray_width': '{:.4f}', 'sigma_factor': '{:.2f}'},
+            anchor=(20.0, 35.0),
+            line_height=18.0,
+        )
 
         self.controller.print_help()
         self.update_visualization()
@@ -112,11 +122,12 @@ class InteractiveEllipseDemo:
         sim_changed = any(old.get(k) != self.params.get(k)
                           for k in ['source_x', 'source_y', 'direction_angle', 'aperture', 'samples', 'max_generations'])
         vis_changed = any(old.get(k) != self.params.get(k)
-                          for k in ['ray_width', 'ray_intensity'])
+                          for k in ['ray_width', 'ray_intensity', 'sigma_factor'])
 
         # Update render config values used by the shader
         self.viewer.render_config.ray_width = float(self.params['ray_width'])
         self.viewer.render_config.default_intensity = float(self.params['ray_intensity'])
+        self.viewer.render_config.sigma_factor = float(self.params['sigma_factor'])
 
         if sim_changed:
             self.update_visualization(full_update=True)
@@ -143,6 +154,9 @@ class InteractiveEllipseDemo:
     def _redraw_from_cache(self) -> None:
         if self.cached_tree is None:
             return
+
+        if not self.show_markers:
+            self.viewer.clear_markers()
 
         # Use color alpha as a *weight* so sample changes modify brightness under squared accumulation
         # Heuristic: keep total contribution roughly stable with samples.

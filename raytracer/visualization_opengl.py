@@ -1,3 +1,4 @@
+
 """OpenGL-based visualization with intensity accumulation and gaussian ray rendering.
 
 - Portable index buffers (uint16) for ES2/ANGLE.
@@ -8,7 +9,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Sequence, Literal, List, Tuple, Optional
 
 import numpy as np
@@ -21,113 +22,143 @@ from vispy.color import Color
 # Shaders
 # --------------------------------------------------------------------------------------
 
-RAY_TUBE_VERT = """
-// Per-vertex attributes (quad corners: -1,-1 ; 1,-1 ; 1,1 ; -1,1)
-attribute vec2 a_corner;
+RAY_TUBE_VERT = "\n".join([
+    "#ifdef GL_ES",
+    "precision highp float;",
+    "precision mediump int;",
+    "#endif",
+    "",
+    "// Per-vertex attributes (quad corners: -1,-1 ; 1,-1 ; 1,1 ; -1,1)",
+    "attribute vec2 a_corner;",
+    "",
+    "// Per-vertex (per-quad) attributes (duplicated for now; could be instanced later)",
+    "attribute vec2 a_ray_start;",
+    "attribute vec2 a_ray_end;",
+    "attribute float a_intensity;",
+    "attribute vec4 a_color;",
+    "",
+    "// Uniforms",
+    "uniform float u_ray_width;",
+    "uniform float u_geom_width;",
+    "",
+    "// Varyings",
+    "varying vec2 v_ray_start;",
+    "varying vec2 v_ray_end;",
+    "varying float v_intensity;",
+    "varying vec4 v_color;",
+    "varying vec2 v_pos;",
+    "",
+    "void main() {",
+    "    // Compute ray direction and perpendicular in visual coordinates",
+    "    vec2 dir = a_ray_end - a_ray_start;",
+    "    float len = length(dir);",
+    "    // Guard against degenerate segments to avoid NaNs",
+    "    if (len < 1e-6) {",
+    "        dir = vec2(1.0, 0.0);",
+    "        len = 1.0;",
+    "    } else {",
+    "        dir = dir / len;",
+    "    }",
+    "    vec2 perp = vec2(-dir.y, dir.x);",
+    "",
+    "    // Along-ray interpolation via corner.x in [-1, 1] -> t in [0, 1]",
+    "    float t = 0.5 * (a_corner.x + 1.0);",
+    "    vec2 along = mix(a_ray_start, a_ray_end, t);",
+    "",
+    "    // Expand quad across-ray via corner.y in [-1, 1]",
+    "    // 3x width for Gaussian tail coverage.",
+    "    vec2 position = along + perp * a_corner.y * u_geom_width * 3.0;",
+    "",
+    "    v_ray_start = a_ray_start;",
+    "    v_ray_end = a_ray_end;",
+    "    v_intensity = a_intensity;",
+    "    v_color = a_color;",
+    "    v_pos = position;",
+    "",
+    "    gl_Position = $transform(vec4(position, 0.0, 1.0));",
+    "}",
+    "",
+]) + "\n"
 
-// Per-vertex (per-quad) attributes (duplicated for now; could be instanced later)
-attribute vec2 a_ray_start;
-attribute vec2 a_ray_end;
-attribute float a_intensity;
-attribute vec4 a_color;
-
-// Uniforms
-uniform float u_ray_width;
-
-// Varyings
-varying vec2 v_ray_start;
-varying vec2 v_ray_end;
-varying float v_intensity;
-varying vec4 v_color;
-varying vec2 v_pos;
-
-void main() {
-    // Compute ray direction and perpendicular in *visual* coordinates
-    vec2 dir = a_ray_end - a_ray_start;
-    float len = length(dir);
-    // Guard against degenerate segments to avoid NaNs
-    if (len < 1e-6) {
-        dir = vec2(1.0, 0.0);
-        len = 1.0;
-    } else {
-        dir = dir / len;
-    }
-    vec2 perp = vec2(-dir.y, dir.x);
-
-    // Along-ray interpolation via corner.x in [-1, 1] -> t in [0, 1]
-    float t = 0.5 * (a_corner.x + 1.0);
-    vec2 along = mix(a_ray_start, a_ray_end, t);
-
-    // Expand quad across-ray via corner.y in [-1, 1]
-    // 3x width for Gaussian tail coverage.
-    vec2 position = along + perp * a_corner.y * u_ray_width * 3.0;
-
-    v_ray_start = a_ray_start;
-    v_ray_end = a_ray_end;
-    v_intensity = a_intensity;
-    v_color = a_color;
-    v_pos = position;
-
-    gl_Position = $transform(vec4(position, 0.0, 1.0));
-}
-"""
-
-RAY_TUBE_FRAG = """
-varying vec2 v_ray_start;
-varying vec2 v_ray_end;
-varying float v_intensity;
-varying vec4 v_color;
-varying vec2 v_pos;
-
-uniform float u_sigma_factor;
-uniform float u_ray_width;
-uniform int   u_accumulation_mode;   // 0: squared(additive), 1: alpha(linear)
-uniform float u_weight_scale;         // Extra scale for per-ray weight if desired
-
-// Distance from point to segment
-float point_to_segment_dist(vec2 p, vec2 a, vec2 b) {
-    vec2 pa = p - a;
-    vec2 ba = b - a;
-    float denom = dot(ba, ba);
-    // Handle degenerate segments
-    if (denom < 1e-12) {
-        return length(pa);
-    }
-    float h = clamp(dot(pa, ba) / denom, 0.0, 1.0);
-    return length(pa - ba * h);
-}
-
-void main() {
-    float dist = point_to_segment_dist(v_pos, v_ray_start, v_ray_end);
-
-    // Gaussian falloff with σ = u_sigma_factor * u_ray_width; guard σ>0
-    float sigma = max(1e-6, u_ray_width * u_sigma_factor);
-    float gaussian = exp(- (dist * dist) / (sigma * sigma));
-
-    // Quick reject (optional micro-optimization)
-    if (gaussian < 1e-3) {
-        discard;
-    }
-
-    // Per-ray weight: use color alpha (user-controlled) times a global scale
-    float weight = clamp(v_color.a * u_weight_scale, 0.0, 10.0);
-
-    // Physical intensity at this fragment
-    float I = weight * v_intensity * gaussian;
-
-    if (u_accumulation_mode == 0) {
-        // Squared accumulation (radiance-like): add sqrt(I) into framebuffer
-        vec3 out_rgb = v_color.rgb * sqrt(I);
-        float out_a  = sqrt(I); // alpha channel sums too with (one, one); not used visually
-        gl_FragColor = vec4(out_rgb, out_a);
-    } else {
-        // Linear alpha blending: non-premultiplied composition
-        float a = clamp(I, 0.0, 1.0);
-        vec3  c = v_color.rgb * I;
-        gl_FragColor = vec4(c, a);
-    }
-}
-"""
+RAY_TUBE_FRAG = "\n".join([
+    "#ifdef GL_ES",
+    "precision highp float;",
+    "precision mediump int;",
+    "#endif",
+    "",
+    "varying vec2 v_ray_start;",
+    "varying vec2 v_ray_end;",
+    "varying float v_intensity;",
+    "varying vec4 v_color;",
+    "varying vec2 v_pos;",
+    "",
+    "uniform float u_sigma_factor;",
+    "uniform float u_ray_width;",
+    "uniform float u_geom_width;",
+    "uniform mat2  u_metric;",
+    "uniform int   u_accumulation_mode;   // 0: squared(additive), 1: alpha(linear)",
+    "uniform float u_weight_scale;         // Extra scale for per-ray weight if desired",
+    "",
+    "// Distance from point to segment",
+    "float point_to_segment_dist(vec2 p, vec2 a, vec2 b) {",
+    "    vec2 pa = p - a;",
+    "    vec2 ba = b - a;",
+    "    vec2 metric_ba = u_metric * ba;",
+    "    float denom = dot(ba, metric_ba);",
+    "    // Handle degenerate segments",
+    "    if (denom < 1e-12) {",
+    "        return sqrt(max(0.0, dot(pa, u_metric * pa)));",
+    "    }",
+    "    float h = clamp(dot(pa, metric_ba) / denom, 0.0, 1.0);",
+    "    vec2 diff = pa - ba * h;",
+    "    return sqrt(max(0.0, dot(diff, u_metric * diff)));",
+    "}",
+    "",
+    "void main() {",
+    "    float dist = point_to_segment_dist(v_pos, v_ray_start, v_ray_end);",
+    "",
+    "    vec2 dir = v_ray_end - v_ray_start;",
+    "    float len = length(dir);",
+    "    if (len < 1e-6) {",
+    "        dir = vec2(1.0, 0.0);",
+    "        len = 1.0;",
+    "    } else {",
+    "        dir = dir / len;",
+    "    }",
+    "    vec2 perp = vec2(-dir.y, dir.x);",
+    "    float width_world = max(u_ray_width, u_geom_width);",
+    "    float perp_scale = sqrt(max(1e-12, dot(perp, u_metric * perp)));",
+    "    float width_pixels = width_world * perp_scale;",
+    "",
+    "    // Gaussian falloff expressed in screen-space units",
+    "    float sigma = max(1e-6, width_pixels * u_sigma_factor);",
+    "    float gaussian = exp(- (dist * dist) / (sigma * sigma));",
+    "",
+    "    // Quick reject (optional micro-optimization)",
+    "    if (gaussian < 1e-3) {",
+    "        discard;",
+    "    }",
+    "",
+    "    // Per-ray weight: use color alpha (user-controlled) times a global scale",
+    "    float weight = clamp(v_color.a * u_weight_scale, 0.0, 10.0);",
+    "",
+    "    // Physical intensity at this fragment",
+    "    float I = weight * v_intensity * gaussian;",
+    "",
+    "    if (u_accumulation_mode == 0) {",
+    "        // Squared accumulation (radiance-like): add sqrt(I) into framebuffer",
+    "        vec3 out_rgb = v_color.rgb * sqrt(I);",
+    "        float out_a  = sqrt(I); // alpha channel sums too with (one, one); not used visually",
+    "        gl_FragColor = vec4(out_rgb, out_a);",
+    "    } else {",
+    "        // Linear alpha blending: non-premultiplied composition",
+    "        float a = clamp(I, 0.0, 1.0);",
+    "        vec3  c = v_color.rgb * I;",
+    "        gl_FragColor = vec4(c, a);",
+    "    }",
+    "}",
+    "",
+]) + "\n"
 
 # --------------------------------------------------------------------------------------
 # Public configuration
@@ -166,11 +197,15 @@ class RayTubeVisual(Visual):
 
         # Program uniforms with safe defaults
         self.shared_program['u_ray_width'] = float(self.config.ray_width)
+        self.shared_program['u_geom_width'] = float(self.config.ray_width)
         self.shared_program['u_sigma_factor'] = float(self.config.sigma_factor)
         self.shared_program['u_accumulation_mode'] = np.int32(
             0 if self.config.accumulation_mode == "squared" else 1
         )
         self.shared_program['u_weight_scale'] = float(self.config.weight_scale)
+        self.shared_program['u_metric'] = np.eye(2, dtype=np.float32)
+
+        self._geom_width: float = float(self.config.ray_width)
 
     # -------- Public API -----------------------------------------------------
 
@@ -178,6 +213,15 @@ class RayTubeVisual(Visual):
         """Update render configuration (cheap)."""
         self.config = config
         # No geometry update needed; uniforms/state set in _prepare_draw
+        self.update()
+
+    def set_geometry_width(self, geometry_width: float) -> None:
+        """Specify the quad expansion width used purely for coverage."""
+        geom = float(max(geometry_width, 1e-6))
+        if not np.isfinite(geom):
+            geom = 1e-3
+        self._geom_width = geom
+        self.shared_program['u_geom_width'] = self._geom_width
         self.update()
 
     def set_data(self, rays: List[Tuple[np.ndarray, np.ndarray, float, np.ndarray]]) -> None:
@@ -240,6 +284,52 @@ class RayTubeVisual(Visual):
         # No automatic bounds; keep None unless you want auto-zoom behavior
         return None
 
+    def _framebuffer_metric(self, view) -> np.ndarray:
+        """Return 2x2 metric mapping visual displacements to framebuffer units."""
+
+        transform = view.transforms.get_transform('visual', 'framebuffer')
+        if transform is None:
+            return np.eye(2, dtype=np.float32)
+
+        samples = np.array(
+            [
+                [0.0, 0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+
+        mapped = np.asarray(transform.map(samples))
+        if mapped.shape[1] >= 4:
+            w = mapped[:, 3:4]
+            w[w == 0] = 1.0
+            mapped = mapped[:, :3] / w
+        elif mapped.shape[1] >= 3:
+            mapped = mapped[:, :3]
+        elif mapped.shape[1] >= 2:
+            mapped = mapped[:, :2]
+        else:
+            return np.eye(2, dtype=np.float32)
+
+        origin = mapped[0, :2]
+        ex = mapped[1, :2] - origin
+        ey = mapped[2, :2] - origin
+
+        J = np.column_stack([ex, ey])
+        if J.shape != (2, 2):
+            return np.eye(2, dtype=np.float32)
+
+        metric = J.T @ J
+        if not np.all(np.isfinite(metric)):
+            return np.eye(2, dtype=np.float32)
+
+        det = np.linalg.det(metric)
+        if not np.isfinite(det) or det <= 1e-12:
+            return np.eye(2, dtype=np.float32)
+
+        return metric.astype(np.float32)
+
     def _prepare_draw(self, view):
         if self._n_indices == 0:
             return False
@@ -249,10 +339,15 @@ class RayTubeVisual(Visual):
 
         # Update uniforms
         self.shared_program['u_ray_width'] = float(self.config.ray_width)
+        self.shared_program['u_geom_width'] = float(self._geom_width)
         self.shared_program['u_sigma_factor'] = float(self.config.sigma_factor)
         self.shared_program['u_weight_scale'] = float(self.config.weight_scale)
         mode_int = np.int32(0 if self.config.accumulation_mode == "squared" else 1)
         self.shared_program['u_accumulation_mode'] = mode_int
+
+        # Metric that maps visual-space displacements into framebuffer space
+        metric = self._framebuffer_metric(view)
+        self.shared_program['u_metric'] = metric
 
         # Set GL blending *per mode* (do not mix presets + custom funcs)
         if mode_int == 0:
@@ -270,6 +365,7 @@ class RayTubeVisual(Visual):
 
 # VisualNode wrapper for scenegraph integration
 RayTube = create_visual_node(RayTubeVisual)
+
 
 # --------------------------------------------------------------------------------------
 # Viewer
@@ -292,6 +388,8 @@ class OpenGLViewer:
     ):
         self.mode = mode
         self.render_config = render_config or RenderConfig()
+        # Preserve requested (user) parameters; actual shader uniforms may clamp
+        self._min_pixels_per_ray = 1.0
 
         self.canvas = scene.SceneCanvas(keys="interactive", show=show, bgcolor=bgcolor, size=size)
         self.view = self.canvas.central_widget.add_view()
@@ -331,6 +429,79 @@ class OpenGLViewer:
             v.parent = None
         setattr(self, attr, [])
 
+    # ------------------------------------------------------------------ sizing helpers
+    def _world_units_per_pixel(self) -> float:
+        """Return the average world-space length that maps to a single pixel."""
+
+        if isinstance(self.view.camera, scene.cameras.PanZoomCamera):
+            rect = self.view.camera.rect
+            if rect is not None:
+                width = float(rect.width)
+                height = float(rect.height)
+                canvas_w, canvas_h = self.canvas.size
+                if width > 0 and height > 0 and canvas_w > 0 and canvas_h > 0:
+                    units_x = width / float(canvas_w)
+                    units_y = height / float(canvas_h)
+                    return max(units_x, units_y)
+
+        transform = self.view.transforms.get_transform('visual', 'framebuffer')
+        if transform is None:
+            return 1.0
+
+        samples = np.array(
+            [
+                [0.0, 0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+
+        mapped = np.asarray(transform.map(samples))
+        if mapped.shape[1] >= 4:
+            w = mapped[:, 3:4]
+            w[w == 0] = 1.0
+            mapped = mapped[:, :3] / w
+        elif mapped.shape[1] >= 3:
+            mapped = mapped[:, :3]
+        elif mapped.shape[1] >= 2:
+            mapped = mapped[:, :2]
+        else:
+            return 1.0
+
+        origin = mapped[0]
+        ex = mapped[1]
+        ey = mapped[2]
+
+        sx = np.linalg.norm(ex[:2] - origin[:2])
+        sy = np.linalg.norm(ey[:2] - origin[:2])
+
+        if not np.isfinite(sx) or sx <= 0:
+            sx = 1.0
+        if not np.isfinite(sy) or sy <= 0:
+            sy = sx
+
+        avg_pixels = max(min(sx, sy), 1e-6)
+        return 1.0 / avg_pixels
+
+    def _effective_render_config(self) -> tuple[RenderConfig, float]:
+        """Return requested render config and the geometry width used for coverage."""
+
+        requested_width = float(self.render_config.ray_width)
+        requested_sigma = float(self.render_config.sigma_factor)
+
+        units_per_pixel = self._world_units_per_pixel()
+        min_world_width = units_per_pixel * self._min_pixels_per_ray
+
+        geometry_width = max(min_world_width, requested_width, 1e-6)
+
+        effective_config = replace(
+            self.render_config,
+            ray_width=requested_width,
+            sigma_factor=requested_sigma,
+        )
+        return effective_config, geometry_width
+
     def draw_surfaces(self, surfaces: list, color: str = "white", width: float = 2.0) -> None:
         self._clear_visuals("_surface_visuals")
 
@@ -363,6 +534,8 @@ class OpenGLViewer:
     ) -> None:
         if width is not None:
             self.render_config.ray_width = float(width)
+
+        effective_config, geometry_width = self._effective_render_config()
 
         ray_data = []
         hit_positions = []
@@ -407,9 +580,11 @@ class OpenGLViewer:
 
         # Create/reuse visual node
         if self._ray_visual is None:
-            self._ray_visual = RayTube(config=self.render_config, parent=self.view.scene)
+            self._ray_visual = RayTube(config=effective_config, parent=self.view.scene)
         else:
-            self._ray_visual.set_config(self.render_config)
+            self._ray_visual.set_config(effective_config)
+
+        self._ray_visual.set_geometry_width(geometry_width)
 
         self._ray_visual.set_data(ray_data)
         self._cached_ray_data = ray_data
@@ -433,7 +608,9 @@ class OpenGLViewer:
     def update_visual_params_only(self) -> None:
         """Fast path: change width/sigma/weights without recomputing geometry."""
         if self._ray_visual is not None and self._cached_ray_data is not None:
-            self._ray_visual.set_config(self.render_config)
+            effective_config, geometry_width = self._effective_render_config()
+            self._ray_visual.set_config(effective_config)
+            self._ray_visual.set_geometry_width(geometry_width)
             self._ray_visual.update()
             self.canvas.update()
 
@@ -442,3 +619,8 @@ class OpenGLViewer:
 
     def close(self) -> None:
         self.canvas.close()
+
+    def clear_markers(self) -> None:
+        """Remove hit markers without affecting other visuals."""
+        self._clear_visuals("_marker_visuals")
+        self.canvas.update()
