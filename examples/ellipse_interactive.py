@@ -16,7 +16,6 @@ from raytracer.sources import PointSource2D
 from raytracer.tracer import RayTracer2D, TraceConfig
 from raytracer.visualization_opengl import OpenGLViewer, RenderConfig
 from raytracer.interactive import InteractiveController, SliderConfig
-from vispy import scene
 from vispy.color import Color
 
 
@@ -196,18 +195,6 @@ class InteractiveEllipseDemo:
         self.viewer.draw_surfaces([self.ellipse], color="white", width=2.0)
 
         self._redraw_from_cache()
-
-        # Add focus markers once
-        if not hasattr(self, '_markers_added'):
-            focus_markers = np.vstack([self.primary_focus, self.secondary_focus])
-            colors = np.array([[0.3, 0.9, 0.3, 1.0], [0.1, 0.7, 1.0, 1.0]], dtype=np.float32)
-            scene.visuals.Markers(
-                pos=focus_markers.astype(np.float32),
-                size=8,
-                face_color=colors,
-                parent=self.viewer.view.scene
-            )
-            self._markers_added = True
 
         self.viewer.canvas.update()
 

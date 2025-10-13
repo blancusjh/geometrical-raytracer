@@ -1,618 +1,448 @@
-
-"""OpenGL-based visualization with intensity accumulation and gaussian ray rendering.
-
-- Portable index buffers (uint16) for ES2/ANGLE.
-- Correct VisPy transform hookup.
-- Dynamic GL blend state per accumulation mode.
-- Alpha acts as a per-ray weight in squared accumulation.
-"""
+"""Lightweight 2-D OpenGL viewer with quadratic accumulation for ray intensity."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Callable, Sequence, Literal, List, Tuple, Optional
+from dataclasses import dataclass
+from typing import Callable, Iterable, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
-from vispy import app, scene, gloo
-from vispy.scene.visuals import create_visual_node
-from vispy.visuals import Visual
+from vispy import app, gloo
 from vispy.color import Color
-
-# --------------------------------------------------------------------------------------
-# Shaders
-# --------------------------------------------------------------------------------------
-
-RAY_TUBE_VERT = "\n".join([
-    "#ifdef GL_ES",
-    "precision highp float;",
-    "precision mediump int;",
-    "#endif",
-    "",
-    "// Per-vertex attributes (quad corners: -1,-1 ; 1,-1 ; 1,1 ; -1,1)",
-    "attribute vec2 a_corner;",
-    "",
-    "// Per-vertex (per-quad) attributes (duplicated for now; could be instanced later)",
-    "attribute vec2 a_ray_start;",
-    "attribute vec2 a_ray_end;",
-    "attribute float a_intensity;",
-    "attribute vec4 a_color;",
-    "",
-    "// Uniforms",
-    "uniform float u_ray_width;",
-    "uniform float u_geom_width;",
-    "",
-    "// Varyings",
-    "varying vec2 v_ray_start;",
-    "varying vec2 v_ray_end;",
-    "varying float v_intensity;",
-    "varying vec4 v_color;",
-    "varying vec2 v_pos;",
-    "",
-    "void main() {",
-    "    // Compute ray direction and perpendicular in visual coordinates",
-    "    vec2 dir = a_ray_end - a_ray_start;",
-    "    float len = length(dir);",
-    "    // Guard against degenerate segments to avoid NaNs",
-    "    if (len < 1e-6) {",
-    "        dir = vec2(1.0, 0.0);",
-    "        len = 1.0;",
-    "    } else {",
-    "        dir = dir / len;",
-    "    }",
-    "    vec2 perp = vec2(-dir.y, dir.x);",
-    "",
-    "    // Along-ray interpolation via corner.x in [-1, 1] -> t in [0, 1]",
-    "    float t = 0.5 * (a_corner.x + 1.0);",
-    "    vec2 along = mix(a_ray_start, a_ray_end, t);",
-    "",
-    "    // Expand quad across-ray via corner.y in [-1, 1]",
-    "    // 3x width for Gaussian tail coverage.",
-    "    vec2 position = along + perp * a_corner.y * u_geom_width * 3.0;",
-    "",
-    "    v_ray_start = a_ray_start;",
-    "    v_ray_end = a_ray_end;",
-    "    v_intensity = a_intensity;",
-    "    v_color = a_color;",
-    "    v_pos = position;",
-    "",
-    "    gl_Position = $transform(vec4(position, 0.0, 1.0));",
-    "}",
-    "",
-]) + "\n"
-
-RAY_TUBE_FRAG = "\n".join([
-    "#ifdef GL_ES",
-    "precision highp float;",
-    "precision mediump int;",
-    "#endif",
-    "",
-    "varying vec2 v_ray_start;",
-    "varying vec2 v_ray_end;",
-    "varying float v_intensity;",
-    "varying vec4 v_color;",
-    "varying vec2 v_pos;",
-    "",
-    "uniform float u_sigma_factor;",
-    "uniform float u_ray_width;",
-    "uniform float u_geom_width;",
-    "uniform mat2  u_metric;",
-    "uniform int   u_accumulation_mode;   // 0: squared(additive), 1: alpha(linear)",
-    "uniform float u_weight_scale;         // Extra scale for per-ray weight if desired",
-    "",
-    "// Distance from point to segment",
-    "float point_to_segment_dist(vec2 p, vec2 a, vec2 b) {",
-    "    vec2 pa = p - a;",
-    "    vec2 ba = b - a;",
-    "    vec2 metric_ba = u_metric * ba;",
-    "    float denom = dot(ba, metric_ba);",
-    "    // Handle degenerate segments",
-    "    if (denom < 1e-12) {",
-    "        return sqrt(max(0.0, dot(pa, u_metric * pa)));",
-    "    }",
-    "    float h = clamp(dot(pa, metric_ba) / denom, 0.0, 1.0);",
-    "    vec2 diff = pa - ba * h;",
-    "    return sqrt(max(0.0, dot(diff, u_metric * diff)));",
-    "}",
-    "",
-    "void main() {",
-    "    float dist = point_to_segment_dist(v_pos, v_ray_start, v_ray_end);",
-    "",
-    "    vec2 dir = v_ray_end - v_ray_start;",
-    "    float len = length(dir);",
-    "    if (len < 1e-6) {",
-    "        dir = vec2(1.0, 0.0);",
-    "        len = 1.0;",
-    "    } else {",
-    "        dir = dir / len;",
-    "    }",
-    "    vec2 perp = vec2(-dir.y, dir.x);",
-    "    float width_world = max(u_ray_width, u_geom_width);",
-    "    float perp_scale = sqrt(max(1e-12, dot(perp, u_metric * perp)));",
-    "    float width_pixels = width_world * perp_scale;",
-    "",
-    "    // Gaussian falloff expressed in screen-space units",
-    "    float sigma = max(1e-6, width_pixels * u_sigma_factor);",
-    "    float gaussian = exp(- (dist * dist) / (sigma * sigma));",
-    "",
-    "    // Quick reject (optional micro-optimization)",
-    "    if (gaussian < 1e-3) {",
-    "        discard;",
-    "    }",
-    "",
-    "    // Per-ray weight: use color alpha (user-controlled) times a global scale",
-    "    float weight = clamp(v_color.a * u_weight_scale, 0.0, 10.0);",
-    "",
-    "    // Physical intensity at this fragment",
-    "    float I = weight * v_intensity * gaussian;",
-    "",
-    "    if (u_accumulation_mode == 0) {",
-    "        // Squared accumulation (radiance-like): add sqrt(I) into framebuffer",
-    "        vec3 out_rgb = v_color.rgb * sqrt(I);",
-    "        float out_a  = sqrt(I); // alpha channel sums too with (one, one); not used visually",
-    "        gl_FragColor = vec4(out_rgb, out_a);",
-    "    } else {",
-    "        // Linear alpha blending: non-premultiplied composition",
-    "        float a = clamp(I, 0.0, 1.0);",
-    "        vec3  c = v_color.rgb * I;",
-    "        gl_FragColor = vec4(c, a);",
-    "    }",
-    "}",
-    "",
-]) + "\n"
-
-# --------------------------------------------------------------------------------------
-# Public configuration
-# --------------------------------------------------------------------------------------
 
 AccumulationMode = Literal["squared", "alpha"]
 
+
 @dataclass
 class RenderConfig:
-    """Configuration for ray rendering."""
+    """Configuration parameters for ray rendering."""
+
     ray_width: float = 0.5
     sigma_factor: float = 0.5
     accumulation_mode: AccumulationMode = "squared"
     default_intensity: float = 1.0
-    # Alpha channel in color acts as per-ray weight in squared mode
     weight_scale: float = 1.0
+    min_pixels: float = 1.0
 
-# --------------------------------------------------------------------------------------
-# Visual
-# --------------------------------------------------------------------------------------
+RAY_VERT = "\n".join(
+    [
+        "#ifdef GL_ES",
+        "precision highp float;",
+        "precision mediump int;",
+        "#endif",
+        "",
+        "attribute vec2 a_corner;",
+        "attribute vec2 a_start;",
+        "attribute vec2 a_end;",
+        "attribute float a_width;",
+        "attribute float a_sigma;",
+        "attribute float a_intensity;",
+        "attribute vec4 a_color;",
+        "",
+        "uniform vec2 u_viewport;",
+        "uniform vec2 u_screen_offset;",
+        "uniform vec2 u_screen_scale;",
+        "",
+        "varying vec2 v_start;",
+        "varying vec2 v_end;",
+        "varying float v_sigma;",
+        "varying float v_intensity;",
+        "varying vec4 v_color;",
+        "varying vec2 v_pos;",
+        "",
+        "void main() {",
+        "    vec2 start_world = a_start;",
+        "    vec2 end_world = a_end;",
+        "    vec2 start_screen = (start_world - u_screen_offset) * u_screen_scale;",
+        "    vec2 end_screen = (end_world - u_screen_offset) * u_screen_scale;",
+        "",
+        "    vec2 dir = end_screen - start_screen;",
+        "    float len = length(dir);",
+        "    if (len < 1e-6) {",
+        "        dir = vec2(1.0, 0.0);",
+        "        len = 1.0;",
+        "    } else {",
+        "        dir = dir / len;",
+        "    }",
+        "    vec2 perp = vec2(-dir.y, dir.x);",
+        "",
+        "    float t = 0.5 * (a_corner.x + 1.0);",
+        "    vec2 along_screen = mix(start_screen, end_screen, t);",
+        "    float geom = max(a_width, 0.5);",
+        "    vec2 pos_screen = along_screen + perp * a_corner.y * geom * 3.0;",
+        "    vec2 pos_ndc = (pos_screen / u_viewport) * 2.0 - 1.0;",
+        "    gl_Position = vec4(pos_ndc, 0.0, 1.0);",
+        "",
+        "    v_start = start_screen;",
+        "    v_end = end_screen;",
+        "    v_sigma = max(a_sigma, 1e-6);",
+        "    v_intensity = a_intensity;",
+        "    v_color = a_color;",
+        "    v_pos = pos_screen;",
+        "}",
+    ]
+) + "\n"
 
-class RayTubeVisual(Visual):
-    """Render 2D ray segments as Gaussian tubes with additive or alpha blending."""
+RAY_FRAG = "\n".join(
+    [
+        "#ifdef GL_ES",
+        "precision highp float;",
+        "precision mediump int;",
+        "#endif",
+        "varying vec2 v_start;",
+        "varying vec2 v_end;",
+        "varying float v_sigma;",
+        "varying float v_intensity;",
+        "varying vec4 v_color;",
+        "varying vec2 v_pos;",
+        "uniform int u_accum_mode;",
+        "uniform float u_weight_scale;",
+        "float point_to_segment_dist(vec2 p, vec2 a, vec2 b) {",
+        "    vec2 pa = p - a;",
+        "    vec2 ba = b - a;",
+        "    float denom = dot(ba, ba);",
+        "    if (denom < 1e-12) {",
+        "        return length(pa);",
+        "    }",
+        "    float h = clamp(dot(pa, ba) / denom, 0.0, 1.0);",
+        "    return length(pa - ba * h);",
+        "}",
+        "void main() {",
+        "    float dist = point_to_segment_dist(v_pos, v_start, v_end);",
+        "    float sigma = v_sigma;",
+        "    float gaussian = exp(-(dist * dist) / (sigma * sigma));",
+        "    if (gaussian < 1e-4) {",
+        "        discard;",
+        "    }",
+        "    float weight = clamp(v_color.a * u_weight_scale, 0.0, 10.0);",
+        "    float I = weight * v_intensity * gaussian;",
+        "    if (u_accum_mode == 0) {",
+        "        float rootI = sqrt(I);",
+        "        gl_FragColor = vec4(v_color.rgb * rootI, rootI);",
+        "    } else {",
+        "        float alpha = clamp(I, 0.0, 1.0);",
+        "        gl_FragColor = vec4(v_color.rgb * I, alpha);",
+        "    }",
+        "}",
+    ]
+) + "\n"
 
-    def __init__(self, config: Optional[RenderConfig] = None):
-        super().__init__(vcode=RAY_TUBE_VERT, fcode=RAY_TUBE_FRAG)
-        self.config: RenderConfig = config or RenderConfig()
+LINE_VERT = "\n".join(
+    [
+        "#ifdef GL_ES",
+        "precision highp float;",
+        "precision mediump int;",
+        "#endif",
+        "attribute vec2 a_pos;",
+        "uniform vec2 u_viewport;",
+        "uniform vec2 u_screen_offset;",
+        "uniform vec2 u_screen_scale;",
+        "void main() {",
+        "    vec2 screen = (a_pos - u_screen_offset) * u_screen_scale;",
+        "    vec2 ndc = (screen / u_viewport) * 2.0 - 1.0;",
+        "    gl_Position = vec4(ndc, 0.0, 1.0);",
+        "}",
+    ]
+) + "\n"
 
-        self._vbo = gloo.VertexBuffer()
-        self._ibo = gloo.IndexBuffer()
-        self._n_indices: int = 0
+LINE_FRAG = "#ifdef GL_ES\nprecision highp float;\nprecision mediump int;\n#endif\nuniform vec4 u_color;\nvoid main() {\n    gl_FragColor = u_color;\n}\n"
 
-        self._draw_mode = 'triangles'
-        # Initial GL state (will be refined each frame in _prepare_draw)
-        self.set_gl_state(depth_test=False, blend=True)
+MARKER_VERT = "\n".join(
+    [
+        "#ifdef GL_ES",
+        "precision highp float;",
+        "precision mediump int;",
+        "#endif",
+        "attribute vec2 a_pos;",
+        "uniform vec2 u_viewport;",
+        "uniform vec2 u_screen_offset;",
+        "uniform vec2 u_screen_scale;",
+        "uniform float u_point_size;",
+        "void main() {",
+        "    vec2 screen = (a_pos - u_screen_offset) * u_screen_scale;",
+        "    vec2 ndc = (screen / u_viewport) * 2.0 - 1.0;",
+        "    gl_Position = vec4(ndc, 0.0, 1.0);",
+        "    gl_PointSize = u_point_size;",
+        "}",
+    ]
+) + "\n"
 
-        # Program uniforms with safe defaults
-        self.shared_program['u_ray_width'] = float(self.config.ray_width)
-        self.shared_program['u_geom_width'] = float(self.config.ray_width)
-        self.shared_program['u_sigma_factor'] = float(self.config.sigma_factor)
-        self.shared_program['u_accumulation_mode'] = np.int32(
-            0 if self.config.accumulation_mode == "squared" else 1
-        )
-        self.shared_program['u_weight_scale'] = float(self.config.weight_scale)
-        self.shared_program['u_metric'] = np.eye(2, dtype=np.float32)
+MARKER_FRAG = "\n".join(
+    [
+        "#ifdef GL_ES",
+        "precision highp float;",
+        "precision mediump int;",
+        "#endif",
+        "uniform vec4 u_color;",
+        "void main() {",
+        "    vec2 uv = gl_PointCoord * 2.0 - 1.0;",
+        "    float r2 = dot(uv, uv);",
+        "    if (r2 > 1.0) {",
+        "        discard;",
+        "    }",
+        "    float alpha = smoothstep(1.0, 0.6, r2);",
+        "    gl_FragColor = vec4(u_color.rgb, u_color.a * alpha);",
+        "}",
+    ]
+) + "\n"
 
-        self._geom_width: float = float(self.config.ray_width)
-
-    # -------- Public API -----------------------------------------------------
-
-    def set_config(self, config: RenderConfig) -> None:
-        """Update render configuration (cheap)."""
+class RayRenderer:
+    def __init__(self, config: RenderConfig):
+        self.program = gloo.Program(RAY_VERT, RAY_FRAG)
+        self.vbo = gloo.VertexBuffer()
+        self.ibo = gloo.IndexBuffer()
+        self._n_indices = 0
         self.config = config
-        # No geometry update needed; uniforms/state set in _prepare_draw
-        self.update()
 
-    def set_geometry_width(self, geometry_width: float) -> None:
-        """Specify the quad expansion width used purely for coverage."""
-        geom = float(max(geometry_width, 1e-6))
-        if not np.isfinite(geom):
-            geom = 1e-3
-        self._geom_width = geom
-        self.shared_program['u_geom_width'] = self._geom_width
-        self.update()
+    def set_data(self, vertices: np.ndarray, indices: np.ndarray) -> None:
+        self.vbo.set_data(vertices)
+        self.ibo.set_data(indices.astype(np.uint32))
+        self._n_indices = int(indices.size)
 
-    def set_data(self, rays: List[Tuple[np.ndarray, np.ndarray, float, np.ndarray]]) -> None:
-        """Set ray data: list of (start[2], end[2], intensity, color[4])."""
-        if not rays:
-            self._n_indices = 0
-            self._vbo.set_data(np.zeros(0, dtype=np.float32))
-            self._ibo.set_data(np.zeros(0, dtype=np.uint16))
-            self.update()
-            return
-
-        n_rays = len(rays)
-
-        # Structured vertex buffer (4 verts per ray)
-        dtype = np.dtype([
-            ('a_corner',     np.float32, 2),
-            ('a_ray_start',  np.float32, 2),
-            ('a_ray_end',    np.float32, 2),
-            ('a_intensity',  np.float32, 1),
-            ('a_color',      np.float32, 4),
-        ])
-
-        verts = np.zeros(n_rays * 4, dtype=dtype)
-        idx   = np.zeros(n_rays * 6, dtype=np.uint16)  # portable!
-
-        corners = np.array([[-1, -1], [ 1, -1], [ 1,  1], [-1,  1]], dtype=np.float32)
-
-        for i, (start, end, intensity, color) in enumerate(rays):
-            base_v = 4 * i
-            base_i = 6 * i
-
-            # sanitize/shape
-            start = np.asarray(start, dtype=np.float32).reshape(2)
-            end   = np.asarray(end,   dtype=np.float32).reshape(2)
-            color = np.asarray(color, dtype=np.float32).reshape(4)
-            intensity = float(intensity)
-
-            verts['a_corner'][base_v:base_v+4]    = corners
-            verts['a_ray_start'][base_v:base_v+4] = start
-            verts['a_ray_end'][base_v:base_v+4]   = end
-            verts['a_intensity'][base_v:base_v+4] = intensity
-            verts['a_color'][base_v:base_v+4]     = color
-
-            # two triangles
-            idx[base_i:base_i+6] = [base_v, base_v+1, base_v+2,
-                                    base_v, base_v+2, base_v+3]
-
-        self._vbo.set_data(verts)
-        self._ibo.set_data(idx)
-        self._n_indices = int(idx.size)
-        self.update()
-
-    # -------- VisPy hooks ----------------------------------------------------
-
-    def _prepare_transforms(self, view):
-        tr = view.transforms.get_transform('visual', 'render')
-        self.shared_program.vert['transform'] = tr
-
-    def _compute_bounds(self, axis, view):
-        # No automatic bounds; keep None unless you want auto-zoom behavior
-        return None
-
-    def _framebuffer_metric(self, view) -> np.ndarray:
-        """Return 2x2 metric mapping visual displacements to framebuffer units."""
-
-        transform = view.transforms.get_transform('visual', 'framebuffer')
-        if transform is None:
-            return np.eye(2, dtype=np.float32)
-
-        samples = np.array(
-            [
-                [0.0, 0.0, 0.0, 1.0],
-                [1.0, 0.0, 0.0, 1.0],
-                [0.0, 1.0, 0.0, 1.0],
-            ],
-            dtype=float,
-        )
-
-        mapped = np.asarray(transform.map(samples))
-        if mapped.shape[1] >= 4:
-            w = mapped[:, 3:4]
-            w[w == 0] = 1.0
-            mapped = mapped[:, :3] / w
-        elif mapped.shape[1] >= 3:
-            mapped = mapped[:, :3]
-        elif mapped.shape[1] >= 2:
-            mapped = mapped[:, :2]
-        else:
-            return np.eye(2, dtype=np.float32)
-
-        origin = mapped[0, :2]
-        ex = mapped[1, :2] - origin
-        ey = mapped[2, :2] - origin
-
-        J = np.column_stack([ex, ey])
-        if J.shape != (2, 2):
-            return np.eye(2, dtype=np.float32)
-
-        metric = J.T @ J
-        if not np.all(np.isfinite(metric)):
-            return np.eye(2, dtype=np.float32)
-
-        det = np.linalg.det(metric)
-        if not np.isfinite(det) or det <= 1e-12:
-            return np.eye(2, dtype=np.float32)
-
-        return metric.astype(np.float32)
-
-    def _prepare_draw(self, view):
+    def draw(
+        self,
+        viewport: Tuple[int, int],
+        screen_offset: np.ndarray,
+        screen_scale: np.ndarray,
+        accumulation_mode: AccumulationMode,
+        weight_scale: float,
+    ) -> None:
         if self._n_indices == 0:
-            return False
-
-        # Bind VBO attributes
-        self.shared_program.bind(self._vbo)
-
-        # Update uniforms
-        self.shared_program['u_ray_width'] = float(self.config.ray_width)
-        self.shared_program['u_geom_width'] = float(self._geom_width)
-        self.shared_program['u_sigma_factor'] = float(self.config.sigma_factor)
-        self.shared_program['u_weight_scale'] = float(self.config.weight_scale)
-        mode_int = np.int32(0 if self.config.accumulation_mode == "squared" else 1)
-        self.shared_program['u_accumulation_mode'] = mode_int
-
-        # Metric that maps visual-space displacements into framebuffer space
-        metric = self._framebuffer_metric(view)
-        self.shared_program['u_metric'] = metric
-
-        # Set GL blending *per mode* (do not mix presets + custom funcs)
+            return
+        self.program.bind(self.vbo)
+        self.program["u_viewport"] = np.array(viewport, dtype=np.float32)
+        self.program["u_screen_offset"] = screen_offset.astype(np.float32)
+        self.program["u_screen_scale"] = screen_scale.astype(np.float32)
+        mode_int = 0 if accumulation_mode == "squared" else 1
+        self.program["u_accum_mode"] = int(mode_int)
+        self.program["u_weight_scale"] = float(weight_scale)
+        gloo.set_state(depth_test=False, blend=True)
         if mode_int == 0:
-            # Additive accumulation across color channels
-            self.set_gl_state(depth_test=False, blend=True,
-                              blend_func=('one', 'one'))
+            gloo.set_blend_func('one', 'one')
         else:
-            # Standard alpha blend for linear mode (non-premultiplied)
-            self.set_gl_state(depth_test=False, blend=True,
-                              blend_func=('src_alpha', 'one_minus_src_alpha'))
-        return True
-
-    def _draw(self, view):
-        self.shared_program.draw(self._draw_mode, self._ibo)
-
-# VisualNode wrapper for scenegraph integration
-RayTube = create_visual_node(RayTubeVisual)
+            gloo.set_blend_func('src_alpha', 'one_minus_src_alpha')
+        self.program.draw('triangles', self.ibo)
 
 
-# --------------------------------------------------------------------------------------
-# Viewer
-# --------------------------------------------------------------------------------------
+class PolylineRenderer:
+    def __init__(self):
+        self.program = gloo.Program(LINE_VERT, LINE_FRAG)
+        self.vbo = gloo.VertexBuffer()
+        self._n_vertices = 0
+        self.color = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)
+        self.width = 1.0
+
+    def set_data(self, points: np.ndarray, color: Sequence[float], width: float) -> None:
+        structured = np.zeros(points.shape[0], dtype=[('a_pos', np.float32, 2)])
+        structured['a_pos'] = points.astype(np.float32)
+        self.vbo.set_data(structured)
+        self._n_vertices = int(points.shape[0])
+        self.color = np.array(color, dtype=np.float32)
+        self.width = float(width)
+
+    def draw(
+        self,
+        viewport: Tuple[int, int],
+        screen_offset: np.ndarray,
+        screen_scale: np.ndarray,
+    ) -> None:
+        if self._n_vertices == 0:
+            return
+        self.program.bind(self.vbo)
+        self.program["u_viewport"] = np.array(viewport, dtype=np.float32)
+        self.program["u_screen_offset"] = screen_offset.astype(np.float32)
+        self.program["u_screen_scale"] = screen_scale.astype(np.float32)
+        self.program["u_color"] = self.color
+        gloo.set_state(depth_test=False, blend=False, line_width=self.width)
+        self.program.draw('line_strip')
+
+
+class MarkerRenderer:
+    def __init__(self):
+        self.program = gloo.Program(MARKER_VERT, MARKER_FRAG)
+        self.vbo = gloo.VertexBuffer()
+        self._n_points = 0
+        self.color = np.array([0.8, 0.1, 0.1, 1.0], dtype=np.float32)
+        self.size = 6.0
+
+    def set_data(self, points: np.ndarray, color: Sequence[float], size: float) -> None:
+        structured = np.zeros(points.shape[0], dtype=[('a_pos', np.float32, 2)])
+        structured['a_pos'] = points.astype(np.float32)
+        self.vbo.set_data(structured)
+        self._n_points = int(points.shape[0])
+        self.color = np.array(color, dtype=np.float32)
+        self.size = float(size)
+
+    def draw(
+        self,
+        viewport: Tuple[int, int],
+        screen_offset: np.ndarray,
+        screen_scale: np.ndarray,
+    ) -> None:
+        if self._n_points == 0:
+            return
+        self.program.bind(self.vbo)
+        self.program["u_viewport"] = np.array(viewport, dtype=np.float32)
+        self.program["u_screen_offset"] = screen_offset.astype(np.float32)
+        self.program["u_screen_scale"] = screen_scale.astype(np.float32)
+        self.program["u_color"] = self.color
+        self.program["u_point_size"] = float(self.size)
+        gloo.set_state(depth_test=False, blend=True)
+        gloo.set_blend_func('src_alpha', 'one_minus_src_alpha')
+        self.program.draw('points')
 
 class OpenGLViewer:
-    """Unified OpenGL viewer for 2D and 3D ray tracing with intensity accumulation."""
+    """Minimal 2-D OpenGL viewer with quadratic accumulation."""
 
     def __init__(
         self,
-        mode: Literal["2d", "3d"] = "2d",
+        *,
         x_lims: Tuple[float, float] = (-6.0, 6.0),
         y_lims: Tuple[float, float] = (-6.0, 6.0),
-        z_lims: Optional[Tuple[float, float]] = None,
-        show_axis: bool = True,
         show: bool = True,
         size: Tuple[int, int] = (900, 700),
-        bgcolor: str | Tuple[float, float, float, float] = "black",
+        bgcolor: str | Sequence[float] = "black",
         render_config: Optional[RenderConfig] = None,
-    ):
-        self.mode = mode
+    ) -> None:
         self.render_config = render_config or RenderConfig()
-        # Preserve requested (user) parameters; actual shader uniforms may clamp
-        self._min_pixels_per_ray = 1.0
+        self.canvas = app.Canvas(keys="interactive", size=size, show=show)
+        self.canvas.events.draw.connect(self._on_draw)
+        self.canvas.events.resize.connect(self._on_resize)
+        self.canvas.events.mouse_press.connect(self._on_mouse_press)
+        self.canvas.events.mouse_release.connect(self._on_mouse_release)
+        self.canvas.events.mouse_move.connect(self._on_mouse_move)
+        self.canvas.events.mouse_wheel.connect(self._on_mouse_wheel)
 
-        self.canvas = scene.SceneCanvas(keys="interactive", show=show, bgcolor=bgcolor, size=size)
-        self.view = self.canvas.central_widget.add_view()
+        self._bgcolor = np.array(Color(bgcolor).rgba, dtype=np.float32)
+        self._viewport = (int(size[0]), int(size[1]))
+        self._view_rect = [float(x_lims[0]), float(x_lims[1]), float(y_lims[0]), float(y_lims[1])]
+        self._pan_active = False
+        self._last_mouse_pos: Optional[Tuple[float, float]] = None
 
-        if show_axis:
-            scene.visuals.XYZAxis(parent=self.view.scene)
+        self._ray_renderer = RayRenderer(self.render_config)
+        self._surface_renderers: List[PolylineRenderer] = []
+        self._marker_renderer = MarkerRenderer()
 
-        if mode == "2d":
-            self.camera = scene.cameras.PanZoomCamera()
-            self.camera.set_range(x=x_lims, y=y_lims)
-            self.view.camera = self.camera
-        else:
-            self.turntable_cam = scene.cameras.TurntableCamera(fov=45.0, azimuth=35.0, elevation=25.0)
-            self.fly_cam = scene.cameras.FlyCamera(fov=45.0)
-            self.view.camera = self.turntable_cam
+        self._ray_records: List[Tuple[np.ndarray, np.ndarray, float, np.ndarray]] = []
+        self._surface_records: List[Tuple[np.ndarray, np.ndarray, float]] = []
+        self._marker_points_world = np.zeros((0, 2), dtype=np.float32)
 
-            @self.canvas.events.key_press.connect
-            def on_key(event):
-                if event.key == 'c':
-                    if self.view.camera is self.turntable_cam:
-                        self.view.camera = self.fly_cam
-                        print("Switched to Fly Camera")
-                    else:
-                        self.view.camera = self.turntable_cam
-                        print("Switched to Turntable Camera")
+        if show:
+            self.canvas.show()
 
-        # Visual storage
-        self._surface_visuals: List[scene.VisualNode] = []
-        self._ray_visual: Optional[RayTube] = None
-        self._marker_visuals: List[scene.VisualNode] = []
+    def _on_resize(self, event) -> None:
+        size = event.size
+        self._viewport = (int(size[0]), int(size[1]))
+        gloo.set_viewport(0, 0, *self._viewport)
+        self._update_all_geometry()
+        self.canvas.update()
 
-        self._cached_ray_data: Optional[list] = None
+    def _on_draw(self, event) -> None:
+        gloo.clear(color=self._bgcolor)
+        viewport = self._viewport
+        screen_offset, screen_scale = self._screen_transform()
+        for renderer in self._surface_renderers:
+            renderer.draw(viewport, screen_offset, screen_scale)
+        self._ray_renderer.draw(viewport, screen_offset, screen_scale, self.render_config.accumulation_mode, self.render_config.weight_scale)
+        self._marker_renderer.draw(viewport, screen_offset, screen_scale)
 
-    def _clear_visuals(self, attr: str) -> None:
-        visuals = getattr(self, attr, [])
-        for v in visuals:
-            v.parent = None
-        setattr(self, attr, [])
+    def _on_mouse_press(self, event) -> None:
+        if event.button == 1:
+            self._pan_active = True
+            self._last_mouse_pos = tuple(event.pos)
 
-    # ------------------------------------------------------------------ sizing helpers
-    def _world_units_per_pixel(self) -> float:
-        """Return the average world-space length that maps to a single pixel."""
+    def _on_mouse_release(self, event) -> None:
+        if event.button == 1:
+            self._pan_active = False
+            self._last_mouse_pos = None
 
-        if isinstance(self.view.camera, scene.cameras.PanZoomCamera):
-            rect = self.view.camera.rect
-            if rect is not None:
-                width = float(rect.width)
-                height = float(rect.height)
-                canvas_w, canvas_h = self.canvas.size
-                if width > 0 and height > 0 and canvas_w > 0 and canvas_h > 0:
-                    units_x = width / float(canvas_w)
-                    units_y = height / float(canvas_h)
-                    return max(units_x, units_y)
+    def _on_mouse_move(self, event) -> None:
+        if not self._pan_active or self._last_mouse_pos is None:
+            return
+        cur = event.pos
+        prev = self._last_mouse_pos
+        dx = cur[0] - prev[0]
+        dy = cur[1] - prev[1]
+        self._last_mouse_pos = tuple(cur)
+        self._pan(dx, dy)
 
-        transform = self.view.transforms.get_transform('visual', 'framebuffer')
-        if transform is None:
-            return 1.0
+    def _on_mouse_wheel(self, event) -> None:
+        scale = 1.1 ** (-event.delta[1])
+        self._zoom(scale, event.pos)
 
-        samples = np.array(
-            [
-                [0.0, 0.0, 0.0, 1.0],
-                [1.0, 0.0, 0.0, 1.0],
-                [0.0, 1.0, 0.0, 1.0],
-            ],
-            dtype=float,
-        )
-
-        mapped = np.asarray(transform.map(samples))
-        if mapped.shape[1] >= 4:
-            w = mapped[:, 3:4]
-            w[w == 0] = 1.0
-            mapped = mapped[:, :3] / w
-        elif mapped.shape[1] >= 3:
-            mapped = mapped[:, :3]
-        elif mapped.shape[1] >= 2:
-            mapped = mapped[:, :2]
-        else:
-            return 1.0
-
-        origin = mapped[0]
-        ex = mapped[1]
-        ey = mapped[2]
-
-        sx = np.linalg.norm(ex[:2] - origin[:2])
-        sy = np.linalg.norm(ey[:2] - origin[:2])
-
-        if not np.isfinite(sx) or sx <= 0:
-            sx = 1.0
-        if not np.isfinite(sy) or sy <= 0:
-            sy = sx
-
-        avg_pixels = max(min(sx, sy), 1e-6)
-        return 1.0 / avg_pixels
-
-    def _effective_render_config(self) -> tuple[RenderConfig, float]:
-        """Return requested render config and the geometry width used for coverage."""
-
-        requested_width = float(self.render_config.ray_width)
-        requested_sigma = float(self.render_config.sigma_factor)
-
-        units_per_pixel = self._world_units_per_pixel()
-        min_world_width = units_per_pixel * self._min_pixels_per_ray
-
-        geometry_width = max(min_world_width, requested_width, 1e-6)
-
-        effective_config = replace(
-            self.render_config,
-            ray_width=requested_width,
-            sigma_factor=requested_sigma,
-        )
-        return effective_config, geometry_width
-
-    def draw_surfaces(self, surfaces: list, color: str = "white", width: float = 2.0) -> None:
-        self._clear_visuals("_surface_visuals")
-
+    def draw_surfaces(self, surfaces: Iterable, color: str | Sequence[float] = "white", width: float = 2.0) -> None:
+        self._surface_records.clear()
+        rgba = np.array(Color(color).rgba, dtype=np.float32)
         for surface in surfaces:
             if hasattr(surface, "polyline_segments"):
                 segments = surface.polyline_segments()
             else:
                 segments = [surface.polyline()]
-
             for seg in segments:
-                seg = np.asarray(seg, dtype=np.float32)
-                if seg.ndim != 2 or seg.shape[0] < 2:
+                pts = np.asarray(seg, dtype=np.float32)
+                if pts.ndim != 2 or pts.shape[0] < 2:
                     continue
-                if self.mode == "2d" and seg.shape[1] == 2:
-                    seg = np.column_stack([seg, np.zeros(len(seg), dtype=np.float32)])
-                line = scene.visuals.Line(pos=seg, color=color, width=width, parent=self.view.scene)
-                self._surface_visuals.append(line)
+                if pts.shape[1] == 3:
+                    pts = pts[:, :2]
+                self._surface_records.append((pts, rgba, float(width)))
+        self._rebuild_surface_renderers()
+        self.canvas.update()
 
     def draw_rays(
         self,
         tree,
+        *,
         tail_length: float = 12.0,
-        width: Optional[float] = None,
-        show_misses: bool = True,
         color_resolver: Optional[Callable] = None,
-        hit_color: Color | str | Sequence[float] = "yellow",
-        miss_color: Color | str | Sequence[float] = "orange",
         intensity_resolver: Optional[Callable] = None,
-        update_markers: bool = True,
+        show_misses: bool = True,
+        marker_color: str | Sequence[float] = "crimson",
+        marker_size: float = 6.0,
     ) -> None:
-        if width is not None:
-            self.render_config.ray_width = float(width)
+        self._ray_records.clear()
+        marker_list: List[np.ndarray] = []
 
-        effective_config, geometry_width = self._effective_render_config()
+        default_hit = np.array(Color("white").rgba, dtype=np.float32)
+        default_miss = np.array(Color("orange").rgba, dtype=np.float32)
 
-        ray_data = []
-        hit_positions = []
+        for node in tree.nodes():
+            start = np.asarray(node.ray.origin[:2], dtype=np.float32)
+            direction = np.asarray(node.ray.direction[:2], dtype=np.float32)
 
-        default_miss = np.array(Color(miss_color).rgba, dtype=np.float32)
-        default_hit = np.array(Color(hit_color).rgba, dtype=np.float32)
-
-        # Deterministic order is helpful for debugging
-        for node in sorted(tree.nodes(), key=lambda n: n.label):
-            start = np.asarray(node.ray.origin, dtype=np.float32)
-            direction = np.asarray(node.ray.direction, dtype=np.float32)
-
-            # Intensity per ray (can depend on generation)
-            intensity = float(intensity_resolver(node)) if intensity_resolver else float(self.render_config.default_intensity)
-
-            # Color (RGBA); alpha will act as a *weight* under squared accumulation
-            if color_resolver:
-                color = np.array(color_resolver(node), dtype=np.float32)
-                if color.size == 3:
-                    color = np.append(color, 1.0)
-            elif node.intersection is None:
+            if node.intersection is None:
                 if not show_misses:
                     continue
-                color = default_miss.copy()
-            else:
-                color = default_hit.copy()
-
-            # End point
-            if node.intersection is None:
                 end = start + direction * float(tail_length)
+                color = default_miss
             else:
-                end = np.asarray(node.intersection.point, dtype=np.float32)
-                if update_markers:
-                    hit_positions.append(end)
+                end = np.asarray(node.intersection.point[:2], dtype=np.float32)
+                color = default_hit
+                marker_list.append(end)
 
-            # 2D reduction if needed
-            if self.mode == "2d":
-                start = start[:2]
-                end = end[:2]
+            if color_resolver is not None:
+                custom = np.asarray(color_resolver(node), dtype=np.float32)
+                if custom.shape[0] == 3:
+                    custom = np.concatenate([custom, np.array([1.0], dtype=np.float32)])
+                color = custom
 
-            ray_data.append((start, end, intensity, color))
+            base_intensity = float(self.render_config.default_intensity)
+            intensity = float(intensity_resolver(node)) if intensity_resolver else base_intensity
 
-        # Create/reuse visual node
-        if self._ray_visual is None:
-            self._ray_visual = RayTube(config=effective_config, parent=self.view.scene)
+            self._ray_records.append((start, end, intensity, color))
+
+        self._update_ray_geometry()
+
+        if marker_list:
+            self._marker_points_world = np.vstack(marker_list).astype(np.float32)
         else:
-            self._ray_visual.set_config(effective_config)
+            self._marker_points_world = np.zeros((0, 2), dtype=np.float32)
 
-        self._ray_visual.set_geometry_width(geometry_width)
+        self._update_marker_geometry(color=marker_color, size=marker_size)
 
-        self._ray_visual.set_data(ray_data)
-        self._cached_ray_data = ray_data
-
-        # Markers
-        if update_markers:
-            self._clear_visuals("_marker_visuals")
-            if hit_positions:
-                if self.mode == "2d":
-                    hit_positions = [p[:2] if len(p) > 2 else p for p in hit_positions]
-                markers = scene.visuals.Markers(
-                    pos=np.asarray(hit_positions, dtype=np.float32),
-                    size=5,
-                    face_color=Color("crimson").rgba,
-                    parent=self.view.scene,
-                )
-                markers.set_gl_state(depth_test=False, blend=True)
-                markers.order = 1000
-                self._marker_visuals.append(markers)
+        self.canvas.update()
 
     def update_visual_params_only(self) -> None:
-        """Fast path: change width/sigma/weights without recomputing geometry."""
-        if self._ray_visual is not None and self._cached_ray_data is not None:
-            effective_config, geometry_width = self._effective_render_config()
-            self._ray_visual.set_config(effective_config)
-            self._ray_visual.set_geometry_width(geometry_width)
-            self._ray_visual.update()
-            self.canvas.update()
+        self._update_ray_geometry()
+        self.canvas.update()
 
     def run(self) -> None:
         app.run()
@@ -621,6 +451,158 @@ class OpenGLViewer:
         self.canvas.close()
 
     def clear_markers(self) -> None:
-        """Remove hit markers without affecting other visuals."""
-        self._clear_visuals("_marker_visuals")
+        self._marker_points_world = np.zeros((0, 2), dtype=np.float32)
+        self._marker_renderer.set_data(self._marker_points_world, np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32), 1.0)
         self.canvas.update()
+
+    def _rebuild_surface_renderers(self) -> None:
+        self._surface_renderers = []
+        if not self._surface_records:
+            return
+        for pts_world, color, width in self._surface_records:
+            renderer = PolylineRenderer()
+            renderer.set_data(pts_world, color, width)
+            self._surface_renderers.append(renderer)
+
+    def _update_all_geometry(self) -> None:
+        if self._surface_records:
+            self._rebuild_surface_renderers()
+        if self._ray_records:
+            self._update_ray_geometry()
+        self._update_marker_geometry()
+
+    def _update_ray_geometry(self) -> None:
+        if not self._ray_records:
+            self._ray_renderer.set_data(np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.uint32))
+            return
+
+        n = len(self._ray_records)
+        dtype = np.dtype([
+            ("a_corner", np.float32, 2),
+            ("a_start", np.float32, 2),
+            ("a_end", np.float32, 2),
+            ("a_width", np.float32, 1),
+            ("a_sigma", np.float32, 1),
+            ("a_intensity", np.float32, 1),
+            ("a_color", np.float32, 4),
+        ])
+
+        starts = np.array([rec[0] for rec in self._ray_records], dtype=np.float32)
+        ends = np.array([rec[1] for rec in self._ray_records], dtype=np.float32)
+        intensities = np.array([rec[2] for rec in self._ray_records], dtype=np.float32)
+        colors = np.array([rec[3] for rec in self._ray_records], dtype=np.float32)
+
+        direction = ends - starts
+        norms = np.linalg.norm(direction, axis=1)
+        safe_norms = np.where(norms < 1e-6, 1.0, norms)
+        direction /= safe_norms[:, None]
+        direction[norms < 1e-6] = np.array([1.0, 0.0], dtype=np.float32)
+
+        perp = np.stack([-direction[:, 1], direction[:, 0]], axis=1)
+        offset_world = perp * float(self.render_config.ray_width)
+
+        x0, x1, y0, y1 = self._view_rect
+        sx = self._viewport[0] / max(x1 - x0, 1e-6)
+        sy = self._viewport[1] / max(y1 - y0, 1e-6)
+        offset_screen = np.stack([offset_world[:, 0] * sx, offset_world[:, 1] * sy], axis=1)
+        width_pixels = np.maximum(np.linalg.norm(offset_screen, axis=1), self.render_config.min_pixels)
+        sigma_pixels = np.maximum(width_pixels * self.render_config.sigma_factor, 1e-3)
+
+        corners = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]], dtype=np.float32)
+        vertices = np.zeros(n * 4, dtype=dtype)
+        vertices['a_corner'] = np.tile(corners, (n, 1))
+        vertices['a_start'] = np.repeat(starts, 4, axis=0)
+        vertices['a_end'] = np.repeat(ends, 4, axis=0)
+        vertices['a_width'] = np.repeat(width_pixels[:, None], 4, axis=0)
+        vertices['a_sigma'] = np.repeat(sigma_pixels[:, None], 4, axis=0)
+        vertices['a_intensity'] = np.repeat(intensities[:, None], 4, axis=0)
+        vertices['a_color'] = np.repeat(colors, 4, axis=0)
+
+        base = (np.arange(n, dtype=np.uint32) * 4).reshape(-1, 1)
+        pattern = np.array([[0, 1, 2, 0, 2, 3]], dtype=np.uint32)
+        indices = (base + pattern).reshape(-1)
+
+        self._ray_renderer.set_data(vertices, indices)
+
+    def _update_marker_geometry(self, *, color: str | Sequence[float] | None = None, size: float | None = None) -> None:
+        rgba = np.array(Color(color).rgba, dtype=np.float32) if color is not None else self._marker_renderer.color
+        radius = float(size) if size is not None else self._marker_renderer.size
+
+        pts = self._marker_points_world if self._marker_points_world.size else np.zeros((0, 2), dtype=np.float32)
+        self._marker_renderer.set_data(pts, rgba, radius)
+
+    def _world_to_screen(self, points: np.ndarray) -> np.ndarray:
+        points = np.asarray(points, dtype=np.float32)
+        x0, x1, y0, y1 = self._view_rect
+        w, h = self._viewport
+        sx = w / max(x1 - x0, 1e-6)
+        sy = h / max(y1 - y0, 1e-6)
+        x = (points[..., 0] - x0) * sx
+        y = (points[..., 1] - y0) * sy
+        return np.stack([x, y], axis=-1)
+
+    def _screen_transform(self) -> Tuple[np.ndarray, np.ndarray]:
+        x0, x1, y0, y1 = self._view_rect
+        sx = self._viewport[0] / max(x1 - x0, 1e-6)
+        sy = self._viewport[1] / max(y1 - y0, 1e-6)
+        offset = np.array([x0, y0], dtype=np.float32)
+        scale = np.array([sx, sy], dtype=np.float32)
+        return offset, scale
+
+    def _ray_width_sigma_pixels(self, start: np.ndarray, end: np.ndarray) -> Tuple[float, float]:
+        x0, x1, y0, y1 = self._view_rect
+        w, h = self._viewport
+        sx = w / (x1 - x0)
+        sy = h / (y1 - y0)
+        direction = end - start
+        norm = float(np.linalg.norm(direction))
+        if norm < 1e-6:
+            direction = np.array([1.0, 0.0], dtype=np.float32)
+            norm = 1.0
+        else:
+            direction = direction / norm
+        perp_world = np.array([-direction[1], direction[0]], dtype=np.float32)
+        offset_world = perp_world * float(self.render_config.ray_width)
+        offset_screen = np.array([offset_world[0] * sx, offset_world[1] * sy], dtype=np.float32)
+        width_pixels = float(max(np.linalg.norm(offset_screen), self.render_config.min_pixels))
+        sigma_pixels = float(max(width_pixels * self.render_config.sigma_factor, 1e-3))
+        return width_pixels, sigma_pixels
+
+    def _pan(self, dx_pixels: float, dy_pixels: float) -> None:
+        w, h = self._viewport
+        x0, x1, y0, y1 = self._view_rect
+        sx = (x1 - x0) / w
+        sy = (y1 - y0) / h
+        self._view_rect[0] -= dx_pixels * sx
+        self._view_rect[1] -= dx_pixels * sx
+        self._view_rect[2] -= dy_pixels * sy
+        self._view_rect[3] -= dy_pixels * sy
+        self._update_all_geometry()
+        self.canvas.update()
+
+    def _zoom(self, scale: float, cursor_pos: Tuple[float, float]) -> None:
+        w, h = self._viewport
+        if w <= 0 or h <= 0:
+            return
+        x0, x1, y0, y1 = self._view_rect
+        cx, cy = self._screen_to_world(cursor_pos)
+        width = (x1 - x0) * scale
+        height = (y1 - y0) * scale
+        alpha_x = (cx - x0) / (x1 - x0)
+        alpha_y = (cy - y0) / (y1 - y0)
+        self._view_rect[0] = cx - width * alpha_x
+        self._view_rect[1] = self._view_rect[0] + width
+        self._view_rect[2] = cy - height * alpha_y
+        self._view_rect[3] = self._view_rect[2] + height
+        self._update_all_geometry()
+        self.canvas.update()
+
+    def _screen_to_world(self, pos: Tuple[float, float]) -> Tuple[float, float]:
+        x0, x1, y0, y1 = self._view_rect
+        w, h = self._viewport
+        x = x0 + (pos[0] / w) * (x1 - x0)
+        y = y0 + (pos[1] / h) * (y1 - y0)
+        return float(x), float(y)
+
+
+__all__ = ["OpenGLViewer", "RenderConfig"]
