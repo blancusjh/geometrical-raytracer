@@ -229,6 +229,64 @@ class OpenGLViewer(app.Canvas):
         self._exposure_dirty = True
         self.update()
 
+    def draw_ray_segments(
+        self,
+        segments: np.ndarray,  # (N, 2, 2) world endpoints
+        *,
+        colors: np.ndarray | None = None,  # (N, 4)
+        intensities: np.ndarray | None = None,  # (N,)
+        escaping: np.ndarray | None = None,  # (N,) bool
+        directions: np.ndarray | None = None,  # (N, 2), required with escaping
+    ) -> None:
+        """Scene-level entry point: draw raw ray segments (no RayTree needed)."""
+
+        segments = np.asarray(segments, dtype=float)
+        n = segments.shape[0]
+        if n == 0:
+            return
+        colors = (
+            np.tile([1.0, 1.0, 1.0, 1.0], (n, 1)) if colors is None else np.asarray(colors)
+        )
+        intensities = (
+            np.ones(n) if intensities is None else np.asarray(intensities, dtype=float)
+        )
+        escaping_arr = (
+            np.zeros(n, dtype=bool) if escaping is None else np.asarray(escaping, dtype=bool)
+        )
+        if directions is None:
+            deltas = segments[:, 1, :] - segments[:, 0, :]
+            norms = np.linalg.norm(deltas, axis=1, keepdims=True)
+            directions = deltas / np.where(norms == 0.0, 1.0, norms)
+
+        self._ensure_scene_center(segments[:, 0, :].mean(axis=0))
+        center = self._scene_center
+        self._segments = np.column_stack(
+            [segments[:, 0, :] - center, segments[:, 1, :] - center]
+        ).astype(np.float32)
+        self._escaping = escaping_arr
+        self._directions = np.asarray(directions, dtype=np.float32)
+        self._extend_escaping()
+        self._ray_renderer.set_segments(
+            self._segments,
+            np.asarray(colors, dtype=np.float32),
+            intensities.astype(np.float32),
+        )
+        self._exposure_dirty = True
+        self.update()
+
+    def draw_polyline(self, polyline, *, color="white", width: float = 2.0) -> None:
+        """Draw a raw polyline overlay (surfaces, screens, outlines)."""
+
+        polyline = np.asarray(polyline, dtype=float)
+        if polyline.shape[0] < 2:
+            return
+        self._ensure_scene_center(np.nanmean(polyline, axis=0))
+        rgba = Color(color).rgba if not isinstance(color, (tuple, list, np.ndarray)) else tuple(color)
+        self._surface_renderers.append(
+            PolylineRenderer(polyline - self._scene_center, rgba, width)
+        )
+        self.update()
+
     def draw_markers(self, points, *, color="crimson", size: float = 6.0) -> None:
         points = np.asarray(points, dtype=float).reshape(-1, 2)
         if points.shape[0] == 0:

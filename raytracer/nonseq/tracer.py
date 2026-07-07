@@ -68,10 +68,16 @@ class RayTracer2D:
             hit = self._first_hit(node.ray)
             node.intersection = hit
 
-            if hit is None or node.generation >= self.config.max_generations:
+            if hit is None:
                 continue
 
             surface = hit.surface
+            on_hit = getattr(surface, "on_hit", None)
+            if on_hit is not None:
+                on_hit(node, hit)
+
+            if node.generation >= self.config.max_generations:
+                continue
             if surface is not None and getattr(surface, "absorbing", False):
                 continue
 
@@ -97,6 +103,16 @@ class RayTracer2D:
 
             child_opl = node.opl + incident_n * hit.distance
 
+            # Per-surface interaction overrides the global config: lens faces
+            # refract, mirrors reflect, "config" surfaces follow TraceConfig.
+            interaction = getattr(surface, "interaction", "config")
+            if interaction == "config":
+                do_reflect = self.config.allow_reflection
+                do_refract = self.config.allow_refraction
+            else:
+                do_reflect = interaction == "reflect"
+                do_refract = interaction == "refract"
+
             reflectance = 1.0
             transmittance = 0.0
             if self.config.fresnel_split:
@@ -105,8 +121,12 @@ class RayTracer2D:
                 )
                 reflectance = coeffs.reflectance
                 transmittance = coeffs.transmittance
+                if do_refract and not do_reflect and interaction == "refract":
+                    # Fresnel split on a refractive face also spawns the
+                    # partial reflection.
+                    do_reflect = True
 
-            if self.config.allow_reflection:
+            if do_reflect:
                 refl_intensity = (
                     node.intensity * reflectance if self.config.fresnel_split else node.intensity
                 )
@@ -118,7 +138,7 @@ class RayTracer2D:
                         opl=child_opl, intensity=refl_intensity, kind="reflected",
                     )
 
-            if self.config.allow_refraction:
+            if do_refract:
                 refr_dir = refract(node.ray.direction, normal, incident_n, transmit_medium)
                 if refr_dir is not None:
                     refr_intensity = (
