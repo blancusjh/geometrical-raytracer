@@ -167,6 +167,37 @@ class PolylineRenderer:
         self.program.draw("triangles", self.index_buffer)
 
 
+class FilledPolygonRenderer:
+    """Translucent filled triangle meshes drawn as flat-color overlays.
+
+    Vertices are scene-relative world (M, 2); faces are (K, 3) uint32 indices.
+    Used for lens bodies coloured by material (shows the enclosed medium).
+    """
+
+    def __init__(self, vertices: np.ndarray, faces: np.ndarray, color) -> None:
+        self.program = gloo.Program(shaders.FILL_VERT, shaders.FILL_FRAG)
+        vertices = np.asarray(vertices, dtype=np.float32).reshape(-1, 2)
+        faces = np.asarray(faces, dtype=np.uint32).reshape(-1, 3)
+        self.n_faces = faces.shape[0]
+        if self.n_faces == 0 or vertices.shape[0] < 3:
+            self.n_faces = 0
+            return
+        self.program["a_position"] = vertices
+        self.index_buffer = gloo.IndexBuffer(faces.ravel())
+        self.color = color
+
+    def draw(self, *, viewport, view_center, ppw) -> None:
+        if self.n_faces == 0:
+            return
+        self.program["u_viewport"] = viewport
+        self.program["u_view_center"] = tuple(view_center)
+        self.program["u_ppw"] = ppw
+        self.program["u_color"] = self.color
+        gloo.set_state(blend=True, depth_test=False)
+        gloo.set_blend_func("src_alpha", "one_minus_src_alpha")
+        self.program.draw("triangles", self.index_buffer)
+
+
 class MarkerRenderer:
     """Round point-sprite markers."""
 
@@ -240,6 +271,7 @@ __all__ = [
     "AccumulationTarget",
     "RayRenderer",
     "PolylineRenderer",
+    "FilledPolygonRenderer",
     "MarkerRenderer",
     "TonemapPass",
     "auto_exposure",

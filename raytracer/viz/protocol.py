@@ -52,6 +52,7 @@ class GLBackend:
         if self.viewer is None:
             return self.render(scene)
         self.viewer._surface_renderers.clear()
+        self.viewer._fill_renderers.clear()
         self.viewer.clear_markers()
         self._populate(scene)
         return self.viewer

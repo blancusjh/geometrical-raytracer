@@ -213,6 +213,28 @@ void main() {
 }
 """
 
+FILL_VERT = _PREAMBLE + """
+uniform vec2  u_viewport;
+uniform vec2  u_view_center;
+uniform float u_ppw;
+
+attribute vec2 a_position;     // world, scene-relative
+
+void main() {
+    vec2 half_vp = 0.5 * u_viewport;
+    vec2 pos = (a_position - u_view_center) * u_ppw + half_vp;
+    gl_Position = vec4(pos / u_viewport * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+
+FILL_FRAG = _PREAMBLE + """
+uniform vec4 u_color;          // rgb + translucent alpha
+
+void main() {
+    gl_FragColor = u_color;
+}
+"""
+
 __all__ = [
     "RAY_VERT",
     "RAY_FRAG",
@@ -222,4 +244,6 @@ __all__ = [
     "LINE_FRAG",
     "MARKER_VERT",
     "MARKER_FRAG",
+    "FILL_VERT",
+    "FILL_FRAG",
 ]

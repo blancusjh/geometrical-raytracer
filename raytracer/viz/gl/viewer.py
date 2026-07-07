@@ -27,6 +27,7 @@ from vispy.color import Color
 from .camera import Camera
 from .renderers import (
     AccumulationTarget,
+    FilledPolygonRenderer,
     MarkerRenderer,
     PolylineRenderer,
     RayRenderer,
@@ -92,6 +93,7 @@ class OpenGLViewer(app.Canvas):
         self._escaping: np.ndarray | None = None  # bool per segment
         self._directions: np.ndarray | None = None  # unit dir per segment
         self._surface_renderers: list[PolylineRenderer] = []
+        self._fill_renderers: list[FilledPolygonRenderer] = []
         self._marker_renderers: list[MarkerRenderer] = []
         self._accumulation = AccumulationTarget()
         self._tonemap = TonemapPass()
@@ -287,6 +289,23 @@ class OpenGLViewer(app.Canvas):
         )
         self.update()
 
+    def draw_filled_polygon(self, vertices, faces, *, color) -> None:
+        """Draw a translucent filled triangle mesh (e.g. a lens body by material).
+
+        vertices: (M, 2) world; faces: (K, 3) int indices. Rendered as an overlay
+        under the surface outlines and markers.
+        """
+        vertices = np.asarray(vertices, dtype=float).reshape(-1, 2)
+        faces = np.asarray(faces).reshape(-1, 3)
+        if vertices.shape[0] < 3 or faces.shape[0] == 0:
+            return
+        self._ensure_scene_center(vertices.mean(axis=0))
+        rgba = Color(color).rgba if not isinstance(color, (tuple, list, np.ndarray)) else tuple(color)
+        self._fill_renderers.append(
+            FilledPolygonRenderer(vertices - self._scene_center, faces, rgba)
+        )
+        self.update()
+
     def draw_markers(self, points, *, color="crimson", size: float = 6.0) -> None:
         points = np.asarray(points, dtype=float).reshape(-1, 2)
         if points.shape[0] == 0:
@@ -409,6 +428,12 @@ class OpenGLViewer(app.Canvas):
             mode=self.config.resolved_tone_map(),
             background=tuple(background) if self.config.background != "black" else (0.0, 0.0, 0.0),
         )
+        for renderer in self._fill_renderers:  # material bodies, under the outlines
+            renderer.draw(
+                viewport=viewport,
+                view_center=self._view_center_rel,
+                ppw=self.camera.pixels_per_world,
+            )
         for renderer in self._surface_renderers:
             renderer.draw(
                 viewport=viewport,

@@ -28,7 +28,7 @@ def main() -> None:
     viewer = Viewer3D(title="US7557996 — 3D")
     viewer.add_system(system)
     viewer.add_field_bundles(
-        tracer, fields=[56.0, 62.0, 67.0], na_object_sine=0.22, samples=24
+        tracer, fields=[56.0, 62.0, 67.0], na_object_sine=0.30, radial=6, azimuth=48
     )
 
     if "--save" in sys.argv:

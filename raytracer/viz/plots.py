@@ -25,6 +25,7 @@ DEFAULT_MATERIAL_COLORS = {
     "SIO2": ("#bde0fe", "#2878b5"),
     "CAF2": ("#c7f9cc", "#278b65"),
     "HIINDEX1": ("#ffe29a", "#c47f00"),
+    "HIINDEX2": ("#ffb3a1", "#c1440e"),
 }
 _FALLBACK_COLORS = [
     ("#f2c6de", "#a4508b"),
