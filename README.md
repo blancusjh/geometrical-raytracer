@@ -78,8 +78,18 @@ viewer.draw_rays(tree)     # acumulación HDR + auto-exposición
 viewer.run()
 ```
 
-Demos ejecutables en `examples/`: `clean_ellipse_opengl.py`,
-`conic_showcase.py`, `refractive_sphere.py`, `refractive_ovoid.py`.
+Demos ejecutables en `examples/`:
+
+- `clean_ellipse_opengl.py`, `conic_showcase.py`, `refractive_sphere.py`,
+  `refractive_ovoid.py` — cáusticas y refracción en el visor OpenGL.
+- `lens_screen_dual_backend.py` — la misma escena por matplotlib y OpenGL.
+- `interactive_lens.py` — modo interactivo: arrastra la fuente/lente/pantalla
+  (handles cian), Tab cicla parámetros, ←/→ los ajusta con retrazado en vivo.
+- `image_formation.py` — formación de imágenes: relevo geométrico de un
+  objeto extendido (`ImageSource2D` → `Screen2D`) y formación difractiva de
+  una imagen cargada de archivo (`BinaryMask.from_image` → método de Abbe).
+- `duv_3d.py` — el objetivo DUV completo en 3D (mallas de revolución +
+  haces trazados, cámara turntable).
 
 ## Estructura
 
@@ -90,8 +100,11 @@ raytracer/
   sequential/  # filas de superficie, sistema, prescripción CSV, trazador
                # vectorizado, capa paraxial, campos y pupilas
   analysis/    # spots, fans, métricas, Zernike, eikonal, imaging escalar
-  nonseq/      # rayos, superficies, fuentes y trazador 2D no-secuencial
-  viz/         # plots matplotlib, color (CIE), visor OpenGL (gl/)
+  nonseq/      # rayos, superficies, fuentes (incl. ImageSource2D), lentes/
+               # espejos 2D, pantallas de observación, trazador no-secuencial
+  viz/         # plots matplotlib, escena neutral dual-backend (scene/mpl/
+               # protocol), color (CIE), visor OpenGL HDR (gl/), modo
+               # interactivo (interactive), visor 3D (gl3d)
   data/        # prescripción US7557996 empaquetada
 examples/      # demos GL + notebooks de réplica de patentes
 reference/     # notebooks y módulo de referencia originales
