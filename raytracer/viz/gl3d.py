@@ -23,13 +23,37 @@ from .plots import DEFAULT_MATERIAL_COLORS
 
 TWO_PI = 2.0 * np.pi
 MIRROR_COLOR = (0.62, 0.66, 0.72, 1.0)
-GLASS_ALPHA = 1.0  # opaque: avoids translucent depth-order artifacts
+# Glass uses standard alpha translucency: stacked surfaces get DENSER (as real
+# glass does), never brighter. Safe now that the depth-mask clear bug is fixed.
+# Light (the beam modes) is what adds; glass is not.
+GLASS_ALPHA = 0.30
 RAY_COLORS = [
-    (0.95, 0.35, 0.25, 0.9),
-    (0.30, 0.95, 0.45, 0.9),
-    (0.35, 0.65, 1.00, 0.9),
-    (0.80, 0.55, 0.95, 0.9),
+    (0.95, 0.35, 0.25, 0.55),
+    (0.30, 0.95, 0.45, 0.55),
+    (0.35, 0.65, 1.00, 0.55),
+    (0.80, 0.55, 0.95, 0.55),
 ]
+
+# Draw order: opaque mirrors first, then rays (depth-tested), then translucent
+# glass blended over them — a ray behind glass is tinted by it, a ray in front
+# stays crisp, and anything behind a mirror is properly occluded.
+ORDER_OPAQUE, ORDER_RAYS, ORDER_GLASS = 0, 1, 2
+
+
+def spectral_rgb(wavelength_nm: float) -> np.ndarray:
+    """Linear-sRGB of a wavelength via the CIE 1931 fits (diffractsim-style).
+
+    Wavelengths outside the visible gamut (e.g. 193 nm DUV) map to a deep
+    violet so the beam stays representable on screen.
+    """
+    from .color import wavelength_to_rgb
+
+    # Check the *unnormalized* response: outside the visible range the CIE fits
+    # return numerical residue that normalize=True would blow up to a wrong hue.
+    raw = np.asarray(wavelength_to_rgb(float(wavelength_nm), normalize=False), dtype=float)
+    if float(raw.max()) < 1e-3:  # UV / IR: no visible response
+        return np.array([0.45, 0.18, 1.0])
+    return np.asarray(wavelength_to_rgb(float(wavelength_nm)), dtype=float)
 
 
 def _angles(angle_range, n):
@@ -101,10 +125,11 @@ def lathe_solid(front, back, semidiameter, *, z_front, z_back,
     return vertices.astype(np.float32), np.asarray(faces, dtype=np.int32)
 
 
-def _material_color(material, alpha=GLASS_ALPHA):
-    # use the saturated edge tone so the medium stays distinguishable under shading
+def _material_color(material, alpha=1.0):
+    # bright face tone: additive layers build a luminous crystal glow while the
+    # hue keeps the media distinguishable (SIO2 blue / CAF2 green / HIINDEX amber)
     entry = DEFAULT_MATERIAL_COLORS.get(material, ("#c9c9c9", "#8a8a8a"))
-    r, g, b = Color(entry[1] if len(entry) > 1 else entry[0]).rgb
+    r, g, b = Color(entry[0]).rgb
     return (float(r), float(g), float(b), alpha)
 
 
@@ -114,6 +139,9 @@ class Viewer3D:
     def __init__(self, *, size=(1300, 820), background="#0a0a0f", title="raytracer 3D"):
         from vispy import scene
 
+        # NOTE: no MSAA (config samples): multisample framebuffers leave stale /
+        # black frames on some drivers (frozen first frame over the scene).
+        # Lines use their own fragment antialiasing instead.
         self.canvas = scene.SceneCanvas(
             keys="interactive", size=size, bgcolor=background, title=title, show=False
         )
@@ -124,55 +152,101 @@ class Viewer3D:
         self._shading_filters: list = []
         self._wireframe_filters: list = []
         self._wireframe_on = False
+        self._ray_groups: dict[str, list] = {"lines": [], "beam": [], "spectrum": []}
+        self._ray_mode = "lines"
+        # CRITICAL: glClear honours glDepthMask. Glass draws last with
+        # depth_mask=False; without re-enabling it before the next frame's
+        # clear, the depth buffer never clears and the first frame stays
+        # imprinted as a frozen black silhouette that occludes everything.
+        # Wrap _draw_scene (the funnel for both live paints and offscreen
+        # render()) so the mask is restored before every clear.
+        _orig_draw_scene = self.canvas._draw_scene
+
+        def _draw_scene_with_reset(*args, **kwargs):
+            self._reset_gl_state()
+            return _orig_draw_scene(*args, **kwargs)
+
+        self.canvas._draw_scene = _draw_scene_with_reset
         # headlight: update the light direction whenever the camera moves
         self.canvas.events.mouse_move.connect(self._update_light)
         self.canvas.events.mouse_wheel.connect(self._update_light)
         self.canvas.events.key_press.connect(self._on_key)
 
+    @staticmethod
+    def _reset_gl_state(event=None):
+        from vispy import gloo
+
+        gloo.set_state(depth_mask=True)
+
     # -- meshes ----------------------------------------------------------
-    def _add_mesh(self, vertices, faces, color, *, shading="smooth"):
+    def _add_mesh(self, vertices, faces, color, *, style="opaque"):
         from vispy.visuals.filters import WireframeFilter
 
-        translucent = len(color) > 3 and color[3] < 1.0
-        mesh = self._scene.visuals.Mesh(
-            vertices=vertices, faces=faces, color=color, shading=shading,
-            parent=self.view.scene,
-        )
-        mesh.set_gl_state(blend=True, depth_test=True, cull_face=False,
-                          depth_mask=not translucent)
-        sf = getattr(mesh, "shading_filter", None)
-        if sf is not None:
-            # Bright ambient FLOOR so no face is ever black (both the coefficient
-            # AND the light must be turned up — the default ambient_light alpha is
-            # only 0.25). Moderate diffuse gives gentle relief.
-            try:
-                sf.ambient_light = (1.0, 1.0, 1.0, 1.0)
-                sf.diffuse_light = (1.0, 1.0, 1.0, 0.85)
-                sf.ambient_coefficient = (1.0, 1.0, 1.0, 0.75)
-                sf.diffuse_coefficient = (1.0, 1.0, 1.0, 0.50)
-                sf.specular_coefficient = (1.0, 1.0, 1.0, 0.15)
-                sf.shininess = 24.0
-            except Exception:
-                pass
-            self._shading_filters.append(sf)
-        wf = WireframeFilter(enabled=False, color=(0.9, 0.95, 1.0, 0.6), width=0.7)
+        if style == "glass":
+            # Shaded translucent glass: alpha compositing, so overlapping
+            # surfaces read denser (like real glass), never brighter. Smooth
+            # shading + specular glint give each lens a solid body.
+            tint = (color[0], color[1], color[2], GLASS_ALPHA)
+            mesh = self._scene.visuals.Mesh(
+                vertices=vertices, faces=faces, color=tint, shading="smooth",
+                parent=self.view.scene,
+            )
+            mesh.set_gl_state(blend=True, depth_test=True, depth_mask=False,
+                              cull_face=False,
+                              blend_func=("src_alpha", "one_minus_src_alpha"))
+            mesh.order = ORDER_GLASS
+            sf = getattr(mesh, "shading_filter", None)
+            if sf is not None:
+                try:
+                    sf.ambient_light = (1.0, 1.0, 1.0, 1.0)
+                    sf.diffuse_light = (1.0, 1.0, 1.0, 0.9)
+                    sf.ambient_coefficient = (1.0, 1.0, 1.0, 0.55)
+                    sf.diffuse_coefficient = (1.0, 1.0, 1.0, 0.60)
+                    sf.specular_coefficient = (1.0, 1.0, 1.0, 0.50)
+                    sf.shininess = 80.0
+                except Exception:
+                    pass
+                self._shading_filters.append(sf)  # headlight follows the camera
+        else:  # opaque (mirrors)
+            mesh = self._scene.visuals.Mesh(
+                vertices=vertices, faces=faces, color=color, shading="smooth",
+                parent=self.view.scene,
+            )
+            mesh.set_gl_state(blend=True, depth_test=True, cull_face=False,
+                              depth_mask=True)
+            mesh.order = ORDER_OPAQUE
+            sf = getattr(mesh, "shading_filter", None)
+            if sf is not None:
+                # bright ambient floor so no mirror face ever goes black
+                try:
+                    sf.ambient_light = (1.0, 1.0, 1.0, 1.0)
+                    sf.diffuse_light = (1.0, 1.0, 1.0, 0.85)
+                    sf.ambient_coefficient = (1.0, 1.0, 1.0, 0.75)
+                    sf.diffuse_coefficient = (1.0, 1.0, 1.0, 0.50)
+                    sf.specular_coefficient = (1.0, 1.0, 1.0, 0.15)
+                    sf.shininess = 24.0
+                except Exception:
+                    pass
+                self._shading_filters.append(sf)
+        wf = WireframeFilter(enabled=False, color=(0.9, 0.95, 1.0, 0.55), width=0.8)
         mesh.attach(wf)
         self._wireframe_filters.append(wf)
         self._bounds.append(vertices)
         return mesh
 
-    def add_lens(self, front, back, semidiameter, *, z_front, z_back, color, section="full"):
+    def add_lens(self, front, back, semidiameter, *, z_front, z_back, color,
+                 section="full", style="glass"):
         rng = (0.0, np.pi) if section == "half" else (0.0, TWO_PI)
         v, f = lathe_solid(front, back, semidiameter, z_front=z_front, z_back=z_back,
                            angle_range=rng)
-        self._add_mesh(v, f, color)
+        self._add_mesh(v, f, color, style=style)
 
     def add_surface(self, profile, semidiameter, *, vertex_z, color, section="full",
-                    angular_samples=96):
+                    angular_samples=96, style="opaque"):
         rng = (0.0, np.pi) if section == "half" else (0.0, TWO_PI)
         v, f = lathe(profile, semidiameter, vertex_z=vertex_z,
                      angular_samples=angular_samples, angle_range=rng)
-        self._add_mesh(v, f, color)
+        self._add_mesh(v, f, color, style=style)
 
     def add_system(self, system, *, section="full", angular_samples: int = 64) -> None:
         """Render lens elements (coloured by material) + mirrors as full closed
@@ -198,14 +272,21 @@ class Viewer3D:
                 continue
             self.add_surface(row.profile, row.semidiameter or 50.0,
                              vertex_z=float(system.vertices[i]),
-                             color=_material_color("SIO2"), section=section)
+                             color=_material_color("SIO2"), section=section,
+                             style="glass")
 
     # -- rays ------------------------------------------------------------
-    def add_paths(self, paths, *, color=None, width: float = 1.4) -> None:
+    def add_paths(self, paths, *, color=None, width: float = 1.4,
+                  group: str = "lines", additive: bool = False) -> None:
+        """Add traced polylines. ``group`` is a toggleable layer ("lines"/"beam").
+
+        With ``additive`` the segments blend ONE,ONE: overlapping rays sum their
+        (energy-scaled) colors into a continuous beam, diffractsim-style.
+        """
         paths = np.asarray(paths, dtype=float)
         if paths.ndim == 2:
             paths = paths[None, ...]
-        color = color or RAY_COLORS[0]
+        color = color if color is not None else RAY_COLORS[0]
         positions, connections, offset = [], [], 0
         for path in paths:
             valid = path[~np.isnan(path).any(axis=1)]
@@ -221,13 +302,48 @@ class Viewer3D:
         line = self._scene.visuals.Line(
             pos=positions, connect=np.vstack(connections).astype(np.uint32),
             color=color, width=width, parent=self.view.scene, method="gl",
+            antialias=True,  # fragment AA (no MSAA needed)
         )
-        line.set_gl_state(blend=True, depth_test=False)  # rays always visible
+        if additive:
+            # LIGHT adds: energy summation (colorimetric mixing where beams of
+            # different wavelengths overlap); no depth write between beams
+            line.set_gl_state(blend=True, depth_test=True, depth_mask=False,
+                              blend_func=("one", "one"))
+        else:
+            # plain traces: alpha blending, depth-tested (occluded by mirrors,
+            # seen through the glass) — no additive color summing
+            line.set_gl_state(blend=True, depth_test=True)
+        line.order = ORDER_RAYS
+        line.visible = group == self._ray_mode
+        self._ray_groups.setdefault(group, []).append(line)
         self._bounds.append(positions)
 
     def add_field_bundles(self, tracer, fields, *, na_object_sine, radial=6, azimuth=32,
-                          stop_index=None) -> None:
+                          stop_index=None, mode: str = "lines",
+                          wavelength_nm: float | None = None,
+                          wavelengths_nm=None,
+                          beam_energy: float = 12.0,
+                          beam: bool = False) -> None:
+        """Trace pupil bundles per field, in one of three display modes.
+
+        mode="lines"    -> per-field colored traces (alpha, no color summing).
+        mode="beam"     -> dense additive beam at the system wavelength: rays
+            carry ``spectral_rgb(wavelength_nm) * beam_energy / n_rays`` and sum
+            into a continuous glow (193 nm DUV shows as violet).
+        mode="spectrum" -> one wavelength per field (``wavelengths_nm``, default
+            633/532/473 nm — a display assignment: the patent gives indices at a
+            single wavelength), each an additive spectral beam. Where beams of
+            different wavelengths overlap, colors sum colorimetrically
+            (CIE 1931 -> linear sRGB, as in diffractsim) -> white at the image.
+        """
         from ..sequential.fields import FieldPoint, PupilSampling, trace_pupil
+
+        if beam:  # backward-compat flag
+            mode = "beam"
+        if mode == "beam" and wavelength_nm is None:
+            wavelength_nm = float(getattr(tracer.system, "wavelength_um", 0.55)) * 1e3
+        if mode == "spectrum" and wavelengths_nm is None:
+            wavelengths_nm = (633.0, 532.0, 473.0)
 
         for k, field_y in enumerate(fields):
             pupil = trace_pupil(
@@ -236,7 +352,16 @@ class Viewer3D:
                 keep_paths=True, stop_index=stop_index,
             )
             paths = pupil.batch.paths[pupil.valid]
-            self.add_paths(paths, color=RAY_COLORS[k % len(RAY_COLORS)])
+            if mode in ("beam", "spectrum"):
+                wl = (wavelength_nm if mode == "beam"
+                      else float(wavelengths_nm[k % len(wavelengths_nm)]))
+                n_rays = max(int(pupil.valid.sum()), 1)
+                rgb = spectral_rgb(wl) * (beam_energy / n_rays)
+                self.add_paths(paths, color=(*rgb.tolist(), 1.0), width=1.0,
+                               group=mode, additive=True)
+            else:
+                self.add_paths(paths, color=RAY_COLORS[k % len(RAY_COLORS)],
+                               group="lines")
 
     # -- interaction -----------------------------------------------------
     def _update_light(self, event=None):
@@ -254,11 +379,30 @@ class Viewer3D:
                 pass
 
     def _on_key(self, event):
-        if getattr(event, "key", None) is not None and str(event.key).lower() == "w":
+        key = getattr(event, "key", None)
+        # vispy Key objects stringify as "<Key ('W',)>"; use .name for the letter
+        key = (getattr(key, "name", None) or "").lower() if key is not None else ""
+        if key == "w":
             self._wireframe_on = not self._wireframe_on
             for wf in self._wireframe_filters:
                 wf.enabled = self._wireframe_on
             self.canvas.update()
+        elif key == "m":
+            modes = [m for m in ("lines", "beam", "spectrum") if self._ray_groups.get(m)]
+            if modes:
+                i = modes.index(self._ray_mode) if self._ray_mode in modes else -1
+                self.set_ray_mode(modes[(i + 1) % len(modes)])
+
+    def set_ray_mode(self, mode: str) -> None:
+        """Show one ray layer: "lines", "beam" or "spectrum"."""
+        self._ray_mode = mode
+        for name, lines in self._ray_groups.items():
+            for line in lines:
+                line.visible = name == mode
+        self.canvas.update()
+
+    def set_beam_mode(self, on: bool) -> None:  # backward compat
+        self.set_ray_mode("beam" if on else "lines")
 
     # -- display ---------------------------------------------------------
     def frame(self) -> None:
@@ -291,4 +435,4 @@ class Viewer3D:
         app.run()
 
 
-__all__ = ["lathe", "lathe_solid", "Viewer3D", "MIRROR_COLOR"]
+__all__ = ["lathe", "lathe_solid", "Viewer3D", "MIRROR_COLOR", "spectral_rgb"]
