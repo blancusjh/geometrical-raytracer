@@ -345,6 +345,21 @@ class Viewer3D:
         if mode == "spectrum" and wavelengths_nm is None:
             wavelengths_nm = (633.0, 532.0, 473.0)
 
+        # Display cap for additive beams: beyond ~30k rays/field every beam
+        # pixel is already covered many times over (no visual gain), and the
+        # per-ray energy would drop below the 8-bit framebuffer quantum
+        # (1/255) and vanish. Clamp the sampling, visually equivalent.
+        MAX_BEAM_RAYS = 30_000
+        if mode in ("beam", "spectrum") and radial * azimuth > MAX_BEAM_RAYS:
+            import math
+
+            f = math.sqrt(MAX_BEAM_RAYS / (radial * azimuth))
+            radial = max(4, int(radial * f))
+            azimuth = max(16, int(azimuth * f))
+            print(f"[gl3d] {mode}: muestreo recortado a {radial * azimuth:,} "
+                  "rayos/campo (tope de display; visualmente equivalente)",
+                  flush=True)
+
         for k, field_y in enumerate(fields):
             pupil = trace_pupil(
                 tracer, FieldPoint(y=float(field_y)), na_object_sine=na_object_sine,
@@ -358,9 +373,11 @@ class Viewer3D:
                 n_rays = max(int(pupil.valid.sum()), 1)
                 # Denser sampling spreads the same energy over more pixels;
                 # compensate sublinearly so the beam keeps its brightness
-                # regardless of density (calibrated at ~1400 rays/field).
+                # regardless of density (calibrated at ~1400 rays/field), and
+                # never let a ray fall below the 8-bit additive quantum.
                 density_boost = max(1.0, n_rays / 1400.0) ** 0.75
-                rgb = spectral_rgb(wl) * (beam_energy * density_boost / n_rays)
+                energy = max(beam_energy * density_boost / n_rays, 1.6 / 255.0)
+                rgb = spectral_rgb(wl) * energy
                 self.add_paths(paths, color=(*rgb.tolist(), 1.0), width=1.0,
                                group=mode, additive=True)
             else:

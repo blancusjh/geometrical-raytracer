@@ -34,10 +34,11 @@ FIELDS = [56.0, 62.0, 67.0]
 NA_OBJECT = 0.30
 
 # Beam-density multiplier. The additive beam/spectrum modes get smoother and
-# more continuous with more rays (cost: ~N² rays -> N=3 is already very dense).
-# The *lines* mode stays at fixed sampling: individual alpha traces only turn
-# into spaghetti when multiplied.
-N = 3
+# more continuous with more rays (cost: ~N² rays). The viewer clamps the drawn
+# beam to ~30k rays/field (display cap, visually equivalent beyond that), so
+# large N stays fast and the beam never quantizes to invisible. The *lines*
+# mode stays at fixed sampling: multiplied alpha traces only turn to spaghetti.
+N = 10
 LINES_SAMPLING = dict(radial=6, azimuth=48)
 BEAM_SAMPLING = dict(radial=14 * N, azimuth=96 * N)
 
