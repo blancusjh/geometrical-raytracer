@@ -92,4 +92,105 @@ class ParallelSource2D(Source2D):
         return seeds
 
 
-__all__ = ["RaySeed", "Source2D", "PointSource2D", "ParallelSource2D"]
+@dataclass
+class ImageSource2D(Source2D):
+    """Extended object: a 1-D intensity profile emitting weighted ray fans.
+
+    Each pixel of *profile* becomes a point emitter on the segment
+    ``p0 -> p1`` whose rays carry the pixel intensity. Tracing through a
+    system and histogramming a :class:`~raytracer.nonseq.detectors.Screen2D`
+    reconstructs the (magnified, inverted) geometric image of the profile.
+    """
+
+    profile: np.ndarray
+    p0: np.ndarray
+    p1: np.ndarray
+    axis_direction: np.ndarray
+    aperture: float
+    rays_per_point: int = 15
+    intensity_threshold: float = 1e-3
+    wavelength_um: Optional[float] = None
+
+    @classmethod
+    def from_image(
+        cls,
+        path,
+        *,
+        p0,
+        p1,
+        axis_direction,
+        aperture: float,
+        rays_per_point: int = 15,
+        column: int | None = None,
+        pixels: int | None = None,
+    ) -> "ImageSource2D":
+        """Build the profile from an image file (grayscale mean or a column)."""
+
+        import matplotlib.image as mpimg
+
+        raw = mpimg.imread(path)
+        if raw.ndim == 3:
+            raw = raw[..., :3].mean(axis=2)
+        raw = np.asarray(raw, dtype=float)
+        if raw.max() > 1.0:
+            raw = raw / 255.0
+        profile = raw[:, column] if column is not None else raw.mean(axis=1)
+        profile = profile[::-1]  # image row 0 is at the top; segment runs p0->p1
+        if pixels is not None and pixels != profile.size:
+            positions = np.linspace(0.0, 1.0, profile.size)
+            wanted = np.linspace(0.0, 1.0, pixels)
+            profile = np.interp(wanted, positions, profile)
+        peak = profile.max()
+        if peak > 0:
+            profile = profile / peak
+        return cls(
+            profile=profile,
+            p0=np.asarray(p0, dtype=float),
+            p1=np.asarray(p1, dtype=float),
+            axis_direction=np.asarray(axis_direction, dtype=float),
+            aperture=aperture,
+            rays_per_point=rays_per_point,
+        )
+
+    @property
+    def samples(self) -> int:  # total emitted rays (Source2D contract)
+        return int(np.count_nonzero(self.profile > self.intensity_threshold)) * (
+            self.rays_per_point
+        )
+
+    def emit(self) -> List[RaySeed]:
+        profile = np.asarray(self.profile, dtype=float)
+        p0 = np.asarray(self.p0, dtype=float)
+        p1 = np.asarray(self.p1, dtype=float)
+        axis = normalize(self.axis_direction)
+        base_angle = float(np.arctan2(axis[1], axis[0]))
+        half = float(self.aperture) / 2.0
+        thetas = np.linspace(-half, half, self.rays_per_point)
+
+        seeds: List[RaySeed] = []
+        positions = np.linspace(0.0, 1.0, profile.size)
+        for fraction, intensity in zip(positions, profile):
+            if intensity <= self.intensity_threshold:
+                continue
+            origin = p0 + fraction * (p1 - p0)
+            for offset in thetas:
+                angle = base_angle + offset
+                seeds.append(
+                    RaySeed(
+                        origin=origin.copy(),
+                        direction=np.array([np.cos(angle), np.sin(angle)]),
+                        intensity=float(intensity) / self.rays_per_point,
+                        wavelength_um=self.wavelength_um,
+                        params={"pixel_fraction": float(fraction)},
+                    )
+                )
+        return seeds
+
+
+__all__ = [
+    "RaySeed",
+    "Source2D",
+    "PointSource2D",
+    "ParallelSource2D",
+    "ImageSource2D",
+]
