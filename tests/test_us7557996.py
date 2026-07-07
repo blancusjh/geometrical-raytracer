@@ -86,6 +86,46 @@ def test_pupil_na_and_ray_count(tracer):
 
 
 @pytest.mark.slow
+def test_zernike_regression(tracer):
+    # Reference: RMS excluding tilt 21.0048 nm; after tilt/defocus removal 0.5089 nm.
+    from raytracer.analysis import fit_transverse
+
+    pupil = trace_pupil(
+        tracer,
+        FieldPoint(y=62.0),
+        na_object_sine=NA_IMAGE / REDUCTION,
+        sampling=PupilSampling(kind="rings", radial=12, azimuth=72),
+    )
+    expansion = fit_transverse(
+        pupil,
+        na_image=NA_IMAGE,
+        n_image=tracer.system.n_image,
+        wavelength_mm=tracer.system.wavelength_um * 1e-3,
+        max_order=6,
+    )
+    assert expansion.rms_no_tilt_nm == pytest.approx(21.0048, rel=1e-2)
+    assert expansion.rms_refocused_nm == pytest.approx(0.5089, rel=1e-2)
+
+
+@pytest.mark.slow
+def test_field_metrics_regression(tracer):
+    from raytracer.analysis import field_metrics
+
+    metrics = field_metrics(
+        tracer,
+        [56.0, 62.0, 67.0],
+        na_object_sine=NA_IMAGE / REDUCTION,
+        magnification=1.0 / REDUCTION,
+    )
+    # Reference EE80 radii: 0.11107, 0.10535, 0.10324 um.
+    expected_ee80 = [0.11107446, 0.10534665, 0.10324211]
+    expected_ts = [-1.161959e-05, -1.0508084e-05, -1.1919436e-05]
+    for row, ee80, ts in zip(metrics, expected_ee80, expected_ts):
+        assert row["ee80_radius_um"] == pytest.approx(ee80, rel=5e-3)
+        assert row["astigmatic_separation_mm"] == pytest.approx(ts, rel=2e-2)
+
+
+@pytest.mark.slow
 def test_rms_spot_radius_in_reference_band(tracer):
     # Reference RMS spot radii: 0.0922, 0.0862, 0.0812 um at the three fields.
     expected = {56.0: 0.092218766, 62.0: 0.086225812, 67.0: 0.081181224}

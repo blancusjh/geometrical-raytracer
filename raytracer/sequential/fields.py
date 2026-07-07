@@ -113,12 +113,17 @@ class PupilSampling:
     radial: int = 10
     azimuth: int = 48
     n: int = 81
+    rmax: float = 1.0
+    adaptive: bool = False  # azimuth count proportional to ring radius (EUV layout)
 
     def points(self) -> np.ndarray:
         if self.kind == "rings":
             pts = []
-            for r in np.linspace(0.0, 1.0, self.radial):
-                count = 1 if r == 0.0 else self.azimuth
+            for r in np.linspace(0.0, self.rmax, self.radial):
+                if self.adaptive:
+                    count = max(1, int(round(self.azimuth * r)))
+                else:
+                    count = 1 if r == 0.0 else self.azimuth
                 for az in np.linspace(0.0, 2.0 * np.pi, count, endpoint=False):
                     pts.append((r * np.cos(az), r * np.sin(az)))
             return np.asarray(pts)
@@ -139,10 +144,11 @@ class PupilSampling:
         """Per-sample pupil-area weights (normalized to unit sum)."""
 
         points = self.points() if points is None else points
-        if self.kind == "rings":
+        if self.kind == "rings" and not self.adaptive:
             r = np.hypot(points[:, 0], points[:, 1])
             weights = np.maximum(r, 0.5 / (self.radial - 1))
         else:
+            # Adaptive rings sample the disk near-uniformly; grids are uniform.
             weights = np.ones(points.shape[0])
         return weights / weights.sum()
 
