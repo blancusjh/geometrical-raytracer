@@ -331,6 +331,9 @@ class OpenGLViewer(app.Canvas):
 
     def run(self) -> None:
         self.show()
+        from .._window import announce_window
+
+        announce_window(self, "[raytracer GL]")
         app.run()
 
     def close(self) -> None:  # pragma: no cover - passthrough

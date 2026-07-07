@@ -95,6 +95,7 @@ def lens_outline(system, i, j, samples=220):
 
 
 def build_viewer():
+    print("[duv_2d_gl] Cargando prescripción y trazando 363 rayos exactos...", flush=True)
     csv = resources.files("raytracer") / "data" / "US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
     tracer = SequentialTracer(system)
@@ -172,6 +173,8 @@ def main():
         mpimg.imsave(out, viewer.snapshot())
         print(f"wrote {out}")
         return
+    print("[duv_2d_gl] Abriendo ventana — arrastra para panear, rueda para zoom.",
+          flush=True)
     viewer.run()
 
 

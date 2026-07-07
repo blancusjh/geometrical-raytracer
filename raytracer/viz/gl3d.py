@@ -356,7 +356,11 @@ class Viewer3D:
                 wl = (wavelength_nm if mode == "beam"
                       else float(wavelengths_nm[k % len(wavelengths_nm)]))
                 n_rays = max(int(pupil.valid.sum()), 1)
-                rgb = spectral_rgb(wl) * (beam_energy / n_rays)
+                # Denser sampling spreads the same energy over more pixels;
+                # compensate sublinearly so the beam keeps its brightness
+                # regardless of density (calibrated at ~1400 rays/field).
+                density_boost = max(1.0, n_rays / 1400.0) ** 0.75
+                rgb = spectral_rgb(wl) * (beam_energy * density_boost / n_rays)
                 self.add_paths(paths, color=(*rgb.tolist(), 1.0), width=1.0,
                                group=mode, additive=True)
             else:
@@ -432,6 +436,9 @@ class Viewer3D:
 
         self.frame()
         self.canvas.show()
+        from ._window import announce_window
+
+        announce_window(self.canvas, "[raytracer 3D]")
         app.run()
 
 

@@ -33,8 +33,30 @@ from raytracer.viz.gl3d import Viewer3D
 FIELDS = [56.0, 62.0, 67.0]
 NA_OBJECT = 0.30
 
+# Beam-density multiplier. The additive beam/spectrum modes get smoother and
+# more continuous with more rays (cost: ~N² rays -> N=3 is already very dense).
+# The *lines* mode stays at fixed sampling: individual alpha traces only turn
+# into spaghetti when multiplied.
+N = 3
+LINES_SAMPLING = dict(radial=6, azimuth=48)
+BEAM_SAMPLING = dict(radial=14 * N, azimuth=96 * N)
+
+
+def _bundle(viewer, tracer, label, sampling, **kw):
+    import time
+
+    n_est = sampling["radial"] * sampling["azimuth"] * len(FIELDS)
+    print(f"[duv_3d] Trazando {label}: ~{n_est:,} rayos...", end=" ", flush=True)
+    if n_est > 200_000:
+        print("(muestreo ENORME, esto puede tardar minutos)", end=" ", flush=True)
+    t0 = time.time()
+    viewer.add_field_bundles(tracer, fields=FIELDS, na_object_sine=NA_OBJECT,
+                             **sampling, **kw)
+    print(f"{time.time() - t0:.1f}s", flush=True)
+
 
 def main() -> None:
+    print("[duv_3d] Cargando prescripción US7557996 (48 superficies)...", flush=True)
     csv = resources.files("raytracer") / "data" / "US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
     tracer = SequentialTracer(system)
@@ -42,20 +64,12 @@ def main() -> None:
 
     viewer = Viewer3D(title="US7557996 — 3D   [m] lines/beam/spectrum  [w] wireframe")
     viewer.add_system(system)
-    # mode 1: colored line traces (no color summing)
-    viewer.add_field_bundles(
-        tracer, fields=FIELDS, na_object_sine=NA_OBJECT, radial=6, azimuth=48
-    )
-    # mode 2: additive violet beam at the DUV wavelength
-    viewer.add_field_bundles(
-        tracer, fields=FIELDS, na_object_sine=NA_OBJECT, radial=14, azimuth=96,
-        mode="beam",
-    )
-    # mode 3: one wavelength per field, colorimetric additive mixing
-    viewer.add_field_bundles(
-        tracer, fields=FIELDS, na_object_sine=NA_OBJECT, radial=14, azimuth=96,
-        mode="spectrum",
-    )
+    _bundle(viewer, tracer, "modo lines", LINES_SAMPLING)
+    _bundle(viewer, tracer, "modo beam (aditivo violeta)", BEAM_SAMPLING, mode="beam")
+    _bundle(viewer, tracer, "modo spectrum (colorimétrico)", BEAM_SAMPLING,
+            mode="spectrum")
+    print("[duv_3d] Abriendo ventana — [m] cambia modo de rayos, [w] wireframe,"
+          " arrastra para orbitar.", flush=True)
     if "--beam" in sys.argv:
         viewer.set_ray_mode("beam")
     elif "--spectrum" in sys.argv:
