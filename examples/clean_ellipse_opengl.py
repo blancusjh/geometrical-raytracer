@@ -44,8 +44,8 @@ def main() -> None:
     ellipse, tree, source = build_scene(samples=500)
 
     render_config = RenderConfig(
-        ray_width=0.010,
-        sigma_factor=0.01,
+        ray_width=0.005,
+        sigma_factor=0.015,
         accumulation_mode="squared",
         default_intensity=0.05,
         weight_scale=1.0,

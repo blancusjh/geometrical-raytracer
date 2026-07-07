@@ -1,90 +1,75 @@
 # RayTracer
 
-RayTracer is a small 2D ray-tracing toolkit for exploring classical dioptrics. It focuses on constructive ray geometry rather than photorealistic rendering, making it handy for experimenting with reflective conics, Cartesian ovoids, and stigmatic singlets.
+A compact 2-D ray-tracing toolkit for exploring reflection and refraction on conic surfaces. The package keeps only the essentials: analytic conics, Snell's law, a breadth-first ray tracer, and an OpenGL viewer for visualising ray trees.
 
-## Highlights
+## Features
 
-- Breadth-first ray tree with explicit generation labels and branching for reflection/refraction (`raytracer/tracer.py`).
-- Catalog of analytic surfaces: conics (ellipse, parabola, circle) plus parametric Cartesian dioptriques and matched singlets (`raytracer/geometry.py`, `raytracer/dioptrics.py`).
-- Source primitives for point and parallel emitters with simple fan/aperture sampling (`raytracer/sources.py`).
-- Lightweight VisPy viewer that batches all surfaces/rays for interactive inspection (`raytracer/visualization.py`).
+- Geometric conics (ellipse, parabola, circle, hyperbola) with optional rotation and refractive indices (`raytracer/geometry.py`).
+- Basic optical laws (Snell's law, reflect, refract) implemented on top of unit-vector helpers (`raytracer/physics.py`, `raytracer/rays.py`).
+- Straightforward 2-D tracer that branches into reflected and refracted rays while carrying the active medium index (`raytracer/tracer.py`).
+- Lightweight VisPy/OpenGL viewer that draws surfaces and ray trees with adjustable accumulation (`raytracer/visualization_opengl.py`).
+- Simple point and parallel sources for seeding ray fans (`raytracer/sources.py`).
 
-## Getting Started
+## Requirements
 
-### Dependencies
-
-The core library only requires NumPy. Running the interactive examples additionally needs VisPy. Install everything into your environment:
+The minimal runtime dependency is NumPy. The OpenGL viewer and example scripts additionally require VisPy:
 
 ```bash
-pip install -r requirements.txt  # if you have one
-# or manually
 pip install numpy vispy
 ```
 
-### Running Examples
+## Quick Start
 
-Ready-made demonstrations live in `examples/`:
+```python
+import numpy as np
 
-- `ellipse_depth5.py` – launches rays from one focus of an elliptical mirror and shows five internal reflections converging on the conjugate focus.
-- `cartesian_dioptrique_focus.py` – traces refraction through a single Cartesian dioptrique from object distance `z0` to image distance `zi`.
-- `cartesian_singlet_focus.py` – combines two matched Cartesian dioptriques into a stigmatic singlet, highlighting the object, intermediate, and final focal points.
-- `high_aperture_singlet.py` – fires a wide (≈40°) fan of rays into a thick Cartesian singlet so you can inspect non-paraxial behaviour. Try `Scene2DViewer(line_method="agg")` for anti-aliased segments.
+from raytracer.geometry import EllipseConic
+from raytracer.sources import PointSource2D
+from raytracer.tracer import RayTracer2D, TraceConfig
+from raytracer.visualization_opengl import OpenGLViewer
 
-Execute an example with:
+mirror = EllipseConic(semi_major=4.0, semi_minor=2.5)
+source = PointSource2D(
+    origin=np.array([0.0, 0.1]),
+    axis_direction=np.array([-1.0, 0.0]),
+    aperture=np.deg2rad(60.0),
+    samples=200,
+)
 
-```bash
-python examples/ellipse_depth5.py
+tree = RayTracer2D([mirror], TraceConfig(max_generations=3)).trace([source])
+
+viewer = OpenGLViewer(x_lims=(-8, 2), y_lims=(-4, 4))
+viewer.draw_surfaces([mirror])
+viewer.draw_rays(tree)
+viewer.run()
 ```
 
-The VisPy window supports pan/zoom via mouse interactions. Pass `extend_mode="axis"` to `Scene2DViewer.draw_rays` when you want each refracted branch to continue until it crosses the optical axis. For a crisper look, initialise the viewer with `line_method="agg"` (anti-aliased software rendering) or stick with the default `"gl"` renderer for speed.
-
-### Programmatic Use
-
-The typical workflow is:
-
-1. Build surfaces (mirrors or dioptriques) and supply their refractive indices.
-2. Configure sources that emit seed rays.
-3. Instantiate `RayTracer2D` with a `TraceConfig` specifying max generations and whether to enable reflection/refraction.
-4. Call `trace([sources...])` to obtain a `RayTree` describing every segment.
-5. Feed the tree to your analyser/visualiser of choice.
-
-The tracer automatically flips surface normals based on incident direction and carries medium indices through each branch (`Gamma_k0` for reflections, `Gamma_k1` for refractions).
-
-### Working With Cartesian Surfaces
-
-`raytracer/dioptrics.py` exposes two main helpers:
-
-- `CartesianDioptrique` – constructs a single surface from conjugate distances `(z0, zi)` and refractive pair `(n0, ni)`. You can provide either `rho_max` or an `aperture_radius`; it will numerically determine the appropriate profile and expose a polyline for tracing/visualisation.
-- `CartesianSinglet` – wraps two compatible Cartesian dioptriques separated by a specified thickness, producing a matched front/back pair for lens studies.
-
-Both are discretised into polylines, so increasing `samples` tightens accuracy for large apertures.
-
-### Offline Renders
-
-Run `python scripts/render_snapshots.py` to export reference images (both GL and AGG line rendering) into the `renders/` directory. The helper uses the new `Scene2DViewer.save()` API, so feel free to adapt it for your own scenes.
+A runnable version of this demo lives in `examples/clean_ellipse_opengl.py`.
 
 ## Repository Layout
 
 ```
 raytracer/
-  dioptrics.py        # Cartesian dioptriques, singlet helper, sigma utilities
-  geometry.py         # Conics and generic surface base class
-  physics.py          # Reflection/refraction laws
-  sources.py          # Point and parallel ray emitters
-  tracer.py           # Breadth-first tracer with media support
-  visualization.py    # Batched VisPy viewer for 2D scenes
+  __init__.py             # Public-facing re-exports
+  geometry.py             # Conic sections and local-frame helpers
+  physics.py              # Snell's law, reflect, refract
+  rays.py                 # Core ray primitives and genealogy helpers
+  sources.py              # Point and parallel 2-D emitters
+  surfaces.py             # Surface base class and local frame utilities
+  tracer.py               # Breadth-first 2-D tracer
+  visualization_opengl.py # VisPy-based OpenGL viewer
 examples/
-  ellipse_depth5.py
-  cartesian_dioptrique_focus.py
-  cartesian_singlet_focus.py
+  clean_ellipse_opengl.py # Minimal reflective ellipse demo
+  conic_showcase.py       # General/hyperbola/parabola/sphere showcase
+  refractive_sphere.py    # Parallel rays refracting through a glass circle
 ```
 
-## Development Notes
+## Notes
 
-- The project currently has no automated test suite; when modifying tracing logic, consider scripting quick numerical checks similar to the ones used during development (see inline comments in the examples).
-- The repository runs without git metadata in the provided environment; if you plan to contribute, initialise a repository and add a dependency specification (`requirements.txt` or `pyproject.toml`).
-- VisPy raises a `ModuleNotFoundError` if not installed. To avoid blocking environments without GUI support, gate imports or provide headless fallbacks when integrating into larger toolchains.
+- The codebase intentionally avoids additional abstractions; extensions (e.g., custom sources or surfaces) can subclass `Surface2D` or emit bespoke `RaySeed` batches.
+- When modelling refractive interfaces, set `n_exterior`/`n_interior` on the surface so the tracer knows which medium to enter.
+- The repository does not ship with an automated test suite. Run the example or craft small numerical checks when adjusting the tracer logic.
 
 ## License
 
-No explicit license file is present. Treat the code as private unless the project owner specifies otherwise.
+No explicit license file is provided; treat the project as private unless stated otherwise by the owner.

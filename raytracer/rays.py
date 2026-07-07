@@ -1,156 +1,87 @@
-"""Core ray data structures and genealogy utilities (dimension agnostic)."""
+"""Minimal 2-D ray primitives and genealogy helpers."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from itertools import count
-from typing import Dict, Iterable, Optional, TYPE_CHECKING
+from typing import Dict, Iterable, Optional
 
 import numpy as np
 from numpy.typing import ArrayLike
 
-if TYPE_CHECKING:
-    from .surfaces import SurfaceND  # pragma: no cover - imported lazily
-
 EPS = 1e-9
 
 
-def _as_vector(vec: ArrayLike, *, dim: int | None = None) -> np.ndarray:
-    """Return *vec* coerced to a 1-D float array, optionally enforcing dimension."""
+def _as_vector(vec: ArrayLike, *, dim: int = 2) -> np.ndarray:
+    """Return *vec* coerced to a 1-D float array of length ``dim``."""
 
     arr = np.asarray(vec, dtype=float)
-    if arr.ndim != 1:
-        raise ValueError("Expected a 1-D vector.")
-    if dim is not None and arr.shape[0] != dim:
-        raise ValueError(f"Expected vector of length {dim}, got {arr.shape[0]}")
+    if arr.ndim != 1 or arr.shape[0] != dim:
+        raise ValueError(f"Expected vector of length {dim}, got shape {arr.shape}")
     return arr
 
 
 def normalize(vec: ArrayLike, eps: float = EPS) -> np.ndarray:
-    """Return the unit version of *vec*, raising for near-zero vectors."""
+    """Return the unit direction associated with *vec*."""
 
-    arr = _as_vector(vec)
+    arr = np.asarray(vec, dtype=float)
     mag = np.linalg.norm(arr)
     if mag <= eps:
-        raise ValueError("Cannot normalize zero-length vector.")
+        raise ValueError("Cannot normalize a zero-length vector.")
     return arr / mag
 
 
 @dataclass
-class RayND:
-    """Half-line defined by origin and direction in arbitrary dimension."""
+class Ray2D:
+    """Half-line defined by a 2-D origin and unit direction."""
 
     origin: ArrayLike
     direction: ArrayLike
 
     def __post_init__(self) -> None:
-        origin = _as_vector(self.origin)
-        direction = normalize(self.direction)
-        if origin.shape != direction.shape:
-            raise ValueError("Origin and direction must share the same dimensionality.")
-        self.origin = origin
-        self.direction = direction
-
-    @property
-    def dimension(self) -> int:
-        return self.origin.shape[0]
+        self.origin = _as_vector(self.origin, dim=2)
+        self.direction = normalize(self.direction)
 
     def point_at(self, lam: float) -> np.ndarray:
-        """Return the position along the ray at parameter *lam*."""
-
-        return self.origin + lam * self.direction
-
-
-class Ray2D(RayND):
-    """2-D specialisation of :class:`RayND`."""
-
-    def __init__(self, origin: ArrayLike, direction: ArrayLike) -> None:
-        super().__init__(origin=origin, direction=direction)
-        if self.dimension != 2:
-            raise ValueError("Ray2D requires vectors of length 2.")
-
-
-class Ray3D(RayND):
-    """3-D specialisation of :class:`RayND`."""
-
-    def __init__(self, origin: ArrayLike, direction: ArrayLike) -> None:
-        super().__init__(origin=origin, direction=direction)
-        if self.dimension != 3:
-            raise ValueError("Ray3D requires vectors of length 3.")
-
-
-def direction_from_angles(theta: float, phi: float | None = None) -> np.ndarray:
-    """Return a unit direction vector for polar/spherical coordinates."""
-
-    theta = float(theta)
-    if phi is None:
-        return np.array([np.cos(theta), np.sin(theta)], dtype=float)
-    phi = float(phi)
-    sin_theta = np.sin(theta)
-    return np.array(
-        [
-            sin_theta * np.cos(phi),
-            sin_theta * np.sin(phi),
-            np.cos(theta),
-        ],
-        dtype=float,
-    )
-
-
-def ray_from_angles(origin: ArrayLike, theta: float, phi: float | None = None) -> RayND:
-    """Convenience constructor that builds a ray from angular coordinates."""
-
-    if phi is None:
-        return Ray2D(origin=origin, direction=direction_from_angles(theta))
-    return Ray3D(origin=origin, direction=direction_from_angles(theta, phi))
+        return self.origin + float(lam) * self.direction
 
 
 @dataclass
-class IntersectionND:
-    """Hit record storing the location, normal and distance along the ray."""
+class Intersection2D:
+    """Hit record storing the intersection between a ray and a surface."""
 
     point: ArrayLike
     normal: ArrayLike
     distance: float
     surface_id: str
-    parameters: np.ndarray | None = None
-    meta: Dict[str, float] = field(default_factory=dict)
-    surface: "SurfaceND | None" = None
+    parameters: Optional[np.ndarray] = None
+    surface: object | None = None
+    meta: Optional[Dict[str, float]] = None
 
     def __post_init__(self) -> None:
-        point = _as_vector(self.point)
-        normal = normalize(self.normal)
-        if point.shape != normal.shape:
-            raise ValueError("Point and normal must share the same dimensionality.")
+        self.point = _as_vector(self.point, dim=2)
+        self.normal = normalize(self.normal)
         if self.parameters is not None:
-            self.parameters = _as_vector(self.parameters)
-        self.point = point
-        self.normal = normal
-
-    @property
-    def dimension(self) -> int:
-        return self.point.shape[0]
-
-
-Intersection2D = IntersectionND
-Intersection3D = IntersectionND
+            self.parameters = np.asarray(self.parameters, dtype=float)
+        if self.meta is None:
+            self.meta = {}
 
 
 @dataclass
 class RayNode:
-    """Node inside a ray genealogy tree."""
+    """Node inside a simple ray genealogy tree."""
 
     label: str
-    ray: RayND
+    ray: Ray2D
     parent_label: Optional[str]
     generation: int
-    intersection: Optional[IntersectionND] = None
+    medium_n: float
+    intersection: Optional[Intersection2D] = None
     children: list[str] = field(default_factory=list)
-    medium_n: float = 1.0
 
 
 class RayTree:
-    """Container mapping ray labels to nodes while preserving ancestry."""
+    """Container that stores traced rays by label."""
 
     def __init__(self) -> None:
         self._nodes: Dict[str, RayNode] = {}
@@ -173,20 +104,38 @@ class RayTree:
 
 
 class RayLabeler:
-    """Utility to assign stable unique labels to rays."""
+    """Utility producing readable, unique ray labels."""
 
     def __init__(self) -> None:
         self._counter = count(1)
 
-    def _next_label(self) -> str:
+    def new_primary(self) -> str:
         return f"ray_{next(self._counter)}"
 
-    def new_primary(self) -> str:
-        return self._next_label()
-
-    def child(self, parent_label: str, branch_index: int) -> str:
-        return self._next_label()
+    def child(self, parent_label: str) -> str:
+        return f"{parent_label}.{next(self._counter)}"
 
 
-# Backwards compatibility re-exports for existing 2-D focused modules.
-Ray = Ray2D
+def direction_from_angle(theta: float) -> np.ndarray:
+    """Return a unit direction given a polar angle in radians."""
+
+    theta = float(theta)
+    return np.array([np.cos(theta), np.sin(theta)], dtype=float)
+
+
+def ray_from_angle(origin: ArrayLike, theta: float) -> Ray2D:
+    """Convenience helper that spawns a ray from an origin and angle."""
+
+    return Ray2D(origin=origin, direction=direction_from_angle(theta))
+
+
+__all__ = [
+    "Ray2D",
+    "Intersection2D",
+    "RayNode",
+    "RayTree",
+    "RayLabeler",
+    "normalize",
+    "direction_from_angle",
+    "ray_from_angle",
+]

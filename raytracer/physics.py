@@ -1,4 +1,4 @@
-"""Optical laws for ray-surface interactions (dimension-agnostic)."""
+"""Basic reflection and refraction laws for 2-D ray tracing."""
 
 from __future__ import annotations
 
@@ -10,9 +10,14 @@ import numpy as np
 from .rays import normalize
 
 
+#Fluida es la escritura, cual música de intrumento 
+#empleado con maestría, no cesa este flujo.
+#    OH! Maravillaos. 
+#    Del vacío emerguemos, acá escribimos, acá creamos. 
+
 @dataclass(frozen=True)
-class SnellResult:
-    """Container describing the outcome of applying Snell's law."""
+class SnellResult: # SHIT name. 
+    """Summary of Snell's law for a single ray/surface interaction."""
 
     eta: float
     cos_incident: float
@@ -24,7 +29,7 @@ class SnellResult:
 
 
 def snell(direction: np.ndarray, normal: np.ndarray, n1: float, n2: float) -> SnellResult:
-    """Return cosines for incidence/transmission and the relative index."""
+    """Return Snell's-law parameters for an interface between ``n1`` and ``n2``."""
 
     d = normalize(direction)
     n = normalize(normal)
@@ -38,7 +43,7 @@ def snell(direction: np.ndarray, normal: np.ndarray, n1: float, n2: float) -> Sn
 
 
 def reflect(direction: np.ndarray, normal: np.ndarray) -> np.ndarray:
-    """Return the reflected unit vector for an incident ray."""
+    """Return the reflected unit direction for an incident ray."""
 
     d = normalize(direction)
     n = normalize(normal)
@@ -46,7 +51,7 @@ def reflect(direction: np.ndarray, normal: np.ndarray) -> np.ndarray:
 
 
 def refract(direction: np.ndarray, normal: np.ndarray, n1: float, n2: float) -> np.ndarray | None:
-    """Return refracted unit vector or ``None`` on total internal reflection."""
+    """Return the refracted unit direction, or ``None`` if TIR occurs."""
 
     result = snell(direction, normal, n1, n2)
     if result.total_internal_reflection:
@@ -59,33 +64,4 @@ def refract(direction: np.ndarray, normal: np.ndarray, n1: float, n2: float) -> 
     return normalize(eta * d + (eta * cos_i - cos_t) * n)
 
 
-def fresnel_coefficients(result: SnellResult, n1: float, n2: float) -> tuple[float, float]:
-    """Return the Fresnel reflection coefficients (Rs, Rp).
-
-    The coefficients are returned for s- and p-polarised light respectively.
-    When total internal reflection occurs both values are ``1.0``.
-    """
-
-    if result.total_internal_reflection:
-        return 1.0, 1.0
-
-    cos_i = result.cos_incident
-    cos_t = result.cos_transmitted if result.cos_transmitted is not None else 0.0
-    n1 = float(n1)
-    n2 = float(n2)
-
-    rs_num = n1 * cos_i - n2 * cos_t
-    rs_den = n1 * cos_i + n2 * cos_t
-    rp_num = n2 * cos_i - n1 * cos_t
-    rp_den = n2 * cos_i + n1 * cos_t
-
-    rs = (rs_num / rs_den) ** 2 if rs_den != 0.0 else 1.0
-    rp = (rp_num / rp_den) ** 2 if rp_den != 0.0 else 1.0
-    return rs, rp
-
-
-def fresnel_unpolarised(result: SnellResult, n1: float, n2: float) -> float:
-    """Return the unpolarised Fresnel reflectance."""
-
-    rs, rp = fresnel_coefficients(result, n1, n2)
-    return 0.5 * (rs + rp)
+__all__ = ["SnellResult", "snell", "reflect", "refract"]

@@ -1,202 +1,257 @@
-"""Lightweight 2-D OpenGL viewer with quadratic accumulation for ray intensity."""
+
+"""
+visualization_opengl.py
+
+A compact, robust 2-D OpenGL viewer implemented with vispy.gloo.
+This module is backward-compatible with older examples in this repository:
+ - RenderConfig supports ray_width, sigma_factor, accumulation_mode (string), etc.
+ - Public API methods: OpenGLViewer.draw_rays, draw_surfaces, draw_markers,
+   update_visual_params_only, run, close.
+
+No external dependencies beyond numpy and vispy are required.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Literal, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from vispy import app, gloo
 from vispy.color import Color
 
-AccumulationMode = Literal["squared", "alpha"]
+AccumulationMode = str  # expected values: "squared" or "alpha" (legacy) or "none"
 
+
+# ---------------------------
+# Configuration
+# ---------------------------
 
 @dataclass
 class RenderConfig:
-    """Configuration parameters for ray rendering."""
-
+    """Rendering configuration (backwards compatible)."""
     ray_width: float = 0.5
     sigma_factor: float = 0.5
-    accumulation_mode: AccumulationMode = "squared"
+    accumulation_mode: AccumulationMode = "squared"  # "squared" or "alpha" (legacy)
     default_intensity: float = 1.0
     weight_scale: float = 1.0
     min_pixels: float = 1.0
+    use_solid_rays: bool = False
+    # background color accepted by vispy.color.Color
+    background: Sequence[float] | str = "black"
 
-RAY_VERT = "\n".join(
-    [
-        "#ifdef GL_ES",
-        "precision highp float;",
-        "precision mediump int;",
-        "#endif",
-        "",
-        "attribute vec2 a_corner;",
-        "attribute vec2 a_start;",
-        "attribute vec2 a_end;",
-        "attribute float a_width;",
-        "attribute float a_sigma;",
-        "attribute float a_intensity;",
-        "attribute vec4 a_color;",
-        "",
-        "uniform vec2 u_viewport;",
-        "uniform vec2 u_screen_offset;",
-        "uniform vec2 u_screen_scale;",
-        "",
-        "varying vec2 v_start;",
-        "varying vec2 v_end;",
-        "varying float v_sigma;",
-        "varying float v_intensity;",
-        "varying vec4 v_color;",
-        "varying vec2 v_pos;",
-        "",
-        "void main() {",
-        "    vec2 start_world = a_start;",
-        "    vec2 end_world = a_end;",
-        "    vec2 start_screen = (start_world - u_screen_offset) * u_screen_scale;",
-        "    vec2 end_screen = (end_world - u_screen_offset) * u_screen_scale;",
-        "",
-        "    vec2 dir = end_screen - start_screen;",
-        "    float len = length(dir);",
-        "    if (len < 1e-6) {",
-        "        dir = vec2(1.0, 0.0);",
-        "        len = 1.0;",
-        "    } else {",
-        "        dir = dir / len;",
-        "    }",
-        "    vec2 perp = vec2(-dir.y, dir.x);",
-        "",
-        "    float t = 0.5 * (a_corner.x + 1.0);",
-        "    vec2 along_screen = mix(start_screen, end_screen, t);",
-        "    float geom = max(a_width, 0.5);",
-        "    vec2 pos_screen = along_screen + perp * a_corner.y * geom * 3.0;",
-        "    vec2 pos_ndc = (pos_screen / u_viewport) * 2.0 - 1.0;",
-        "    gl_Position = vec4(pos_ndc, 0.0, 1.0);",
-        "",
-        "    v_start = start_screen;",
-        "    v_end = end_screen;",
-        "    v_sigma = max(a_sigma, 1e-6);",
-        "    v_intensity = a_intensity;",
-        "    v_color = a_color;",
-        "    v_pos = pos_screen;",
-        "}",
-    ]
-) + "\n"
 
-RAY_FRAG = "\n".join(
-    [
-        "#ifdef GL_ES",
-        "precision highp float;",
-        "precision mediump int;",
-        "#endif",
-        "varying vec2 v_start;",
-        "varying vec2 v_end;",
-        "varying float v_sigma;",
-        "varying float v_intensity;",
-        "varying vec4 v_color;",
-        "varying vec2 v_pos;",
-        "uniform int u_accum_mode;",
-        "uniform float u_weight_scale;",
-        "float point_to_segment_dist(vec2 p, vec2 a, vec2 b) {",
-        "    vec2 pa = p - a;",
-        "    vec2 ba = b - a;",
-        "    float denom = dot(ba, ba);",
-        "    if (denom < 1e-12) {",
-        "        return length(pa);",
-        "    }",
-        "    float h = clamp(dot(pa, ba) / denom, 0.0, 1.0);",
-        "    return length(pa - ba * h);",
-        "}",
-        "void main() {",
-        "    float dist = point_to_segment_dist(v_pos, v_start, v_end);",
-        "    float sigma = v_sigma;",
-        "    float gaussian = exp(-(dist * dist) / (sigma * sigma));",
-        "    if (gaussian < 1e-4) {",
-        "        discard;",
-        "    }",
-        "    float weight = clamp(v_color.a * u_weight_scale, 0.0, 10.0);",
-        "    float I = weight * v_intensity * gaussian;",
-        "    if (u_accum_mode == 0) {",
-        "        float rootI = sqrt(I);",
-        "        gl_FragColor = vec4(v_color.rgb * rootI, rootI);",
-        "    } else {",
-        "        float alpha = clamp(I, 0.0, 1.0);",
-        "        gl_FragColor = vec4(v_color.rgb * I, alpha);",
-        "    }",
-        "}",
-    ]
-) + "\n"
+# ---------------------------
+# Shaders
+# ---------------------------
 
-LINE_VERT = "\n".join(
-    [
-        "#ifdef GL_ES",
-        "precision highp float;",
-        "precision mediump int;",
-        "#endif",
-        "attribute vec2 a_pos;",
-        "uniform vec2 u_viewport;",
-        "uniform vec2 u_screen_offset;",
-        "uniform vec2 u_screen_scale;",
-        "void main() {",
-        "    vec2 screen = (a_pos - u_screen_offset) * u_screen_scale;",
-        "    vec2 ndc = (screen / u_viewport) * 2.0 - 1.0;",
-        "    gl_Position = vec4(ndc, 0.0, 1.0);",
-        "}",
-    ]
-) + "\n"
+_VERT_PREAMBLE = """
+#ifdef GL_ES
+precision highp float;
+precision mediump int;
+#endif
+uniform vec2 u_viewport;
+uniform vec2 u_screen_offset;
+uniform vec2 u_screen_scale;
+"""
 
-LINE_FRAG = "#ifdef GL_ES\nprecision highp float;\nprecision mediump int;\n#endif\nuniform vec4 u_color;\nvoid main() {\n    gl_FragColor = u_color;\n}\n"
+RAY_VERT = _VERT_PREAMBLE + """
+attribute vec2 a_corner;
+attribute vec2 a_start;
+attribute vec2 a_end;
+attribute float a_width;
+attribute float a_sigma;
+attribute float a_intensity;
+attribute vec4 a_color;
+attribute vec2 a_perp;
 
-MARKER_VERT = "\n".join(
-    [
-        "#ifdef GL_ES",
-        "precision highp float;",
-        "precision mediump int;",
-        "#endif",
-        "attribute vec2 a_pos;",
-        "uniform vec2 u_viewport;",
-        "uniform vec2 u_screen_offset;",
-        "uniform vec2 u_screen_scale;",
-        "uniform float u_point_size;",
-        "void main() {",
-        "    vec2 screen = (a_pos - u_screen_offset) * u_screen_scale;",
-        "    vec2 ndc = (screen / u_viewport) * 2.0 - 1.0;",
-        "    gl_Position = vec4(ndc, 0.0, 1.0);",
-        "    gl_PointSize = u_point_size;",
-        "}",
-    ]
-) + "\n"
+varying vec2 v_start;
+varying vec2 v_end;
+varying float v_sigma;
+varying float v_intensity;
+varying vec4 v_color;
+varying vec2 v_pos;
 
-MARKER_FRAG = "\n".join(
-    [
-        "#ifdef GL_ES",
-        "precision highp float;",
-        "precision mediump int;",
-        "#endif",
-        "uniform vec4 u_color;",
-        "void main() {",
-        "    vec2 uv = gl_PointCoord * 2.0 - 1.0;",
-        "    float r2 = dot(uv, uv);",
-        "    if (r2 > 1.0) {",
-        "        discard;",
-        "    }",
-        "    float alpha = smoothstep(1.0, 0.6, r2);",
-        "    gl_FragColor = vec4(u_color.rgb, u_color.a * alpha);",
-        "}",
-    ]
-) + "\n"
+void main() {
+    vec2 start_world = a_start;
+    vec2 end_world = a_end;
+    vec2 start_screen = (start_world - u_screen_offset) * u_screen_scale;
+    vec2 end_screen = (end_world - u_screen_offset) * u_screen_scale;
+    vec2 perp = a_perp;
+
+    float t = 0.5 * (a_corner.x + 1.0);
+    vec2 along_screen = mix(start_screen, end_screen, t);
+
+    float half_width = a_width * 0.5;
+    vec2 pos_screen = along_screen + perp * a_corner.y * half_width;
+
+    vec2 pos_ndc = (pos_screen / u_viewport) * 2.0 - 1.0;
+    gl_Position = vec4(pos_ndc, 0.0, 1.0);
+
+    v_start = start_screen;
+    v_end = end_screen;
+    v_sigma = max(a_sigma, 1e-6);
+    v_intensity = a_intensity;
+    v_color = a_color;
+    v_pos = pos_screen;
+}
+"""
+
+RAY_FRAG = """
+#ifdef GL_ES
+precision highp float;
+precision mediump int;
+#endif
+varying vec2 v_start;
+varying vec2 v_end;
+varying float v_sigma;
+varying float v_intensity;
+varying vec4 v_color;
+varying vec2 v_pos;
+uniform int u_accum_mode;
+uniform float u_weight_scale;
+uniform int u_use_solid;
+
+float point_to_segment_dist(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a;
+    vec2 ba = b - a;
+    float denom = dot(ba, ba);
+    if (denom < 1e-12) {
+        return length(pa);
+    }
+    float h = clamp(dot(pa, ba) / denom, 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+void main() {
+    float dist = point_to_segment_dist(v_pos, v_start, v_end);
+    float sigma = v_sigma;
+    float intensity_factor;
+    if (u_use_solid == 1) {
+        if (dist > sigma) {
+            discard;
+        }
+        intensity_factor = 1.0;
+    } else {
+        float gaussian = exp(-(dist * dist) / (sigma * sigma));
+        if (gaussian < 1e-6) {
+            discard;
+        }
+        intensity_factor = gaussian;
+    }
+    float weight = clamp(v_color.a * u_weight_scale, 0.0, 10.0);
+    float I = weight * v_intensity * intensity_factor;
+    if (u_accum_mode == 0) {
+        float rootI = sqrt(I);
+        gl_FragColor = vec4(v_color.rgb * rootI, rootI);
+    } else {
+        float alpha = clamp(I, 0.0, 1.0);
+        gl_FragColor = vec4(v_color.rgb * I, alpha);
+    }
+}
+"""
+
+_LINE_VERT = _VERT_PREAMBLE + """
+attribute vec2 a_pos;
+void main() {
+    vec2 screen = (a_pos - u_screen_offset) * u_screen_scale;
+    vec2 ndc = (screen / u_viewport) * 2.0 - 1.0;
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+"""
+
+_LINE_FRAG = "#ifdef GL_ES\nprecision highp float;\nprecision mediump int;\n#endif\nuniform vec4 u_color;\nvoid main() { gl_FragColor = u_color; }\n"
+
+_MARKER_VERT = _VERT_PREAMBLE + """
+attribute vec2 a_pos;
+uniform float u_point_size;
+attribute vec4 a_color;
+varying vec4 v_color;
+void main() {
+    vec2 screen = (a_pos - u_screen_offset) * u_screen_scale;
+    vec2 ndc = (screen / u_viewport) * 2.0 - 1.0;
+    gl_Position = vec4(ndc, 0.0, 1.0);
+    gl_PointSize = u_point_size;
+    v_color = a_color;
+}
+"""
+
+_MARKER_FRAG = """
+#ifdef GL_ES
+precision highp float;
+precision mediump int;
+#endif
+varying vec4 v_color;
+void main() {
+    vec2 uv = gl_PointCoord * 2.0 - 1.0;
+    float r2 = dot(uv, uv);
+    if (r2 > 1.0) {
+        discard;
+    }
+    float alpha = smoothstep(1.0, 0.6, r2);
+    gl_FragColor = vec4(v_color.rgb, v_color.a * alpha);
+}
+"""
+
+
+# ---------------------------
+# Helpers
+# ---------------------------
+
+def _color_array(color: Sequence[float] | str, count: int) -> np.ndarray:
+    """
+    Convert a color specifier into an (count, 4) float32 RGBA array.
+    Accepts vispy color strings (e.g., "white"), tuples/lists, or per-vertex arrays.
+    """
+    if isinstance(color, str):
+        rgba = np.array(Color(color).rgba, dtype=np.float32)
+        return np.tile(rgba[None, :], (count, 1))
+
+    arr = np.asarray(color, dtype=np.float32)
+    if arr.ndim == 1:
+        if arr.size == 3:
+            arr = np.concatenate([arr, np.array([1.0], dtype=np.float32)])
+        if arr.size != 4:
+            raise ValueError("Color must be RGB or RGBA when provided as a sequence.")
+        return np.tile(arr[None, :], (count, 1))
+
+    if arr.ndim == 2:
+        if arr.shape[0] != count:
+            raise ValueError("Number of colors must match number of points")
+        if arr.shape[1] == 3:
+            alpha = np.ones((count, 1), dtype=np.float32)
+            arr = np.hstack([arr, alpha])
+        elif arr.shape[1] != 4:
+            raise ValueError("Per-vertex colors must have 3 or 4 components")
+        return arr.astype(np.float32)
+
+    raise ValueError("Unsupported color format")
+
+
+def _empty_structured_vertices(dtype: np.dtype) -> np.ndarray:
+    """Return an empty structured array matching dtype (so vispy can bind attributes)."""
+    return np.zeros(0, dtype=dtype)
+
+
+# ---------------------------
+# Renderer wrappers
+# ---------------------------
 
 class RayRenderer:
-    def __init__(self, config: RenderConfig):
+    def __init__(self):
         self.program = gloo.Program(RAY_VERT, RAY_FRAG)
         self.vbo = gloo.VertexBuffer()
-        self.ibo = gloo.IndexBuffer()
+        self.ibo = None
         self._n_indices = 0
-        self.config = config
 
     def set_data(self, vertices: np.ndarray, indices: np.ndarray) -> None:
         self.vbo.set_data(vertices)
-        self.ibo.set_data(indices.astype(np.uint32))
-        self._n_indices = int(indices.size)
+        if indices is None:
+            self.ibo = None
+            self._n_indices = 0
+        else:
+            self.ibo = gloo.IndexBuffer(indices.astype(np.uint32))
+            self._n_indices = int(indices.size)
 
     def draw(
         self,
@@ -205,6 +260,7 @@ class RayRenderer:
         screen_scale: np.ndarray,
         accumulation_mode: AccumulationMode,
         weight_scale: float,
+        use_solid: bool,
     ) -> None:
         if self._n_indices == 0:
             return
@@ -215,6 +271,7 @@ class RayRenderer:
         mode_int = 0 if accumulation_mode == "squared" else 1
         self.program["u_accum_mode"] = int(mode_int)
         self.program["u_weight_scale"] = float(weight_scale)
+        self.program["u_use_solid"] = int(1 if use_solid else 0)
         gloo.set_state(depth_test=False, blend=True)
         if mode_int == 0:
             gloo.set_blend_func('one', 'one')
@@ -225,73 +282,62 @@ class RayRenderer:
 
 class PolylineRenderer:
     def __init__(self):
-        self.program = gloo.Program(LINE_VERT, LINE_FRAG)
+        self.program = gloo.Program(_LINE_VERT, _LINE_FRAG)
         self.vbo = gloo.VertexBuffer()
         self._n_vertices = 0
-        self.color = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)
-        self.width = 1.0
 
-    def set_data(self, points: np.ndarray, color: Sequence[float], width: float) -> None:
+    def set_data(self, points: np.ndarray, color: Sequence[float]) -> None:
         structured = np.zeros(points.shape[0], dtype=[('a_pos', np.float32, 2)])
         structured['a_pos'] = points.astype(np.float32)
         self.vbo.set_data(structured)
         self._n_vertices = int(points.shape[0])
-        self.color = np.array(color, dtype=np.float32)
-        self.width = float(width)
+        self.program['u_color'] = np.array(color, dtype=np.float32)
 
-    def draw(
-        self,
-        viewport: Tuple[int, int],
-        screen_offset: np.ndarray,
-        screen_scale: np.ndarray,
-    ) -> None:
+    def draw(self, viewport: Tuple[int, int], screen_offset: np.ndarray, screen_scale: np.ndarray, width: float) -> None:
         if self._n_vertices == 0:
             return
         self.program.bind(self.vbo)
         self.program["u_viewport"] = np.array(viewport, dtype=np.float32)
         self.program["u_screen_offset"] = screen_offset.astype(np.float32)
         self.program["u_screen_scale"] = screen_scale.astype(np.float32)
-        self.program["u_color"] = self.color
-        gloo.set_state(depth_test=False, blend=False, line_width=self.width)
+        gloo.set_state(depth_test=False, blend=False, line_width=float(width))
         self.program.draw('line_strip')
 
 
 class MarkerRenderer:
     def __init__(self):
-        self.program = gloo.Program(MARKER_VERT, MARKER_FRAG)
+        self.program = gloo.Program(_MARKER_VERT, _MARKER_FRAG)
         self.vbo = gloo.VertexBuffer()
         self._n_points = 0
-        self.color = np.array([0.8, 0.1, 0.1, 1.0], dtype=np.float32)
-        self.size = 6.0
 
-    def set_data(self, points: np.ndarray, color: Sequence[float], size: float) -> None:
-        structured = np.zeros(points.shape[0], dtype=[('a_pos', np.float32, 2)])
+    def set_data(self, points: np.ndarray, colors: np.ndarray, size: float) -> None:
+        count = points.shape[0]
+        structured = np.zeros(count, dtype=[('a_pos', np.float32, 2), ('a_color', np.float32, 4)])
         structured['a_pos'] = points.astype(np.float32)
+        structured['a_color'] = colors.astype(np.float32)
         self.vbo.set_data(structured)
-        self._n_points = int(points.shape[0])
-        self.color = np.array(color, dtype=np.float32)
-        self.size = float(size)
+        self._n_points = int(count)
+        self._size = float(size)
 
-    def draw(
-        self,
-        viewport: Tuple[int, int],
-        screen_offset: np.ndarray,
-        screen_scale: np.ndarray,
-    ) -> None:
+    def draw(self, viewport: Tuple[int, int], screen_offset: np.ndarray, screen_scale: np.ndarray) -> None:
         if self._n_points == 0:
             return
         self.program.bind(self.vbo)
         self.program["u_viewport"] = np.array(viewport, dtype=np.float32)
         self.program["u_screen_offset"] = screen_offset.astype(np.float32)
         self.program["u_screen_scale"] = screen_scale.astype(np.float32)
-        self.program["u_color"] = self.color
-        self.program["u_point_size"] = float(self.size)
+        self.program["u_point_size"] = float(self._size)
         gloo.set_state(depth_test=False, blend=True)
         gloo.set_blend_func('src_alpha', 'one_minus_src_alpha')
         self.program.draw('points')
 
+
+# ---------------------------
+# OpenGLViewer
+# ---------------------------
+
 class OpenGLViewer:
-    """Minimal 2-D OpenGL viewer with quadratic accumulation."""
+    """Minimal, backward-compatible 2-D OpenGL viewer for ray visualization."""
 
     def __init__(
         self,
@@ -318,20 +364,42 @@ class OpenGLViewer:
         self._pan_active = False
         self._last_mouse_pos: Optional[Tuple[float, float]] = None
 
-        self._ray_renderer = RayRenderer(self.render_config)
-        self._surface_renderers: List[PolylineRenderer] = []
+        self._ray_renderer = RayRenderer()
+        self._surface_renderer = PolylineRenderer()
         self._marker_renderer = MarkerRenderer()
 
         self._ray_records: List[Tuple[np.ndarray, np.ndarray, float, np.ndarray]] = []
         self._surface_records: List[Tuple[np.ndarray, np.ndarray, float]] = []
         self._marker_points_world = np.zeros((0, 2), dtype=np.float32)
+        self._marker_colors = np.zeros((0, 4), dtype=np.float32)
+        self._marker_size = 6.0
+
+        # pre-built dtype for rays (keeps structured empties compatible)
+        self._ray_dtype = np.dtype([
+            ("a_corner", np.float32, 2),
+            ("a_start", np.float32, 2),
+            ("a_end", np.float32, 2),
+            ("a_width", np.float32, 1),
+            ("a_sigma", np.float32, 1),
+            ("a_intensity", np.float32, 1),
+            ("a_color", np.float32, 4),
+            ("a_perp", np.float32, 2),
+        ])
 
         if show:
             self.canvas.show()
 
+    # ---------------------------
+    # Event handlers
+    # ---------------------------
+
     def _on_resize(self, event) -> None:
+        prev_viewport = self._viewport
         size = event.size
-        self._viewport = (int(size[0]), int(size[1]))
+        new_viewport = (int(size[0]), int(size[1]))
+
+        self._match_world_scale(prev_viewport, new_viewport)
+        self._viewport = new_viewport
         gloo.set_viewport(0, 0, *self._viewport)
         self._update_all_geometry()
         self.canvas.update()
@@ -340,9 +408,20 @@ class OpenGLViewer:
         gloo.clear(color=self._bgcolor)
         viewport = self._viewport
         screen_offset, screen_scale = self._screen_transform()
-        for renderer in self._surface_renderers:
-            renderer.draw(viewport, screen_offset, screen_scale)
-        self._ray_renderer.draw(viewport, screen_offset, screen_scale, self.render_config.accumulation_mode, self.render_config.weight_scale)
+        # draw surfaces
+        for pts, color_rgba, width in self._surface_records:
+            self._surface_renderer.set_data(pts, color_rgba)
+            self._surface_renderer.draw(viewport, screen_offset, screen_scale, width)
+        # draw rays
+        self._ray_renderer.draw(
+            viewport,
+            screen_offset,
+            screen_scale,
+            self.render_config.accumulation_mode,
+            self.render_config.weight_scale,
+            self.render_config.use_solid_rays,
+        )
+        # draw markers
         self._marker_renderer.draw(viewport, screen_offset, screen_scale)
 
     def _on_mouse_press(self, event) -> None:
@@ -366,17 +445,83 @@ class OpenGLViewer:
         self._pan(dx, dy)
 
     def _on_mouse_wheel(self, event) -> None:
-        scale = 1.1 ** (-event.delta[1])
+        scale = 1.1 ** (event.delta[1])
         self._zoom(scale, event.pos)
 
+    # ---------------------------
+    # Public API: surfaces, rays, markers
+    # ---------------------------
+
     def draw_surfaces(self, surfaces: Iterable, color: str | Sequence[float] = "white", width: float = 2.0) -> None:
+        """
+        Draw surfaces. Preference order:
+         - s.polyline_segments()
+         - s.polyline()
+         - s.points or s.vertices
+         - ellipse-like inference (semi_major / semi_minor + center/focus)
+         - placeholder box (with warning)
+        """
         self._surface_records.clear()
-        rgba = np.array(Color(color).rgba, dtype=np.float32)
-        for surface in surfaces:
-            if hasattr(surface, "polyline_segments"):
-                segments = surface.polyline_segments()
-            else:
-                segments = [surface.polyline()]
+        for s in surfaces:
+            segments = None
+
+            # 1) canonical API from older code
+            if hasattr(s, "polyline_segments"):
+                try:
+                    segments = s.polyline_segments()
+                except Exception:
+                    segments = None
+
+            if segments is None and hasattr(s, "polyline"):
+                try:
+                    poly = s.polyline()
+                    segments = [poly]
+                except Exception:
+                    segments = None
+
+            # 2) direct arrays
+            if segments is None:
+                if hasattr(s, "points"):
+                    try:
+                        segments = [np.asarray(s.points, dtype=np.float32)]
+                    except Exception:
+                        segments = None
+                elif hasattr(s, "vertices"):
+                    try:
+                        segments = [np.asarray(s.vertices, dtype=np.float32)]
+                    except Exception:
+                        segments = None
+
+            # 3) ellipse-like fallback (non-invasive)
+            if segments is None and hasattr(s, "semi_major") and hasattr(s, "semi_minor"):
+                try:
+                    # infer center: prefer center attribute, else try first focus, else origin(0,0)
+                    if hasattr(s, "center"):
+                        center = np.asarray(s.center, dtype=np.float32)
+                    elif hasattr(s, "focus"):
+                        f = getattr(s, "focus")
+                        f_arr = np.asarray(f)
+                        if f_arr.ndim == 1 and f_arr.size >= 2:
+                            center = f_arr[:2]
+                        else:
+                            center = np.array([0.0, 0.0], dtype=np.float32)
+                    else:
+                        center = np.array([0.0, 0.0], dtype=np.float32)
+                    a = float(getattr(s, "semi_major"))
+                    b = float(getattr(s, "semi_minor"))
+                    theta = np.linspace(0.0, 2.0 * np.pi, 240, endpoint=True)
+                    pts = np.column_stack([center[0] + a * np.cos(theta), center[1] + b * np.sin(theta)]).astype(np.float32)
+                    segments = [pts]
+                except Exception:
+                    segments = None
+
+            # 4) final fallback placeholder
+            if segments is None:
+                segments = [np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]], dtype=np.float32)]
+                print(f"[Viewer] Warning: Surface {type(s).__name__} has no drawable geometry — using placeholder box.")
+
+            # normalize, drop z if needed, and append
+            rgba = _color_array(color, 1)[0]
             for seg in segments:
                 pts = np.asarray(seg, dtype=np.float32)
                 if pts.ndim != 2 or pts.shape[0] < 2:
@@ -384,6 +529,7 @@ class OpenGLViewer:
                 if pts.shape[1] == 3:
                     pts = pts[:, :2]
                 self._surface_records.append((pts, rgba, float(width)))
+
         self._rebuild_surface_renderers()
         self.canvas.update()
 
@@ -397,46 +543,88 @@ class OpenGLViewer:
         show_misses: bool = True,
         marker_color: str | Sequence[float] = "crimson",
         marker_size: float = 6.0,
+        leaf_extension: Optional[Callable[[object], Optional[Sequence[float]]]] = None,
     ) -> None:
+        """
+        Accepts a ray 'tree' (iterable of nodes). Each node is expected to have:
+            - node.ray.origin, node.ray.direction  (or node.origin/node.direction)
+            - node.intersection (None for miss) with .point
+            - optional node.children / node.generation
+        This method is compatible with the original examples' tree API.
+        """
         self._ray_records.clear()
         marker_list: List[np.ndarray] = []
 
         default_hit = np.array(Color("white").rgba, dtype=np.float32)
         default_miss = np.array(Color("orange").rgba, dtype=np.float32)
 
-        for node in tree.nodes():
-            start = np.asarray(node.ray.origin[:2], dtype=np.float32)
-            direction = np.asarray(node.ray.direction[:2], dtype=np.float32)
+        # Helper accessors for a node (compatibility with different node shapes)
+        def _get_origin(node):
+            if hasattr(node, "ray") and hasattr(node.ray, "origin"):
+                return np.asarray(node.ray.origin[:2], dtype=np.float32)
+            if hasattr(node, "origin"):
+                return np.asarray(node.origin[:2], dtype=np.float32)
+            raise AttributeError("Node has no origin")
 
-            if node.intersection is None:
+        def _get_direction(node):
+            if hasattr(node, "ray") and hasattr(node.ray, "direction"):
+                return np.asarray(node.ray.direction[:2], dtype=np.float32)
+            if hasattr(node, "direction"):
+                return np.asarray(node.direction[:2], dtype=np.float32)
+            raise AttributeError("Node has no direction")
+
+        for node in tree.nodes():
+            start = _get_origin(node)
+            direction = _get_direction(node)
+
+            if getattr(node, "intersection", None) is None:
                 if not show_misses:
                     continue
                 end = start + direction * float(tail_length)
                 color = default_miss
             else:
-                end = np.asarray(node.intersection.point[:2], dtype=np.float32)
-                color = default_hit
-                marker_list.append(end)
+                # intersection.point expected
+                pt = getattr(node.intersection, "point", None)
+                if pt is None:
+                    end = start + direction * float(tail_length)
+                    color = default_miss
+                else:
+                    end = np.asarray(pt[:2], dtype=np.float32)
+                    color = default_hit
+                    marker_list.append(end)
+
+            # leaf extension hook (non-invasive)
+            if leaf_extension is not None and not getattr(node, "children", []):
+                try:
+                    extended = leaf_extension(node)
+                    if extended is not None:
+                        end = np.asarray(extended[:2], dtype=np.float32)
+                except Exception:
+                    pass
 
             if color_resolver is not None:
-                custom = np.asarray(color_resolver(node), dtype=np.float32)
-                if custom.shape[0] == 3:
-                    custom = np.concatenate([custom, np.array([1.0], dtype=np.float32)])
-                color = custom
+                try:
+                    custom = np.asarray(color_resolver(node), dtype=np.float32)
+                    if custom.size == 3:
+                        custom = np.concatenate([custom, np.array([1.0], dtype=np.float32)])
+                    color = custom
+                except Exception:
+                    # if color_resolver fails, use previous color
+                    pass
 
             base_intensity = float(self.render_config.default_intensity)
-            intensity = float(intensity_resolver(node)) if intensity_resolver else base_intensity
+            intensity = float(intensity_resolver(node)) if (intensity_resolver is not None) else base_intensity
 
             self._ray_records.append((start, end, intensity, color))
 
         self._update_ray_geometry()
 
         if marker_list:
-            self._marker_points_world = np.vstack(marker_list).astype(np.float32)
+            points = np.vstack(marker_list).astype(np.float32)
+            colors = _color_array(marker_color, points.shape[0])
+            self._set_marker_state(points, colors, marker_size)
         else:
-            self._marker_points_world = np.zeros((0, 2), dtype=np.float32)
-
-        self._update_marker_geometry(color=marker_color, size=marker_size)
+            self._set_marker_state(np.zeros((0, 2), dtype=np.float32), np.zeros((0, 4), dtype=np.float32), marker_size)
 
         self.canvas.update()
 
@@ -451,85 +639,128 @@ class OpenGLViewer:
         self.canvas.close()
 
     def clear_markers(self) -> None:
-        self._marker_points_world = np.zeros((0, 2), dtype=np.float32)
-        self._marker_renderer.set_data(self._marker_points_world, np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32), 1.0)
+        self._set_marker_state(np.zeros((0, 2), dtype=np.float32), np.zeros((0, 4), dtype=np.float32), 1.0)
         self.canvas.update()
 
-    def _rebuild_surface_renderers(self) -> None:
-        self._surface_renderers = []
-        if not self._surface_records:
+    def draw_markers(
+        self,
+        points: Sequence[Sequence[float]] | np.ndarray,
+        *,
+        colors: Sequence[Sequence[float]] | Sequence[float] | str = "white",
+        size: float | None = None,
+        append: bool = False,
+    ) -> None:
+        pts = np.asarray(points, dtype=np.float32)
+        if pts.ndim == 1:
+            pts = pts.reshape(1, -1)
+        if pts.shape[1] not in (2, 3):
+            raise ValueError("Marker points must have 2 or 3 components")
+        pts = pts[:, :2]
+
+        count = pts.shape[0]
+        if count == 0:
+            if not append:
+                self.clear_markers()
             return
-        for pts_world, color, width in self._surface_records:
-            renderer = PolylineRenderer()
-            renderer.set_data(pts_world, color, width)
-            self._surface_renderers.append(renderer)
+
+        color_array = _color_array(colors, count)
+
+        if append and self._marker_points_world.size:
+            pts = np.vstack([self._marker_points_world, pts])
+            color_array = np.vstack([self._marker_colors, color_array])
+
+        marker_size = float(size) if size is not None else self._marker_size
+        self._set_marker_state(pts, color_array, marker_size)
+        self.canvas.update()
+
+    # ---------------------------
+    # Geometry construction and updates
+    # ---------------------------
+
+    def _rebuild_surface_renderers(self) -> None:
+        # surfaces are represented as tuples (pts, rgba, width) already
+        # nothing further to do here; they will be drawn on each frame
+        return
 
     def _update_all_geometry(self) -> None:
-        if self._surface_records:
-            self._rebuild_surface_renderers()
+        # surfaces remain as stored; rebuild ray and marker geometry
         if self._ray_records:
             self._update_ray_geometry()
         self._update_marker_geometry()
 
     def _update_ray_geometry(self) -> None:
         if not self._ray_records:
-            self._ray_renderer.set_data(np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.uint32))
+            empty_verts = _empty_structured_vertices(self._ray_dtype)
+            empty_idx = np.zeros(0, dtype=np.uint32)
+            self._ray_renderer.set_data(empty_verts, empty_idx)
             return
 
         n = len(self._ray_records)
-        dtype = np.dtype([
-            ("a_corner", np.float32, 2),
-            ("a_start", np.float32, 2),
-            ("a_end", np.float32, 2),
-            ("a_width", np.float32, 1),
-            ("a_sigma", np.float32, 1),
-            ("a_intensity", np.float32, 1),
-            ("a_color", np.float32, 4),
-        ])
-
         starts = np.array([rec[0] for rec in self._ray_records], dtype=np.float32)
         ends = np.array([rec[1] for rec in self._ray_records], dtype=np.float32)
         intensities = np.array([rec[2] for rec in self._ray_records], dtype=np.float32)
         colors = np.array([rec[3] for rec in self._ray_records], dtype=np.float32)
 
+        # directions (world-space)
         direction = ends - starts
         norms = np.linalg.norm(direction, axis=1)
         safe_norms = np.where(norms < 1e-6, 1.0, norms)
-        direction /= safe_norms[:, None]
+        direction = direction / safe_norms[:, None]
         direction[norms < 1e-6] = np.array([1.0, 0.0], dtype=np.float32)
 
-        perp = np.stack([-direction[:, 1], direction[:, 0]], axis=1)
-        offset_world = perp * float(self.render_config.ray_width)
+        perp_world = np.stack([-direction[:, 1], direction[:, 0]], axis=1)
 
         x0, x1, y0, y1 = self._view_rect
         sx = self._viewport[0] / max(x1 - x0, 1e-6)
         sy = self._viewport[1] / max(y1 - y0, 1e-6)
+
+        offset_world = perp_world * float(self.render_config.ray_width)
         offset_screen = np.stack([offset_world[:, 0] * sx, offset_world[:, 1] * sy], axis=1)
+
         width_pixels = np.maximum(np.linalg.norm(offset_screen, axis=1), self.render_config.min_pixels)
+        safe_widths = np.where(width_pixels[:, None] <= 1e-12, 1.0, width_pixels[:, None])
+        perp_screen_unit = offset_screen / safe_widths
+
         sigma_pixels = np.maximum(width_pixels * self.render_config.sigma_factor, 1e-3)
 
         corners = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]], dtype=np.float32)
-        vertices = np.zeros(n * 4, dtype=dtype)
-        vertices['a_corner'] = np.tile(corners, (n, 1))
-        vertices['a_start'] = np.repeat(starts, 4, axis=0)
-        vertices['a_end'] = np.repeat(ends, 4, axis=0)
-        vertices['a_width'] = np.repeat(width_pixels[:, None], 4, axis=0)
-        vertices['a_sigma'] = np.repeat(sigma_pixels[:, None], 4, axis=0)
-        vertices['a_intensity'] = np.repeat(intensities[:, None], 4, axis=0)
-        vertices['a_color'] = np.repeat(colors, 4, axis=0)
+        verts = np.zeros(n * 4, dtype=self._ray_dtype)
+        verts['a_corner'] = np.tile(corners, (n, 1))
+        verts['a_start'] = np.repeat(starts, 4, axis=0)
+        verts['a_end'] = np.repeat(ends, 4, axis=0)
+        verts['a_width'] = np.repeat(width_pixels[:, None], 4, axis=0)
+        verts['a_sigma'] = np.repeat(sigma_pixels[:, None], 4, axis=0)
+        verts['a_intensity'] = np.repeat(intensities[:, None], 4, axis=0)
+        verts['a_color'] = np.repeat(colors, 4, axis=0)
+        verts['a_perp'] = np.repeat(perp_screen_unit, 4, axis=0)
 
         base = (np.arange(n, dtype=np.uint32) * 4).reshape(-1, 1)
         pattern = np.array([[0, 1, 2, 0, 2, 3]], dtype=np.uint32)
         indices = (base + pattern).reshape(-1)
 
-        self._ray_renderer.set_data(vertices, indices)
+        self._ray_renderer.set_data(verts, indices)
 
-    def _update_marker_geometry(self, *, color: str | Sequence[float] | None = None, size: float | None = None) -> None:
-        rgba = np.array(Color(color).rgba, dtype=np.float32) if color is not None else self._marker_renderer.color
-        radius = float(size) if size is not None else self._marker_renderer.size
+    def _set_marker_state(self, points: np.ndarray, colors: np.ndarray, size: float) -> None:
+        self._marker_points_world = points.astype(np.float32)
+        self._marker_colors = colors.astype(np.float32)
+        self._marker_size = float(size)
+        self._update_marker_geometry()
 
-        pts = self._marker_points_world if self._marker_points_world.size else np.zeros((0, 2), dtype=np.float32)
-        self._marker_renderer.set_data(pts, rgba, radius)
+    def _update_marker_geometry(self) -> None:
+        pts = self._marker_points_world
+        cols = self._marker_colors
+        if pts.size == 0:
+            pts = np.zeros((0, 2), dtype=np.float32)
+        if cols.size == 0:
+            cols = np.zeros((0, 4), dtype=np.float32)
+        self._marker_renderer.set_data(pts, cols, self._marker_size)
+
+    # ---------------------------
+    # Utilities: transforms, pan/zoom
+    # ---------------------------
+
+    def _resolve_color_array(self, color: Sequence[float] | str, count: int) -> np.ndarray:
+        return _color_array(color, count)
 
     def _world_to_screen(self, points: np.ndarray) -> np.ndarray:
         points = np.asarray(points, dtype=np.float32)
@@ -548,6 +779,25 @@ class OpenGLViewer:
         offset = np.array([x0, y0], dtype=np.float32)
         scale = np.array([sx, sy], dtype=np.float32)
         return offset, scale
+
+    def _match_world_scale(self, prev_viewport: Tuple[int, int], new_viewport: Tuple[int, int]) -> None:
+        """Keep world-units-per-pixel constant when the window resizes."""
+        pw, ph = prev_viewport
+        nw, nh = new_viewport
+        if pw <= 0 or ph <= 0 or nw <= 0 or nh <= 0:
+            return
+
+        x0, x1, y0, y1 = self._view_rect
+        cx = 0.5 * (x0 + x1)
+        cy = 0.5 * (y0 + y1)
+
+        width = (x1 - x0) * (nw / pw)
+        height = (y1 - y0) * (nh / ph)
+
+        self._view_rect[0] = cx - 0.5 * width
+        self._view_rect[1] = cx + 0.5 * width
+        self._view_rect[2] = cy - 0.5 * height
+        self._view_rect[3] = cy + 0.5 * height
 
     def _ray_width_sigma_pixels(self, start: np.ndarray, end: np.ndarray) -> Tuple[float, float]:
         x0, x1, y0, y1 = self._view_rect
@@ -575,8 +825,8 @@ class OpenGLViewer:
         sy = (y1 - y0) / h
         self._view_rect[0] -= dx_pixels * sx
         self._view_rect[1] -= dx_pixels * sx
-        self._view_rect[2] -= dy_pixels * sy
-        self._view_rect[3] -= dy_pixels * sy
+        self._view_rect[2] += dy_pixels * sy
+        self._view_rect[3] += dy_pixels * sy
         self._update_all_geometry()
         self.canvas.update()
 

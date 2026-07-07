@@ -7,8 +7,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from .rays import Intersection2D, Ray2D, normalize
-from .surfaces import LocalFrame, Surface2D
+from ..rays import Intersection2D, Ray2D, normalize
+from ..surfaces import LocalFrame, Surface2D
 
 
 def quadratic_coeffs_from_ep(e: float, p: float) -> tuple[float, float, float, float, float, float]:

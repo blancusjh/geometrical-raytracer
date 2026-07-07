@@ -1,4 +1,4 @@
-from .ellipse_depth5 import main
+from .clean_ellipse_opengl import main
 
 if __name__ == "__main__":
     main()

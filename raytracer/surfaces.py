@@ -1,105 +1,65 @@
-"""Dimension-agnostic surface abstractions."""
+"""2-D surface abstractions used by the simplified tracer."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 import numpy as np
 
-from .rays import IntersectionND, RayND, normalize
+from .rays import Intersection2D, Ray2D, normalize
 
 
-@dataclass
-class SurfaceIntersection:
-    """Intermediate payload returned by surface intersection solvers."""
+class Surface2D:
+    """Abstract base class for 2-D surfaces with optional medium indices."""
 
-    distance: float
-    parameters: np.ndarray
-    point: Optional[np.ndarray] = None
-    normal: Optional[np.ndarray] = None
-    meta: Optional[Dict[str, float]] = None
-
-
-class SurfaceND:
-    """Abstract surface embedded in *dimension* dimensional space."""
-
-    def __init__(self, *, dimension: int, parameter_dimension: Optional[int] = None, surface_id: str = "surface") -> None:
-        if dimension <= 0:
-            raise ValueError("dimension must be a positive integer")
-        self.dimension = int(dimension)
-        self.parameter_dimension = int(parameter_dimension) if parameter_dimension is not None else self.dimension
+    def __init__(
+        self,
+        *,
+        surface_id: str = "surface",
+        n_exterior: float = 1.0,
+        n_interior: float = 1.0,
+    ) -> None:
         self.surface_id = surface_id
+        self.n_exterior = float(n_exterior)
+        self.n_interior = float(n_interior)
 
-    # -- Hooks -----------------------------------------------------------------
-    def point_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+    def polyline(self, samples: int = 512) -> np.ndarray:
+        """Return vertices approximating the surface in world space."""
+
         raise NotImplementedError
 
-    def normal_from_parameters(self, parameters: np.ndarray) -> np.ndarray:
+    def intersect(self, ray: Ray2D) -> Optional[Intersection2D]:
+        """Return the first intersection between *ray* and the surface."""
+
         raise NotImplementedError
-
-    def solve_intersection(self, ray: RayND) -> SurfaceIntersection | None:
-        raise NotImplementedError
-
-    # -- Public API -------------------------------------------------------------
-    def first_intersection(self, ray: RayND) -> IntersectionND | None:
-        if ray.dimension != self.dimension:
-            raise ValueError(
-                f"Ray dimensionality {ray.dimension} does not match surface dimension {self.dimension}."
-            )
-
-        hit = self.solve_intersection(ray)
-        if hit is None:
-            return None
-
-        params = np.asarray(hit.parameters, dtype=float)
-        if params.ndim != 1 or params.shape[0] != self.parameter_dimension:
-            raise ValueError(
-                f"Expected parameter vector of length {self.parameter_dimension}, got {params.shape}"
-            )
-
-        point = hit.point if hit.point is not None else self.point_from_parameters(params)
-        normal = hit.normal if hit.normal is not None else self.normal_from_parameters(params)
-
-        # Ensure outputs respect dimensional expectations.
-        point = np.asarray(point, dtype=float)
-        normal = normalize(normal)
-        if point.shape != (self.dimension,):
-            raise ValueError(f"point_from_parameters returned shape {point.shape}, expected {(self.dimension,)}")
-        if normal.shape != (self.dimension,):
-            raise ValueError(f"normal_from_parameters returned shape {normal.shape}, expected {(self.dimension,)}")
-
-        meta = hit.meta or {}
-        return IntersectionND(
-            point=point,
-            normal=normal,
-            distance=float(hit.distance),
-            surface_id=self.surface_id,
-            parameters=params,
-            meta=meta,
-            surface=self,
-        )
 
 
 class LocalFrame:
-    """Affine transform that maps between local and world coordinates."""
+    """Rigid transform that maps between local and world coordinates."""
 
     def __init__(self, origin: np.ndarray, rotation: np.ndarray) -> None:
         self.origin = np.asarray(origin, dtype=float)
         rotation = np.asarray(rotation, dtype=float)
-        if rotation.ndim != 2 or rotation.shape[0] != rotation.shape[1]:
-            raise ValueError("rotation must be a square matrix")
+        if rotation.shape != (2, 2):
+            raise ValueError("rotation must be a 2x2 matrix")
         self.rotation = rotation
         self.inv_rotation = rotation.T
 
     def to_world(self, point: np.ndarray) -> np.ndarray:
-        return self.rotation @ np.asarray(point, dtype=float) + self.origin
+        point = np.asarray(point, dtype=float)
+        return self.rotation @ point + self.origin
 
     def to_local(self, point: np.ndarray) -> np.ndarray:
-        return self.inv_rotation @ (np.asarray(point, dtype=float) - self.origin)
+        point = np.asarray(point, dtype=float)
+        return self.inv_rotation @ (point - self.origin)
 
     def direction_to_world(self, direction: np.ndarray) -> np.ndarray:
-        return self.rotation @ np.asarray(direction, dtype=float)
+        direction = np.asarray(direction, dtype=float)
+        return self.rotation @ direction
 
     def direction_to_local(self, direction: np.ndarray) -> np.ndarray:
-        return self.inv_rotation @ np.asarray(direction, dtype=float)
+        direction = np.asarray(direction, dtype=float)
+        return self.inv_rotation @ direction
+
+
+__all__ = ["Surface2D", "LocalFrame", "Intersection2D", "Ray2D", "normalize"]
