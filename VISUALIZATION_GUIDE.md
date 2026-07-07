@@ -1,61 +1,75 @@
-# OpenGL Visualisation Guide
+# Guía del visor OpenGL
 
-The simplified toolkit ships with a single 2-D OpenGL viewer (`raytracer.visualization_opengl.OpenGLViewer`). It renders surfaces as polylines and rays as Gaussian tubes whose intensity is accumulated either quadratically or via alpha blending.
+El visor (`raytracer.viz.gl.OpenGLViewer`) dibuja árboles de rayos 2D como
+tubos gaussianos acumulados en HDR:
 
-## Basic Usage
+1. Cada segmento de rayo se expande a un quad en espacio de pantalla (el
+   ancho es isótropo en píxeles para cualquier orientación) y se mezcla
+   **aditivamente** (`ONE, ONE`) en un framebuffer float32 en unidades
+   radiométricas lineales — la superposición de miles de rayos nunca satura.
+2. Un pase de tone-mapping a pantalla completa comprime la energía acumulada
+   para el display (`exponential` por defecto, `reinhard` o `linear`
+   opcionales) seguido de gamma 2.2. Con `auto_exposure=True` (defecto), la
+   exposición se fija para que el percentil 99 de energía quede cerca del
+   blanco.
+3. Superficies y marcadores se dibujan encima como overlays (no radiometría).
+
+## RenderConfig
+
+| Campo | Defecto | Significado |
+|---|---|---|
+| `ray_width` | 0.5 | ancho del rayo en unidades de mundo |
+| `sigma_factor` | 0.5 | σ del perfil gaussiano = ancho_px × factor |
+| `min_pixels` | 1.0 | ancho mínimo en píxeles al alejar el zoom |
+| `use_solid_rays` | False | perfil sólido con borde suave en vez de gaussiano |
+| `default_intensity` | 1.0 | intensidad base (multiplica `node.intensity`) |
+| `weight_scale` | 1.0 | escala global de energía (raramente necesaria) |
+| `exposure` | 1.0 | exposición manual (multiplica la automática) |
+| `tone_map` | "exponential" | `exponential` \| `reinhard` \| `linear` |
+| `auto_exposure` | True | exposición por percentil 99 del buffer HDR |
+| `background` | "black" | color de fondo |
+
+Los campos legacy (`accumulation_mode="squared"/"alpha"`) se aceptan y se
+mapean al pipeline nuevo; los hacks de peso por número de muestras
+(`weight_scale=min(1, 80/samples)`) ya no son necesarios.
+
+## API
+
+- `OpenGLViewer(x_lims, y_lims, size=(900,700), bgcolor=None, render_config=None)`
+  — la vista inicial contiene el rectángulo dado con aspecto bloqueado.
+- `draw_surfaces(surfaces, color="white", width=2.0)` — polilíneas de
+  superficie como quads por segmento (el grosor funciona en cualquier GPU,
+  sin depender de `glLineWidth`).
+- `draw_rays(tree, color_resolver=None, intensity_resolver=None,
+  show_misses=True, marker_color=None, marker_size=6.0)` — los resolvers
+  reciben cada `RayNode`; el alfa del color actúa como peso por rayo. Los
+  rayos que escapan se extienden hasta el borde de la vista actual (se
+  recalculan solos al hacer pan/zoom).
+- `draw_markers(points, color, size)` / `clear_markers()`.
+- `update_visual_params_only(**campos_de_config)` — ajusta parámetros sin
+  retesela geometría.
+- `snapshot()` — render offscreen a RGBA uint8 (para guardar imágenes o
+  tests headless). `read_accumulation()` devuelve el buffer HDR float.
+- `run()` / `close()`.
+
+## Interacción
+
+- **Arrastrar (botón izquierdo):** paneo (el contenido sigue al cursor).
+- **Rueda:** zoom anclado al cursor (el punto bajo el cursor no se mueve).
+- El pan/zoom solo actualiza uniforms — no se reconstruyen VBOs.
+
+## Colorimetría
+
+`raytracer.viz.color.wavelength_to_rgb(λ_nm)` convierte longitudes de onda a
+sRGB lineal (ajustes CIE 1931). Ejemplo de resolver espectral:
 
 ```python
-from raytracer.visualization_opengl import OpenGLViewer, RenderConfig
+from raytracer.viz.color import wavelength_to_rgb
 
-viewer = OpenGLViewer(
-    x_lims=(-8.0, 2.0),
-    y_lims=(-4.0, 4.0),
-    render_config=RenderConfig(
-        ray_width=0.01,
-        sigma_factor=0.01,
-        accumulation_mode="squared",
-    ),
-)
-
-viewer.draw_surfaces([surface])
-viewer.draw_rays(ray_tree)
-viewer.run()
+def color_resolver(node):
+    rgb = wavelength_to_rgb(node.wavelength_um * 1e3)
+    return (*rgb, 1.0)
 ```
 
-- **Mouse drag** pans the view.
-- **Scroll** zooms in/out.
-
-## Render Configuration
-
-| Field | Description |
-| ----- | ----------- |
-| `ray_width` | Base radius (in world units) used to compute a screen-space width. |
-| `sigma_factor` | Scales the Gaussian falloff relative to the width. |
-| `accumulation_mode` | Either `"squared"` (energy-like accumulation) or `"alpha"` (standard alpha blending). |
-| `default_intensity` | Fallback intensity for rays when no resolver is provided. |
-| `weight_scale` | Linear multiplier applied before accumulation. |
-| `min_pixels` | Minimum on-screen thickness to keep very thin rays visible. |
-
-## Customising Colours & Intensities
-
-Both `draw_rays` and `draw_markers` accept callables to override colours or intensities:
-
-```python
-viewer.draw_rays(
-    tree,
-    color_resolver=lambda node: (1.0, 0.8, 0.2, 0.8),
-    intensity_resolver=lambda node: 1.0 / (1.0 + node.generation),
-)
-```
-
-Return either RGB or RGBA tuples. Intensities are positive scalars multiplied by the Gaussian profile.
-
-## Surface Rendering
-
-`draw_surfaces` expects surfaces providing a `polyline()` method (every `Surface2D` subclass does). Pass optional colour and width overrides:
-
-```python
-viewer.draw_surfaces([mirror, lens], color="white", width=2.0)
-```
-
-The viewer stores the latest ray/surface geometry and refreshes automatically when the canvas resizes. Call `update_visual_params_only()` after tweaking `RenderConfig` fields to rebuild ray widths without re-uploading geometry.
+Como la acumulación es lineal en RGB, las fuentes de distintas longitudes de
+onda se suman físicamente (mezcla aditiva de espectros) antes del tone-mapping.

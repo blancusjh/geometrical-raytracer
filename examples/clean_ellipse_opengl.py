@@ -43,12 +43,10 @@ def build_scene(samples: int = 500):
 def main() -> None:
     ellipse, tree, source = build_scene(samples=500)
 
+    # HDR accumulation + auto-exposure: no per-sample weight tuning needed.
     render_config = RenderConfig(
-        ray_width=0.005,
-        sigma_factor=0.015,
-        accumulation_mode="squared",
-        default_intensity=0.05,
-        weight_scale=1.0,
+        ray_width=0.008,
+        sigma_factor=0.5,
         min_pixels=1.0,
     )
 
@@ -62,19 +60,16 @@ def main() -> None:
 
     viewer.draw_surfaces([ellipse], color="white", width=2.0)
 
-    ray_weight = min(1.0, 50.0 / float(source.samples))
-
     def color_resolver(node):
         if node.intersection is None:
-            return (1.0, 0.5, 1.0, 0.5 * ray_weight)
-        return (1.0, 1.0, 1.0, ray_weight)
+            return (1.0, 0.5, 1.0, 0.5)
+        return (1.0, 1.0, 1.0, 1.0)
 
     def intensity_resolver(node):
         return 1.0 / (1.0 + 0.3 * float(node.generation))
 
     viewer.draw_rays(
         tree,
-        tail_length=12.0,
         color_resolver=color_resolver,
         intensity_resolver=intensity_resolver,
         show_misses=True,

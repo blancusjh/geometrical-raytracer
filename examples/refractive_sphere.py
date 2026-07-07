@@ -168,12 +168,10 @@ if __debug__:
 def main() -> None:
     sphere, tree, source = build_scene(samples=120)
 
+    # HDR accumulation + auto-exposure: no per-sample weight tuning needed.
     config = RenderConfig(
         ray_width=0.03,
-        sigma_factor=0.02,
-        accumulation_mode="squared",
-        default_intensity=0.1,
-        weight_scale=min(1.0, 80.0 / max(1, source.samples)),
+        sigma_factor=0.5,
         min_pixels=1.0,
     )
 

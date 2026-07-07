@@ -81,7 +81,7 @@ def __getattr__(name: str):
     # Lazy imports: the OpenGL viewer pulls in vispy, which should not be a
     # hard requirement for headless/analysis use.
     if name in ("OpenGLViewer", "RenderConfig"):
-        from .visualization_opengl import OpenGLViewer, RenderConfig
+        from .viz.gl.viewer import OpenGLViewer, RenderConfig
 
         return {"OpenGLViewer": OpenGLViewer, "RenderConfig": RenderConfig}[name]
     if name == "ConicalDioptrique":

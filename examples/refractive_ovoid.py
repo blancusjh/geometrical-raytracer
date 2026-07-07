@@ -69,13 +69,9 @@ def main():
 
     # Solid ray configuration for clear stigmatism visualization
     cfg = RenderConfig(
-        ray_width=0.001,         # Thin rays in world units - NOW WORKS!
-        sigma_factor=1.0,        # sigma = ray_width (sharp edge in solid mode)
-        accumulation_mode="squared",
-        default_intensity=0.8,
-        weight_scale=1.0,
-        min_pixels=0.3,          # Low threshold - ray_width controls thickness!
-        use_solid_rays=False,     # Solid rays (no Gaussian falloff)
+        ray_width=0.001,
+        sigma_factor=0.5,
+        min_pixels=1.0,
     )
 
     viewer = OpenGLViewer(

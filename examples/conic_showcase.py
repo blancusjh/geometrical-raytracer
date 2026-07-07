@@ -130,12 +130,10 @@ def main() -> None:
     tracer = RayTracer2D([surface], TraceConfig(max_generations=3, allow_reflection=True))
     tree = tracer.trace([source])
 
+    # HDR accumulation + auto-exposure: no per-sample weight tuning needed.
     render_config = RenderConfig(
         ray_width=0.01,
-        sigma_factor=0.02,
-        accumulation_mode="squared",
-        default_intensity=0.1,
-        weight_scale=min(1.0, 80.0 / max(1, args.samples)),
+        sigma_factor=0.5,
         min_pixels=1.0,
     )
 
