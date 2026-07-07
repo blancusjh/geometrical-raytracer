@@ -1,4 +1,4 @@
-"""Minimal 2-D ray primitives and genealogy helpers."""
+"""2-D ray primitives and genealogy helpers for the non-sequential engine."""
 
 from __future__ import annotations
 
@@ -9,26 +9,7 @@ from typing import Dict, Iterable, Optional
 import numpy as np
 from numpy.typing import ArrayLike
 
-EPS = 1e-9
-
-
-def _as_vector(vec: ArrayLike, *, dim: int = 2) -> np.ndarray:
-    """Return *vec* coerced to a 1-D float array of length ``dim``."""
-
-    arr = np.asarray(vec, dtype=float)
-    if arr.ndim != 1 or arr.shape[0] != dim:
-        raise ValueError(f"Expected vector of length {dim}, got shape {arr.shape}")
-    return arr
-
-
-def normalize(vec: ArrayLike, eps: float = EPS) -> np.ndarray:
-    """Return the unit direction associated with *vec*."""
-
-    arr = np.asarray(vec, dtype=float)
-    mag = np.linalg.norm(arr)
-    if mag <= eps:
-        raise ValueError("Cannot normalize a zero-length vector.")
-    return arr / mag
+from ..core.vectors import as_vector, direction_from_angle, normalize
 
 
 @dataclass
@@ -39,7 +20,7 @@ class Ray2D:
     direction: ArrayLike
 
     def __post_init__(self) -> None:
-        self.origin = _as_vector(self.origin, dim=2)
+        self.origin = as_vector(self.origin, dim=2)
         self.direction = normalize(self.direction)
 
     def point_at(self, lam: float) -> np.ndarray:
@@ -59,7 +40,7 @@ class Intersection2D:
     meta: Optional[Dict[str, float]] = None
 
     def __post_init__(self) -> None:
-        self.point = _as_vector(self.point, dim=2)
+        self.point = as_vector(self.point, dim=2)
         self.normal = normalize(self.normal)
         if self.parameters is not None:
             self.parameters = np.asarray(self.parameters, dtype=float)
@@ -69,7 +50,12 @@ class Intersection2D:
 
 @dataclass
 class RayNode:
-    """Node inside a simple ray genealogy tree."""
+    """Node inside a ray genealogy tree.
+
+    ``opl`` is the optical path length accumulated from the tree root up to
+    this node's origin; ``intensity`` is the radiometric weight carried by
+    the ray (unit for sources unless configured otherwise).
+    """
 
     label: str
     ray: Ray2D
@@ -78,6 +64,10 @@ class RayNode:
     medium_n: float
     intersection: Optional[Intersection2D] = None
     children: list[str] = field(default_factory=list)
+    opl: float = 0.0
+    intensity: float = 1.0
+    wavelength_um: Optional[float] = None
+    kind: str = "primary"  # "primary" | "reflected" | "refracted"
 
 
 class RayTree:
@@ -99,6 +89,9 @@ class RayTree:
     def __getitem__(self, label: str) -> RayNode:
         return self._nodes[label]
 
+    def __len__(self) -> int:
+        return len(self._nodes)
+
     def nodes(self) -> Iterable[RayNode]:
         return self._nodes.values()
 
@@ -116,13 +109,6 @@ class RayLabeler:
         return f"{parent_label}.{next(self._counter)}"
 
 
-def direction_from_angle(theta: float) -> np.ndarray:
-    """Return a unit direction given a polar angle in radians."""
-
-    theta = float(theta)
-    return np.array([np.cos(theta), np.sin(theta)], dtype=float)
-
-
 def ray_from_angle(origin: ArrayLike, theta: float) -> Ray2D:
     """Convenience helper that spawns a ray from an origin and angle."""
 
@@ -135,7 +121,5 @@ __all__ = [
     "RayNode",
     "RayTree",
     "RayLabeler",
-    "normalize",
-    "direction_from_angle",
     "ray_from_angle",
 ]

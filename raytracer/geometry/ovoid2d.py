@@ -1,5 +1,5 @@
+"""Cartesian ovoid: stigmatic refractive surface from Fermat's principle."""
 
-# raytracer/geometry/cartesian_ovoid.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -7,8 +7,10 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from ..rays import Intersection2D, Ray2D, normalize
-from ..surfaces import LocalFrame, Surface2D
+from ..core.frames import LocalFrame
+from ..core.vectors import normalize
+from ..nonseq.rays import Intersection2D, Ray2D
+from ..nonseq.surfaces import Surface2D
 
 
 # ============================================================================

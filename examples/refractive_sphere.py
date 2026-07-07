@@ -11,11 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer.geometry import CircleConic
-from raytracer.rays import Intersection2D, Ray2D
-from raytracer.sources import ParallelSource2D
-from raytracer.tracer import RayTracer2D, TraceConfig
-from raytracer.visualization_opengl import OpenGLViewer, RenderConfig
+from raytracer import CircleConic
+from raytracer import Intersection2D, Ray2D
+from raytracer import ParallelSource2D
+from raytracer import RayTracer2D, TraceConfig
+from raytracer import OpenGLViewer, RenderConfig
 
 AMBIENT_N = 1.0
 SPHERE_N = 1.52

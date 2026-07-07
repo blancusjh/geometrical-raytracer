@@ -1,19 +1,18 @@
-"""Geometry module for 2D raytracing."""
+"""Geometric profiles and 2-D interfaces shared by both engines."""
 
-from .geometry import (
-    ConicalDioptrique,
-    EllipseConic,
+from .conics2d import (
     CircleConic,
-    ParabolaConic,
-    HyperbolaConic,
+    ConicInterface2D,
     ConicProfile,
+    EllipseConic,
+    HyperbolaConic,
+    ParabolaConic,
     quadratic_coeffs_from_ep,
 )
-
-from .cartesian_ovoid import CartesianOvoid2D
+from .ovoid2d import CartesianOvoid2D
 
 __all__ = [
-    "ConicalDioptrique",
+    "ConicInterface2D",
     "EllipseConic",
     "CircleConic",
     "ParabolaConic",

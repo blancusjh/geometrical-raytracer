@@ -1,4 +1,8 @@
-"""Conic section surfaces expressed in a compact 2-D form."""
+"""Conic-section interfaces for the 2-D non-sequential engine.
+
+Conics are expressed in focal (polar) form r(theta) = p / (1 + e cos theta)
+and intersected through their implicit quadratic form.
+"""
 
 from __future__ import annotations
 
@@ -7,19 +11,21 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from .rays import Intersection2D, Ray2D, normalize
-from .surfaces import LocalFrame, Surface2D
+from ..core.frames import LocalFrame
+from ..core.vectors import normalize
+from ..nonseq.rays import Intersection2D, Ray2D
+from ..nonseq.surfaces import Surface2D
 
 
 def quadratic_coeffs_from_ep(e: float, p: float) -> tuple[float, float, float, float, float, float]:
     """Return quadratic-form coefficients for a conic in polar form."""
 
-    A: float = 1.0 - e ** 2
+    A: float = 1.0 - e**2
     B: float = 0.0
     C: float = 1.0
     D: float = 2.0 * e * p
     E: float = 0.0
-    F: float = -(p ** 2)
+    F: float = -(p**2)
 
     return (A, B, C, D, E, F)
 
@@ -30,7 +36,9 @@ class ConicProfile:
 
     coeffs: Tuple[float, float, float, float, float, float]
 
-    def intersect(self, origin: np.ndarray, direction: np.ndarray, eps: float = 1e-12) -> Tuple[np.ndarray, float] | None:
+    def intersect(
+        self, origin: np.ndarray, direction: np.ndarray, eps: float = 1e-12
+    ) -> Tuple[np.ndarray, float] | None:
         x0, y0 = origin
         dx, dy = direction
         A, B, C, D, E, F = self.coeffs
@@ -72,7 +80,7 @@ class ConicProfile:
 
 
 @dataclass
-class ConicalDioptrique(Surface2D):
+class ConicInterface2D(Surface2D):
     """General conic section with optional rotation and refractive indices."""
 
     e: float
@@ -84,13 +92,15 @@ class ConicalDioptrique(Surface2D):
     n_interior: float = 1.0
 
     def __post_init__(self) -> None:
-        Surface2D.__init__(self, surface_id=self.surface_id, n_exterior=self.n_exterior, n_interior=self.n_interior)
+        Surface2D.__init__(
+            self,
+            surface_id=self.surface_id,
+            n_exterior=self.n_exterior,
+            n_interior=self.n_interior,
+        )
         self.focus = np.asarray(self.focus, dtype=float)
         self.angle = float(self.angle)
-        cos_a = np.cos(self.angle)
-        sin_a = np.sin(self.angle)
-        rotation = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
-        self.frame = LocalFrame(origin=self.focus, rotation=rotation)
+        self.frame = LocalFrame.from_angle_2d(origin=self.focus, angle=self.angle)
         self.coeffs = quadratic_coeffs_from_ep(self.e, self.p)
         self.profile = ConicProfile(self.coeffs)
 
@@ -137,7 +147,7 @@ class ConicalDioptrique(Surface2D):
         )
 
 
-class EllipseConic(ConicalDioptrique):
+class EllipseConic(ConicInterface2D):
     """Ellipse defined by semi-axes (a, b) with focus at *focus*."""
 
     def __init__(
@@ -154,8 +164,8 @@ class EllipseConic(ConicalDioptrique):
             raise ValueError("Semi-axes must be positive.")
         if semi_minor > semi_major:
             raise ValueError("Semi-minor axis cannot exceed semi-major axis.")
-        e = np.sqrt(1.0 - (semi_minor ** 2) / (semi_major ** 2))
-        p = (semi_minor ** 2) / semi_major
+        e = np.sqrt(1.0 - (semi_minor**2) / (semi_major**2))
+        p = (semi_minor**2) / semi_major
         focus_vec = np.zeros(2) if focus is None else np.asarray(focus, dtype=float)
         super().__init__(
             e=e,
@@ -168,7 +178,7 @@ class EllipseConic(ConicalDioptrique):
         )
 
 
-class CircleConic(ConicalDioptrique):
+class CircleConic(ConicInterface2D):
     """Circle (eccentricity zero) with radius *radius*."""
 
     def __init__(
@@ -192,7 +202,7 @@ class CircleConic(ConicalDioptrique):
         )
 
 
-class ParabolaConic(ConicalDioptrique):
+class ParabolaConic(ConicInterface2D):
     """Parabola (eccentricity one) with semi-latus rectum *p*."""
 
     def __init__(
@@ -218,7 +228,7 @@ class ParabolaConic(ConicalDioptrique):
         )
 
 
-class HyperbolaConic(ConicalDioptrique):
+class HyperbolaConic(ConicInterface2D):
     """Right-opening hyperbola defined by semi-axes (a, b)."""
 
     def __init__(
@@ -233,8 +243,8 @@ class HyperbolaConic(ConicalDioptrique):
     ) -> None:
         if semi_major <= 0.0 or semi_minor <= 0.0:
             raise ValueError("Semi-axes must be positive.")
-        e = np.sqrt(1.0 + (semi_minor ** 2) / (semi_major ** 2))
-        p = (semi_minor ** 2) / semi_major
+        e = np.sqrt(1.0 + (semi_minor**2) / (semi_major**2))
+        p = (semi_minor**2) / semi_major
         focus_vec = np.zeros(2) if focus is None else np.asarray(focus, dtype=float)
         super().__init__(
             e=e,
@@ -245,3 +255,14 @@ class HyperbolaConic(ConicalDioptrique):
             n_exterior=n_exterior,
             n_interior=n_interior,
         )
+
+
+__all__ = [
+    "quadratic_coeffs_from_ep",
+    "ConicProfile",
+    "ConicInterface2D",
+    "EllipseConic",
+    "CircleConic",
+    "ParabolaConic",
+    "HyperbolaConic",
+]

@@ -13,17 +13,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer.geometry import (
+from raytracer import (
     CircleConic,
     ConicalDioptrique,
     EllipseConic,
     HyperbolaConic,
     ParabolaConic,
 )
-from raytracer.sources import PointSource2D
-from raytracer.surfaces import Surface2D
-from raytracer.tracer import RayTracer2D, TraceConfig
-from raytracer.visualization_opengl import OpenGLViewer, RenderConfig
+from raytracer import PointSource2D
+from raytracer import Surface2D
+from raytracer import RayTracer2D, TraceConfig
+from raytracer import OpenGLViewer, RenderConfig
 
 SceneBuilder = Callable[[int], Tuple[Surface2D, PointSource2D, dict]]
 

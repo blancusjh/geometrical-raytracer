@@ -11,10 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer.geometry import EllipseConic
-from raytracer.sources import PointSource2D
-from raytracer.tracer import RayTracer2D, TraceConfig
-from raytracer.visualization_opengl import OpenGLViewer, RenderConfig
+from raytracer import EllipseConic
+from raytracer import PointSource2D
+from raytracer import RayTracer2D, TraceConfig
+from raytracer import OpenGLViewer, RenderConfig
 
 
 def build_scene(samples: int = 500):

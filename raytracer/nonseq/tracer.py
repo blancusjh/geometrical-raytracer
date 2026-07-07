@@ -1,4 +1,4 @@
-"""Breadth-first 2-D ray tracer supporting reflections and refractions."""
+"""Breadth-first 2-D non-sequential tracer (reflection/refraction tree)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from .physics import reflect, refract
+from ..core.physics import fresnel_coefficients, reflect, refract
 from .rays import Ray2D, RayLabeler, RayNode, RayTree
 from .sources import Source2D
 from .surfaces import Surface2D
@@ -16,13 +16,20 @@ from .surfaces import Surface2D
 
 @dataclass
 class TraceConfig:
-    """Configuration for the simplified ray tracer."""
+    """Configuration for the non-sequential tracer.
+
+    With ``fresnel_split`` enabled, child intensities follow the unpolarised
+    Fresnel power coefficients instead of copying the parent intensity, and
+    children below ``min_intensity`` are pruned.
+    """
 
     max_generations: int = 5
     allow_reflection: bool = True
     allow_refraction: bool = False
     ambient_n: float = 1.0
     epsilon: float = 1e-6
+    fresnel_split: bool = False
+    min_intensity: float = 1e-4
 
 
 class RayTracer2D:
@@ -42,13 +49,14 @@ class RayTracer2D:
         for source in sources:
             for seed in source.emit():
                 label = self._labeler.new_primary()
-                ray = Ray2D(seed.origin, seed.direction)
                 node = RayNode(
                     label=label,
-                    ray=ray,
+                    ray=Ray2D(seed.origin, seed.direction),
                     parent_label=None,
                     generation=1,
                     medium_n=self.config.ambient_n,
+                    intensity=seed.intensity,
+                    wavelength_um=seed.wavelength_um,
                 )
                 tree.add(node)
                 queue.append(label)
@@ -63,15 +71,15 @@ class RayTracer2D:
             if hit is None or node.generation >= self.config.max_generations:
                 continue
 
-            surface = hit.surface if hit.surface is not None else None
+            surface = hit.surface
+            if surface is not None and getattr(surface, "absorbing", False):
+                continue
+
             normal = hit.normal.copy()
             incident_n = node.medium_n
 
             exterior = getattr(surface, "n_exterior", incident_n) if surface else incident_n
             interior = getattr(surface, "n_interior", incident_n) if surface else incident_n
-
-            if surface is not None and hit.surface is None:
-                hit.surface = surface
 
             if np.dot(node.ray.direction, normal) > 0.0:
                 normal = -normal
@@ -87,16 +95,43 @@ class RayTracer2D:
             else:
                 transmit_medium = incident_n
 
+            child_opl = node.opl + incident_n * hit.distance
+
+            reflectance = 1.0
+            transmittance = 0.0
+            if self.config.fresnel_split:
+                coeffs = fresnel_coefficients(
+                    node.ray.direction, normal, incident_n, transmit_medium
+                )
+                reflectance = coeffs.reflectance
+                transmittance = coeffs.transmittance
+
             if self.config.allow_reflection:
-                refl_dir = reflect(node.ray.direction, normal)
-                refl_origin = hit.point + refl_dir * self.config.epsilon
-                self._spawn_child(tree, queue, node, refl_origin, refl_dir, incident_n)
+                refl_intensity = (
+                    node.intensity * reflectance if self.config.fresnel_split else node.intensity
+                )
+                if refl_intensity >= self.config.min_intensity:
+                    refl_dir = reflect(node.ray.direction, normal)
+                    refl_origin = hit.point + refl_dir * self.config.epsilon
+                    self._spawn_child(
+                        tree, queue, node, refl_origin, refl_dir, incident_n,
+                        opl=child_opl, intensity=refl_intensity, kind="reflected",
+                    )
 
             if self.config.allow_refraction:
                 refr_dir = refract(node.ray.direction, normal, incident_n, transmit_medium)
                 if refr_dir is not None:
-                    refr_origin = hit.point + refr_dir * self.config.epsilon
-                    self._spawn_child(tree, queue, node, refr_origin, refr_dir, transmit_medium)
+                    refr_intensity = (
+                        node.intensity * transmittance
+                        if self.config.fresnel_split
+                        else node.intensity
+                    )
+                    if refr_intensity >= self.config.min_intensity:
+                        refr_origin = hit.point + refr_dir * self.config.epsilon
+                        self._spawn_child(
+                            tree, queue, node, refr_origin, refr_dir, transmit_medium,
+                            opl=child_opl, intensity=refr_intensity, kind="refracted",
+                        )
 
         return tree
 
@@ -123,6 +158,10 @@ class RayTracer2D:
         origin,
         direction,
         medium_n: float,
+        *,
+        opl: float,
+        intensity: float,
+        kind: str,
     ) -> None:
         label = self._labeler.child(parent.label)
         child = RayNode(
@@ -131,6 +170,10 @@ class RayTracer2D:
             parent_label=parent.label,
             generation=parent.generation + 1,
             medium_n=medium_n,
+            opl=opl,
+            intensity=intensity,
+            wavelength_um=parent.wavelength_um,
+            kind=kind,
         )
         tree.add(child)
         queue.append(label)
