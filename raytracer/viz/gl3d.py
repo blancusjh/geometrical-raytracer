@@ -40,6 +40,34 @@ RAY_COLORS = [
 ORDER_OPAQUE, ORDER_RAYS, ORDER_GLASS = 0, 1, 2
 
 
+# --- HDR pass: the whole scene renders into a float32 FBO (beams accumulate
+# linearly without 8-bit quantization or clipping), then a soft-knee curve maps
+# to the display: identity below KNEE (lenses and beam body keep their exact
+# linear look -> per-pixel brightness stays proportional to ray count), smooth
+# compression above (foci glow without flattening).
+HDR_TONEMAP_VERT = """
+attribute vec2 a_position;
+varying vec2 v_uv;
+void main() {
+    v_uv = 0.5 * (a_position + 1.0);
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}
+"""
+
+HDR_TONEMAP_FRAG = """
+uniform sampler2D u_tex;
+varying vec2 v_uv;
+const float K = 0.9;
+void main() {
+    vec3 c = texture2D(u_tex, v_uv).rgb;
+    vec3 over = max(c - K, 0.0);
+    vec3 soft = K + (1.0 - K) * (1.0 - exp(-over / (1.0 - K)));
+    vec3 mapped = mix(c, soft, step(K, c));   // c < K ? c : soft-knee
+    gl_FragColor = vec4(mapped, 1.0);
+}
+"""
+
+
 def spectral_rgb(wavelength_nm: float) -> np.ndarray:
     """Linear-sRGB of a wavelength via the CIE 1931 fits (diffractsim-style).
 
@@ -154,19 +182,41 @@ class Viewer3D:
         self._wireframe_on = False
         self._ray_groups: dict[str, list] = {"lines": [], "beam": [], "spectrum": []}
         self._ray_mode = "lines"
-        # CRITICAL: glClear honours glDepthMask. Glass draws last with
-        # depth_mask=False; without re-enabling it before the next frame's
-        # clear, the depth buffer never clears and the first frame stays
-        # imprinted as a frozen black silhouette that occludes everything.
         # Wrap _draw_scene (the funnel for both live paints and offscreen
-        # render()) so the mask is restored before every clear.
+        # render()) to:
+        # 1. restore glDepthMask before the clear — glClear honours it, and the
+        #    glass (depth_mask=False) drawn last would otherwise freeze the
+        #    first frame's depth as a black occluding silhouette;
+        # 2. render the scene into a float32 HDR buffer and soft-knee map it to
+        #    the display, so additive beams accumulate linearly (no 8-bit
+        #    quantum, no hard clip).
+        self._hdr_tex = None
+        self._hdr_fbo = None
+        self._hdr_prog = None
         _orig_draw_scene = self.canvas._draw_scene
 
-        def _draw_scene_with_reset(*args, **kwargs):
-            self._reset_gl_state()
-            return _orig_draw_scene(*args, **kwargs)
+        def _draw_scene_hdr(*args, **kwargs):
+            from vispy import gloo
 
-        self.canvas._draw_scene = _draw_scene_with_reset
+            self._reset_gl_state()
+            # Mouse interaction depends on vispy's PICKING passes (visual_at
+            # renders id-colors and reads a pixel). Those must NOT go through
+            # the HDR buffer + tonemap quad, or the read-back is garbage and
+            # the camera never engages. Bypass HDR while picking.
+            scene = getattr(self.canvas, "scene", None)
+            if getattr(scene, "picking", False):
+                return _orig_draw_scene(*args, **kwargs)
+            w, h = self.canvas.physical_size
+            self._ensure_hdr(int(w), int(h))
+            with self._hdr_fbo:
+                gloo.set_viewport(0, 0, int(w), int(h))
+                _orig_draw_scene(*args, **kwargs)
+            gloo.set_viewport(0, 0, int(w), int(h))
+            gloo.set_state(blend=False, depth_test=False, cull_face=False)
+            self._hdr_prog["u_tex"] = self._hdr_tex
+            self._hdr_prog.draw("triangles")
+
+        self.canvas._draw_scene = _draw_scene_hdr
         # headlight: update the light direction whenever the camera moves
         self.canvas.events.mouse_move.connect(self._update_light)
         self.canvas.events.mouse_wheel.connect(self._update_light)
@@ -177,6 +227,22 @@ class Viewer3D:
         from vispy import gloo
 
         gloo.set_state(depth_mask=True)
+
+    def _ensure_hdr(self, w: int, h: int) -> None:
+        from vispy import gloo
+
+        if self._hdr_prog is None:
+            self._hdr_prog = gloo.Program(HDR_TONEMAP_VERT, HDR_TONEMAP_FRAG)
+            self._hdr_prog["a_position"] = np.array(
+                [[-1.0, -1.0], [3.0, -1.0], [-1.0, 3.0]], dtype=np.float32
+            )  # fullscreen triangle
+        if self._hdr_tex is None or self._hdr_tex.shape[:2] != (h, w):
+            self._hdr_tex = gloo.Texture2D(
+                shape=(h, w, 4), internalformat="rgba32f", interpolation="nearest"
+            )
+            self._hdr_fbo = gloo.FrameBuffer(
+                color=self._hdr_tex, depth=gloo.RenderBuffer((h, w))
+            )
 
     # -- meshes ----------------------------------------------------------
     def _add_mesh(self, vertices, faces, color, *, style="opaque"):
@@ -305,8 +371,10 @@ class Viewer3D:
             antialias=True,  # fragment AA (no MSAA needed)
         )
         if additive:
-            # LIGHT adds: energy summation (colorimetric mixing where beams of
-            # different wavelengths overlap); no depth write between beams
+            # LIGHT adds linearly into the float32 HDR buffer (no quantization,
+            # no clipping); the soft-knee display map keeps the beam body
+            # exactly linear — per-pixel brightness stays proportional to the
+            # number of rays crossing it — and only compresses the foci.
             line.set_gl_state(blend=True, depth_test=True, depth_mask=False,
                               blend_func=("one", "one"))
         else:
@@ -371,13 +439,13 @@ class Viewer3D:
                 wl = (wavelength_nm if mode == "beam"
                       else float(wavelengths_nm[k % len(wavelengths_nm)]))
                 n_rays = max(int(pupil.valid.sum()), 1)
-                # Denser sampling spreads the same energy over more pixels;
-                # compensate sublinearly so the beam keeps its brightness
-                # regardless of density (calibrated at ~1400 rays/field), and
-                # never let a ray fall below the 8-bit additive quantum.
-                density_boost = max(1.0, n_rays / 1400.0) ** 0.75
-                energy = max(beam_energy * density_boost / n_rays, 1.6 / 255.0)
-                rgb = spectral_rgb(wl) * energy
+                # Physical scaling: total beam energy is fixed, each ray
+                # carries E/n. Per-pixel brightness = (rays crossing it)·E/n,
+                # which is density-INVARIANT — the illumination structure
+                # (caustics bright, sparse regions dim) is preserved at any
+                # sampling, just smoother. The float HDR buffer makes tiny
+                # per-ray energies safe (no 8-bit quantum).
+                rgb = spectral_rgb(wl) * (beam_energy / n_rays)
                 self.add_paths(paths, color=(*rgb.tolist(), 1.0), width=1.0,
                                group=mode, additive=True)
             else:
