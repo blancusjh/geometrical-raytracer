@@ -106,7 +106,6 @@ class RayRenderer:
         width_px: float,
         sigma_px: float,
         weight_scale: float,
-        use_solid: bool,
     ) -> None:
         if self.n_segments == 0:
             return
@@ -116,9 +115,74 @@ class RayRenderer:
         self.program["u_width_px"] = width_px
         self.program["u_sigma_px"] = sigma_px
         self.program["u_weight_scale"] = weight_scale
-        self.program["u_use_solid"] = 1 if use_solid else 0
         gloo.set_state(blend=True, depth_test=False)
         gloo.set_blend_func("one", "one")  # linear additive accumulation
+        self.program.draw("triangles", self.index_buffer)
+
+
+class SolidRayRenderer:
+    """Draws ray segments as crisp, non-additive lines (the "geometric" mode).
+
+    Shares ``RayRenderer``'s per-segment geometry (``RAY_VERT``: quads with
+    per-vertex color/intensity) but its fragment shader outputs plain,
+    non-premultiplied color for standard alpha blending straight onto the
+    visible framebuffer — unlike ``RayRenderer``, this never writes into the
+    HDR accumulation target, so overlapping rays do not glow or blow out:
+    each ray reads as a single sharp physical line, matching how surfaces are
+    drawn by :class:`PolylineRenderer`. Use for few-ray diagrams (telescopes,
+    single-lens ray fans, stigmatism checks); reserve the additive
+    ``RayRenderer`` ("beam" mode) for dense bundles meant to look like a
+    continuous beam of light.
+    """
+
+    def __init__(self) -> None:
+        self.program = gloo.Program(shaders.RAY_VERT, shaders.RAY_SOLID_FRAG)
+        self.index_buffer: gloo.IndexBuffer | None = None
+        self.n_segments = 0
+
+    def set_segments(
+        self,
+        segments: np.ndarray,  # (N, 4): x0, y0, x1, y1 (scene-relative world)
+        colors: np.ndarray,  # (N, 4) rgb + weight
+        intensities: np.ndarray,  # (N,)
+    ) -> None:
+        self.n_segments = segments.shape[0]
+        if self.n_segments == 0:
+            return
+        starts, ends, corners = segment_quads(segments)
+        self.program["a_start"] = starts
+        self.program["a_end"] = ends
+        self.program["a_corner"] = corners
+        self.program["a_color"] = np.repeat(colors, 4, axis=0).astype(np.float32)
+        self.program["a_intensity"] = np.repeat(intensities, 4).astype(np.float32)
+        self.index_buffer = gloo.IndexBuffer(quad_indices(self.n_segments))
+
+    def update_endpoints(self, segments: np.ndarray) -> None:
+        if self.n_segments == 0:
+            return
+        starts, ends, _ = segment_quads(segments)
+        self.program["a_start"] = starts
+        self.program["a_end"] = ends
+
+    def draw(
+        self,
+        *,
+        viewport: tuple[float, float],
+        view_center: np.ndarray,
+        ppw: float,
+        width_px: float,
+        weight_scale: float,
+    ) -> None:
+        if self.n_segments == 0:
+            return
+        self.program["u_viewport"] = viewport
+        self.program["u_view_center"] = tuple(view_center)
+        self.program["u_ppw"] = ppw
+        self.program["u_width_px"] = width_px
+        self.program["u_sigma_px"] = 0.0
+        self.program["u_weight_scale"] = weight_scale
+        gloo.set_state(blend=True, depth_test=False)
+        gloo.set_blend_func("src_alpha", "one_minus_src_alpha")
         self.program.draw("triangles", self.index_buffer)
 
 
@@ -270,6 +334,7 @@ def auto_exposure(accum_rgba: np.ndarray, *, percentile: float = 99.0) -> float:
 __all__ = [
     "AccumulationTarget",
     "RayRenderer",
+    "SolidRayRenderer",
     "PolylineRenderer",
     "FilledPolygonRenderer",
     "MarkerRenderer",

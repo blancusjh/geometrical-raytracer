@@ -62,9 +62,7 @@ void main() {
 
 RAY_FRAG = _PREAMBLE + """
 uniform float u_sigma_px;
-uniform float u_width_px;
 uniform float u_weight_scale;
-uniform int   u_use_solid;
 
 varying vec2  v_start_px;
 varying vec2  v_end_px;
@@ -83,17 +81,42 @@ float point_to_segment(vec2 p, vec2 a, vec2 b) {
 
 void main() {
     float dist = point_to_segment(v_pos_px, v_start_px, v_end_px);
-    float profile;
-    if (u_use_solid == 1) {
-        profile = 1.0 - smoothstep(0.5 * u_width_px - 0.75, 0.5 * u_width_px + 0.75, dist);
-    } else {
-        float sigma = max(u_sigma_px, 1e-6);
-        profile = exp(-0.5 * dist * dist / (sigma * sigma));
-    }
+    float sigma = max(u_sigma_px, 1e-6);
+    float profile = exp(-0.5 * dist * dist / (sigma * sigma));
     float energy = v_intensity * v_color.a * u_weight_scale * profile;
     if (energy < 1e-7) discard;
     // Linear radiometric accumulation: rgb premultiplied by energy.
     gl_FragColor = vec4(v_color.rgb * energy, energy);
+}
+"""
+
+RAY_SOLID_FRAG = _PREAMBLE + """
+uniform float u_width_px;
+uniform float u_weight_scale;
+
+varying vec2  v_start_px;
+varying vec2  v_end_px;
+varying vec2  v_pos_px;
+varying vec4  v_color;
+varying float v_intensity;
+
+float point_to_segment(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a;
+    vec2 ba = b - a;
+    float denom = dot(ba, ba);
+    if (denom < 1e-12) return length(pa);
+    float t = clamp(dot(pa, ba) / denom, 0.0, 1.0);
+    return length(pa - t * ba);
+}
+
+void main() {
+    float dist = point_to_segment(v_pos_px, v_start_px, v_end_px);
+    float edge = 1.0 - smoothstep(0.5 * u_width_px - 0.75, 0.5 * u_width_px + 0.75, dist);
+    float alpha = clamp(edge * v_color.a * v_intensity * u_weight_scale, 0.0, 1.0);
+    if (alpha < 1e-3) discard;
+    // Plain (non-premultiplied) color, standard alpha blend, no HDR
+    // accumulation: each ray reads as a crisp, non-glowing physical line.
+    gl_FragColor = vec4(v_color.rgb, alpha);
 }
 """
 
@@ -238,6 +261,7 @@ void main() {
 __all__ = [
     "RAY_VERT",
     "RAY_FRAG",
+    "RAY_SOLID_FRAG",
     "TONEMAP_VERT",
     "TONEMAP_FRAG",
     "LINE_VERT",

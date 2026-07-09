@@ -71,6 +71,7 @@ def test_accumulation_is_linear_additive():
     _draw(viewer)
     energy_one = viewer.read_accumulation()[..., :3].max()
 
+    viewer.clear_rays()  # draw_rays accumulates bundles; start fresh
     viewer.draw_rays(two)
     _draw(viewer)
     energy_two = viewer.read_accumulation()[..., :3].max()

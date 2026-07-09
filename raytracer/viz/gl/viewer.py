@@ -31,6 +31,7 @@ from .renderers import (
     MarkerRenderer,
     PolylineRenderer,
     RayRenderer,
+    SolidRayRenderer,
     TonemapPass,
     auto_exposure,
 )
@@ -89,9 +90,15 @@ class OpenGLViewer(app.Canvas):
 
         self._scene_center: np.ndarray | None = None
         self._ray_renderer = RayRenderer()
+        self._solid_ray_renderer = SolidRayRenderer()
+        # Ray state accumulates across draw_rays/draw_ray_segments calls, so
+        # a scene can add several bundles (one call each) without later calls
+        # silently replacing earlier ones. clear_rays() resets for re-draws.
         self._segments: np.ndarray | None = None  # scene-relative
         self._escaping: np.ndarray | None = None  # bool per segment
         self._directions: np.ndarray | None = None  # unit dir per segment
+        self._ray_colors: np.ndarray | None = None  # (N, 4)
+        self._ray_intensities: np.ndarray | None = None  # (N,)
         self._surface_renderers: list[PolylineRenderer] = []
         self._fill_renderers: list[FilledPolygonRenderer] = []
         self._marker_renderers: list[MarkerRenderer] = []
@@ -216,15 +223,13 @@ class OpenGLViewer(app.Canvas):
         self._ensure_scene_center(starts.mean(axis=0))
         center = self._scene_center
 
-        self._segments = np.column_stack([starts - center, ends - center]).astype(
-            np.float32
-        )
-        self._escaping = np.asarray(escaping, dtype=bool)
-        self._directions = np.asarray(directions, dtype=np.float32)
-        self._extend_escaping()
-        self._ray_renderer.set_segments(
-            self._segments, np.asarray(colors, dtype=np.float32),
+        segments_rel = np.column_stack([starts - center, ends - center]).astype(np.float32)
+        self._append_ray_batch(
+            segments_rel,
+            np.asarray(colors, dtype=np.float32),
             np.asarray(intensities, dtype=np.float32),
+            np.asarray(escaping, dtype=bool),
+            np.asarray(directions, dtype=np.float32),
         )
         if marker_color is not None and markers:
             self.draw_markers(np.asarray(markers), color=marker_color, size=marker_size)
@@ -262,18 +267,63 @@ class OpenGLViewer(app.Canvas):
 
         self._ensure_scene_center(segments[:, 0, :].mean(axis=0))
         center = self._scene_center
-        self._segments = np.column_stack(
+        segments_rel = np.column_stack(
             [segments[:, 0, :] - center, segments[:, 1, :] - center]
         ).astype(np.float32)
-        self._escaping = escaping_arr
-        self._directions = np.asarray(directions, dtype=np.float32)
-        self._extend_escaping()
-        self._ray_renderer.set_segments(
-            self._segments,
+        self._append_ray_batch(
+            segments_rel,
             np.asarray(colors, dtype=np.float32),
             intensities.astype(np.float32),
+            escaping_arr,
+            np.asarray(directions, dtype=np.float32),
         )
         self._exposure_dirty = True
+        self.update()
+
+    def _append_ray_batch(
+        self,
+        segments_rel: np.ndarray,
+        colors: np.ndarray,
+        intensities: np.ndarray,
+        escaping: np.ndarray,
+        directions: np.ndarray,
+    ) -> None:
+        """Append a bundle to the accumulated ray state and re-upload it whole."""
+
+        if self._segments is None:
+            self._segments = segments_rel
+            self._ray_colors = colors
+            self._ray_intensities = intensities
+            self._escaping = escaping
+            self._directions = directions
+        else:
+            self._segments = np.vstack([self._segments, segments_rel])
+            self._ray_colors = np.vstack([self._ray_colors, colors])
+            self._ray_intensities = np.concatenate([self._ray_intensities, intensities])
+            self._escaping = np.concatenate([self._escaping, escaping])
+            self._directions = np.vstack([self._directions, directions])
+        self._extend_escaping()
+        self._ray_renderer.set_segments(self._segments, self._ray_colors, self._ray_intensities)
+        self._solid_ray_renderer.set_segments(self._segments, self._ray_colors, self._ray_intensities)
+
+    def clear_rays(self) -> None:
+        """Drop every accumulated ray bundle (for interactive re-draws)."""
+
+        self._segments = None
+        self._ray_colors = None
+        self._ray_intensities = None
+        self._escaping = None
+        self._directions = None
+        self._ray_renderer.set_segments(
+            np.empty((0, 4), dtype=np.float32),
+            np.empty((0, 4), dtype=np.float32),
+            np.empty(0, dtype=np.float32),
+        )
+        self._solid_ray_renderer.set_segments(
+            np.empty((0, 4), dtype=np.float32),
+            np.empty((0, 4), dtype=np.float32),
+            np.empty(0, dtype=np.float32),
+        )
         self.update()
 
     def draw_polyline(self, polyline, *, color="white", width: float = 2.0) -> None:
@@ -394,43 +444,49 @@ class OpenGLViewer(app.Canvas):
             self.config.min_pixels,
         )
         sigma_px = width_px * self.config.sigma_factor
+        use_solid = self.config.use_solid_rays
 
         h, w = int(viewport[1]), int(viewport[0])
-        self._accumulation.ensure((h, w))
-        with self._accumulation.fbo:
-            gloo.set_viewport(0, 0, w, h)
-            gloo.clear(color=(0.0, 0.0, 0.0, 0.0))
-            self._ray_renderer.draw(
-                viewport=viewport,
-                view_center=self._view_center_rel,
-                ppw=self.camera.pixels_per_world,
-                width_px=width_px,
-                sigma_px=sigma_px,
-                weight_scale=self.config.weight_scale,
-                use_solid=self.config.use_solid_rays,
-            )
 
-        if self.config.auto_exposure and self._exposure_dirty:
-            try:
-                self._exposure = self.config.exposure * auto_exposure(
-                    self._accumulation.read()
+        if not use_solid:
+            # "Beam" mode: additive HDR accumulation, tone-mapped for display —
+            # overlapping rays glow, good for dense bundles standing in for a
+            # continuous beam of light (see examples/duv_objective_2d.py).
+            self._accumulation.ensure((h, w))
+            with self._accumulation.fbo:
+                gloo.set_viewport(0, 0, w, h)
+                gloo.clear(color=(0.0, 0.0, 0.0, 0.0))
+                self._ray_renderer.draw(
+                    viewport=viewport,
+                    view_center=self._view_center_rel,
+                    ppw=self.camera.pixels_per_world,
+                    width_px=width_px,
+                    sigma_px=sigma_px,
+                    weight_scale=self.config.weight_scale,
                 )
-            except Exception as error:  # pragma: no cover - driver dependent
-                logger.warning("Auto-exposure readback failed: %s", error)
+
+            if self.config.auto_exposure and self._exposure_dirty:
+                try:
+                    self._exposure = self.config.exposure * auto_exposure(
+                        self._accumulation.read()
+                    )
+                except Exception as error:  # pragma: no cover - driver dependent
+                    logger.warning("Auto-exposure readback failed: %s", error)
+                    self._exposure = self.config.exposure
+                self._exposure_dirty = False
+            elif not self.config.auto_exposure:
                 self._exposure = self.config.exposure
-            self._exposure_dirty = False
-        elif not self.config.auto_exposure:
-            self._exposure = self.config.exposure
 
         gloo.set_viewport(0, 0, w, h)
         background = Color(self.config.background).rgb
         gloo.clear(color=Color(self.config.background))
-        self._tonemap.draw(
-            self._accumulation.texture,
-            exposure=self._exposure,
-            mode=self.config.resolved_tone_map(),
-            background=tuple(background) if self.config.background != "black" else (0.0, 0.0, 0.0),
-        )
+        if not use_solid:
+            self._tonemap.draw(
+                self._accumulation.texture,
+                exposure=self._exposure,
+                mode=self.config.resolved_tone_map(),
+                background=tuple(background) if self.config.background != "black" else (0.0, 0.0, 0.0),
+            )
         for renderer in self._fill_renderers:  # material bodies, under the outlines
             renderer.draw(
                 viewport=viewport,
@@ -442,6 +498,17 @@ class OpenGLViewer(app.Canvas):
                 viewport=viewport,
                 view_center=self._view_center_rel,
                 ppw=self.camera.pixels_per_world,
+            )
+        if use_solid:
+            # "Geometric" mode: crisp, non-additive lines drawn straight onto
+            # the visible framebuffer — perfectly sharp physical rays, no
+            # HDR glow, no aliasing blur (see examples/telescopes/*.py).
+            self._solid_ray_renderer.draw(
+                viewport=viewport,
+                view_center=self._view_center_rel,
+                ppw=self.camera.pixels_per_world,
+                width_px=width_px,
+                weight_scale=self.config.weight_scale,
             )
         for renderer in self._marker_renderers:
             renderer.draw(
@@ -473,6 +540,7 @@ class OpenGLViewer(app.Canvas):
         self._extend_escaping()
         if self._segments is not None and self._escaping is not None and self._escaping.any():
             self._ray_renderer.update_endpoints(self._segments)
+            self._solid_ray_renderer.update_endpoints(self._segments)
         self.update()
 
     def on_mouse_wheel(self, event) -> None:
@@ -481,6 +549,7 @@ class OpenGLViewer(app.Canvas):
         self._extend_escaping()
         if self._segments is not None and self._escaping is not None and self._escaping.any():
             self._ray_renderer.update_endpoints(self._segments)
+            self._solid_ray_renderer.update_endpoints(self._segments)
         self.update()
 
 
