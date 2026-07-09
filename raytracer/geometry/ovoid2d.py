@@ -11,6 +11,7 @@ from ..core.frames import LocalFrame
 from ..core.vectors import normalize
 from ..nonseq.rays import Intersection2D, Ray2D
 from ..nonseq.surfaces import Surface2D
+from .cartesian_oval import cartesian_oval_parametric_curve, gots_params
 
 
 # ============================================================================
@@ -109,19 +110,20 @@ def _intersect_fermat_ovoid(origin: np.ndarray, direction: np.ndarray, *,
 
 
 # ============================================================================
-# Parametric form for visualization (optional - can return empty for now)
+# Parametric form for visualization
 # ============================================================================
 
 def sigma_parametric(z0: float, zi: float, rho: np.ndarray, n0: float, ni: float):
     """
-    Parametric form for drawing. Note: This may not match the Fermat surface exactly.
-    For now, we'll use a simple approximation or return zeros.
+    Exact parametric form ``rho -> (z, r)`` for drawing the Cartesian ovoid.
+
+    Uses the closed-form GOTS parametrization (``raytracer.geometry.
+    cartesian_oval``): plugging ``(z(rho), r(rho))`` back into
+    ``fermat_ovoid_F`` gives a residual at machine precision, so the drawn
+    curve matches the surface the ray tracer actually intersects.
     """
-    # TODO: Implement accurate parametric form or use numerical sampling of Fermat surface
-    rho = np.asarray(rho, dtype=float)
-    z = np.zeros_like(rho)
-    r = rho
-    return z, r
+    G, O, T, S = gots_params(n0, z0, ni, zi)
+    return cartesian_oval_parametric_curve(rho, G, O, T, S)
 
 
 # ---------------------------------------------------------------------
@@ -140,6 +142,7 @@ class CartesianOvoid2D(Surface2D):
     origin: np.ndarray = field(default_factory=lambda: np.zeros(2))
     angle: float = 0.0
     surface_id: str = "cartesian_ovoid"
+    semidiameter: float | None = None
 
     def __post_init__(self) -> None:
         Surface2D.__init__(self,
@@ -154,32 +157,32 @@ class CartesianOvoid2D(Surface2D):
     # ---------- drawing ----------
     def _rho_max(self) -> float:
         """
-        Find the first positive ρ where r(ρ)=0 ↔ ρ^2 - z(ρ)^2 = 0
-        using robust bracket + bisection. This mirrors your 'biseccion_mod'
-        behavior so the drawn curve closes cleanly.
+        Find the closure point of the oval: the first ρ > 0 (past the vertex)
+        where r(ρ) = 0, i.e. ρ² - z(ρ)² = 0, using bracket + bisection.
+
+        Near the vertex, z(ρ) is higher-order in ρ (paraxial sag), so
+        g(ρ) = ρ² - z(ρ)² starts positive; the oval closes where g first
+        turns negative (z catches up with ρ).
         """
         def g(rho):
             z, _ = sigma_parametric(self.z0, self.zi, np.array([rho]), self.n_exterior, self.n_interior)
-            z = float(z[0])
-            return rho * rho - z * z
+            return rho * rho - float(z[0]) ** 2
 
-        # bracket
-        lo, hi = 0.0, 1.0
-        glo = g(lo)  # <= 0
+        lo, hi = 1e-6, 1.0
+        glo = g(lo)  # > 0 just past the vertex
         for _ in range(64):
             ghi = g(hi)
-            if ghi >= 0.0:
+            if ghi <= 0.0:
                 break
             hi *= 2.0
         else:
-            # fallback if never crosses: just take a sane radius to “see” the curve
-            return max(2.0, hi)
+            # never closes within range: fall back to a sane radius to "see" the curve
+            return hi
 
-        # bisection
         for _ in range(80):
             mid = 0.5 * (lo + hi)
             gm = g(mid)
-            if abs(gm) < 1e-10 or (hi - lo) < 1e-6:
+            if abs(gm) < 1e-10 or (hi - lo) < 1e-9:
                 return mid
             if np.sign(gm) == np.sign(glo):
                 lo, glo = mid, gm
@@ -217,6 +220,9 @@ class CartesianOvoid2D(Surface2D):
         if res is None:
             return None
         p_loc, lam = res
+
+        if self.semidiameter is not None and abs(p_loc[1]) > self.semidiameter:
+            return None
 
         # Compute normal from gradient (handle sign for r coordinate)
         grad = fermat_ovoid_grad(p_loc[0], abs(p_loc[1]),

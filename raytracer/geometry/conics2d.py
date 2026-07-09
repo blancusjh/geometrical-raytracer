@@ -90,6 +90,7 @@ class ConicInterface2D(Surface2D):
     surface_id: str = "conic"
     n_exterior: float = 1.0
     n_interior: float = 1.0
+    semidiameter: float | None = None
 
     def __post_init__(self) -> None:
         Surface2D.__init__(
@@ -135,6 +136,8 @@ class ConicInterface2D(Surface2D):
         if result is None:
             return None
         point_local, lam = result
+        if self.semidiameter is not None and abs(point_local[1]) > self.semidiameter:
+            return None
         point_world = self.frame.to_world(point_local)
         normal_world = normalize(self.frame.direction_to_world(self.profile.normal(point_local)))
         return Intersection2D(
@@ -159,6 +162,7 @@ class EllipseConic(ConicInterface2D):
         surface_id: str = "ellipse",
         n_exterior: float = 1.0,
         n_interior: float = 1.0,
+        semidiameter: float | None = None,
     ) -> None:
         if semi_major <= 0.0 or semi_minor <= 0.0:
             raise ValueError("Semi-axes must be positive.")
@@ -175,6 +179,7 @@ class EllipseConic(ConicInterface2D):
             surface_id=surface_id,
             n_exterior=n_exterior,
             n_interior=n_interior,
+            semidiameter=semidiameter,
         )
 
 
@@ -188,6 +193,7 @@ class CircleConic(ConicInterface2D):
         surface_id: str = "circle",
         n_exterior: float = 1.0,
         n_interior: float = 1.0,
+        semidiameter: float | None = None,
     ) -> None:
         if radius <= 0.0:
             raise ValueError("Radius must be positive.")
@@ -199,6 +205,7 @@ class CircleConic(ConicInterface2D):
             surface_id=surface_id,
             n_exterior=n_exterior,
             n_interior=n_interior,
+            semidiameter=semidiameter,
         )
 
 
@@ -213,6 +220,7 @@ class ParabolaConic(ConicInterface2D):
         surface_id: str = "parabola",
         n_exterior: float = 1.0,
         n_interior: float = 1.0,
+        semidiameter: float | None = None,
     ) -> None:
         if p <= 0.0:
             raise ValueError("Semi-latus rectum must be positive.")
@@ -225,6 +233,7 @@ class ParabolaConic(ConicInterface2D):
             surface_id=surface_id,
             n_exterior=n_exterior,
             n_interior=n_interior,
+            semidiameter=semidiameter,
         )
 
 
@@ -240,6 +249,7 @@ class HyperbolaConic(ConicInterface2D):
         surface_id: str = "hyperbola",
         n_exterior: float = 1.0,
         n_interior: float = 1.0,
+        semidiameter: float | None = None,
     ) -> None:
         if semi_major <= 0.0 or semi_minor <= 0.0:
             raise ValueError("Semi-axes must be positive.")
@@ -254,6 +264,7 @@ class HyperbolaConic(ConicInterface2D):
             surface_id=surface_id,
             n_exterior=n_exterior,
             n_interior=n_interior,
+            semidiameter=semidiameter,
         )
 
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ..core.materials import AIR, Material
+from ..geometry.cartesian_oval import CartesianOvalProfile
 from ..geometry.sag import AsphereProfile
 
 
@@ -26,7 +27,7 @@ class SurfaceRow:
     ``semidiameter`` is the clear aperture; ``None`` disables clipping.
     """
 
-    profile: AsphereProfile
+    profile: AsphereProfile | CartesianOvalProfile
     thickness: float = 0.0
     material_after: Material = AIR
     kind: SurfaceKind = SurfaceKind.REFRACT
@@ -47,6 +48,35 @@ class SurfaceRow:
     ) -> "SurfaceRow":
         return cls(
             profile=AsphereProfile.from_radius(radius, conic, coefficients),
+            thickness=thickness,
+            material_after=material,
+            kind=SurfaceKind.REFRACT,
+            semidiameter=semidiameter,
+            comment=comment,
+        )
+
+    @classmethod
+    def cartesian_oval(
+        cls,
+        *,
+        n0: float,
+        z0: float,
+        ni: float,
+        zi: float,
+        thickness: float,
+        material: Material,
+        semidiameter: float | None = None,
+        comment: str = "",
+    ) -> "SurfaceRow":
+        """Stigmatic refracting surface between object (n0, z0) and image (ni, zi).
+
+        See :class:`raytracer.geometry.cartesian_oval.CartesianOvalProfile`;
+        keep ``semidiameter`` within ``profile.max_usable_height`` for a
+        physically meaningful (single-valued) surface.
+        """
+
+        return cls(
+            profile=CartesianOvalProfile(n0=n0, z0=z0, ni=ni, zi=zi),
             thickness=thickness,
             material_after=material,
             kind=SurfaceKind.REFRACT,

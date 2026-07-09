@@ -87,3 +87,23 @@ def test_old_name_emits_deprecation_warning():
 
     with pytest.warns(DeprecationWarning):
         raytracer.ConicalDioptrique(e=0.0, p=1.0)
+
+
+def test_semidiameter_clips_rays_beyond_the_aperture():
+    """A ray that would hit the conic outside its clear aperture must miss."""
+
+    circle = CircleConic(radius=5.0, center=np.array([10.0, 0.0]), semidiameter=2.0)
+
+    within = Ray2D(origin=[0.0, 1.0], direction=[1.0, 0.0])
+    assert circle.intersect(within) is not None
+
+    beyond = Ray2D(origin=[0.0, 3.0], direction=[1.0, 0.0])
+    assert circle.intersect(beyond) is None
+
+
+def test_unset_semidiameter_does_not_clip():
+    """Default (None) semidiameter keeps the old, unclipped behaviour."""
+
+    circle = CircleConic(radius=5.0, center=np.array([10.0, 0.0]))
+    ray = Ray2D(origin=[0.0, 4.9], direction=[1.0, 0.0])
+    assert circle.intersect(ray) is not None

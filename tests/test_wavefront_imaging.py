@@ -11,6 +11,7 @@ from raytracer.analysis.imaging import (
     scalar_psf,
 )
 from raytracer.analysis.wavefront import exit_pupil_wavefront
+from raytracer.core.materials import AIR, ConstantIndex
 from raytracer.sequential import (
     FieldPoint,
     OpticalSystem,
@@ -45,6 +46,29 @@ def test_eikonal_opd_is_zero_for_stigmatic_conjugates():
         remove_mean=True,
     )
     # Perfect conjugates: OPD constant, i.e. ~0 after mean removal.
+    assert np.max(np.abs(samples.opd_waves)) < 1e-6
+
+
+def test_cartesian_oval_3d_is_stigmatic():
+    """The 3-D GOTS Cartesian oval (SurfaceRow.cartesian_oval) must give OPD ~ 0,
+    same as the 2-D implicit ovoid it shares its math with."""
+
+    n0, z0, ni, zi = 1.0, -30.0, 1.7, 10.0
+    glass = ConstantIndex("TEST_GLASS", ni)
+    row = SurfaceRow.cartesian_oval(
+        n0=n0, z0=z0, ni=ni, zi=zi, thickness=zi, material=glass, semidiameter=3.0
+    )
+    system = OpticalSystem([row], object_space=AIR, object_z=z0)
+    tracer = SequentialTracer(system, restart_offset=0.0)
+
+    pupil = trace_pupil(
+        tracer, FieldPoint(y=0.0), na_object_sine=0.1,
+        sampling=PupilSampling(kind="rings", radial=8, azimuth=24),
+        slope_model="sine", chief_slope=0.0,
+    )
+    samples = exit_pupil_wavefront(
+        pupil, na_image=0.3, wavelength_mm=0.5e-3, reference_radius=5.0, remove_mean=True,
+    )
     assert np.max(np.abs(samples.opd_waves)) < 1e-6
 
 
