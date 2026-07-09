@@ -2,14 +2,16 @@
 
 1. **Geometric (2-D engine):** a bar-pattern object emits weighted ray fans
    (`ImageSource2D`); a doublet relays it onto a screen whose irradiance
-   histogram reveals the magnified, inverted image.
+   histogram reveals the magnified, inverted image. The RMS spot radius of
+   the on-axis point of that object is also reported, quantifying the
+   doublet's (nonzero) aberration.
 2. **Diffractive (sequential analysis):** any picture becomes a binary mask
    (`BinaryMask.from_image`) and is imaged through a (perfect or fitted)
    pupil with the partially coherent Abbe method.
 
 Usage:
-    python -m examples.image_formation           # show both figures
-    python -m examples.image_formation --save out/
+    python -m examples.imaging.geometric_and_diffractive_imaging           # show both figures
+    python -m examples.imaging.geometric_and_diffractive_imaging --save out/
 """
 
 from __future__ import annotations
@@ -20,11 +22,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer.analysis import BinaryMask, abbe_image, pupil_function
+from raytracer.analysis import BinaryMask, abbe_image, pupil_function, spot_data_from_points
 from raytracer.nonseq import (
     ImageSource2D,
     Lens2D,
@@ -62,13 +64,19 @@ def geometric_relay():
     edges, values = screen.irradiance(bins=180)
     centers = 0.5 * (edges[:-1] + edges[1:]) - screen.length / 2.0
 
+    # RMS spot size for rays landing near the object's mid-height bar (the
+    # dimmer one), as a proxy for the relay's on-axis aberration.
+    near_center = [h.point for h in screen.hits if abs(h.s - screen.length / 2.0) < 2.0]
+    rms_um = spot_data_from_points(np.asarray(near_center)).rms_radius_um if len(near_center) > 1 else float("nan")
+
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
     object_y = np.linspace(-6.0, 6.0, profile.size)
     axes[0].plot(object_y, profile, color="#20509e")
     axes[0].set(title="Object intensity profile", xlabel="y (mm)", ylabel="I")
     axes[1].plot(centers, values / values.max(), color="#b3421b")
     axes[1].set(
-        title=f"Screen irradiance ({len(screen.hits)} rays) — inverted, magnified",
+        title=f"Screen irradiance ({len(screen.hits)} rays) — inverted, magnified\n"
+              f"RMS spot near center: {rms_um:.3g} um",
         xlabel="y (mm)",
     )
     for ax in axes:
@@ -118,6 +126,8 @@ def _make_demo_image(path: Path) -> None:
 
 
 def main() -> None:
+    import tempfile
+
     save_dir = None
     if "--save" in sys.argv:
         save_dir = Path(sys.argv[sys.argv.index("--save") + 1])
@@ -125,9 +135,12 @@ def main() -> None:
 
     fig_geo = geometric_relay()
 
-    demo = Path(save_dir or ".") / "demo_letter.png"
-    _make_demo_image(demo)
-    fig_diff = diffractive_imaging(demo)
+    # The demo letter is an intermediate input, not a deliverable: keep it in
+    # a temp dir (never the CWD) unless the user asked to save outputs.
+    with tempfile.TemporaryDirectory() as tmp:
+        demo = Path(save_dir or tmp) / "demo_letter.png"
+        _make_demo_image(demo)
+        fig_diff = diffractive_imaging(demo)
 
     if save_dir:
         fig_geo.savefig(save_dir / "geometric_relay.png", dpi=160)

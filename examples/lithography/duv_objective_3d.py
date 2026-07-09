@@ -12,9 +12,9 @@ Two ray modes, toggled live with the **m** key:
 Other keys: **w** wireframe, drag orbit, wheel zoom.
 
 Usage:
-    python -m examples.duv_3d                 # interactive (start in lines mode)
-    python -m examples.duv_3d --beam          # start in beam mode
-    python -m examples.duv_3d --save out.png  # offscreen snapshot
+    python -m examples.lithography.duv_objective_3d                 # interactive (start in lines mode)
+    python -m examples.lithography.duv_objective_3d --beam          # start in beam mode
+    python -m examples.lithography.duv_objective_3d --save out.png  # offscreen snapshot
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -47,9 +47,9 @@ def _bundle(viewer, tracer, label, sampling, **kw):
     import time
 
     n_est = sampling["radial"] * sampling["azimuth"] * len(FIELDS)
-    print(f"[duv_3d] Trazando {label}: ~{n_est:,} rayos...", end=" ", flush=True)
+    print(f"[duv_objective_3d] Tracing {label}: ~{n_est:,} rays...", end=" ", flush=True)
     if n_est > 200_000:
-        print("(muestreo ENORME, esto puede tardar minutos)", end=" ", flush=True)
+        print("(huge sampling, this may take minutes)", end=" ", flush=True)
     t0 = time.time()
     viewer.add_field_bundles(tracer, fields=FIELDS, na_object_sine=NA_OBJECT,
                              **sampling, **kw)
@@ -57,20 +57,21 @@ def _bundle(viewer, tracer, label, sampling, **kw):
 
 
 def main() -> None:
-    print("[duv_3d] Cargando prescripción US7557996 (48 superficies)...", flush=True)
+    print("[duv_objective_3d] Loading the US7557996 prescription (48 surfaces)...", flush=True)
     csv = resources.files("raytracer") / "data" / "US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
     tracer = SequentialTracer(system)
     solve_object_plane(tracer)
 
-    viewer = Viewer3D(title="US7557996 — 3D   [m] lines/beam/spectrum  [w] wireframe")
+    viewer = Viewer3D(title="US7557996 — 3D   [m] lines/beam/spectrum  [a] axes  [w] wireframe")
     viewer.add_system(system)
-    _bundle(viewer, tracer, "modo lines", LINES_SAMPLING)
-    _bundle(viewer, tracer, "modo beam (aditivo violeta)", BEAM_SAMPLING, mode="beam")
-    _bundle(viewer, tracer, "modo spectrum (colorimétrico)", BEAM_SAMPLING,
+    viewer.add_axes()
+    _bundle(viewer, tracer, "lines mode", LINES_SAMPLING)
+    _bundle(viewer, tracer, "beam mode (additive, violet)", BEAM_SAMPLING, mode="beam")
+    _bundle(viewer, tracer, "spectrum mode (colorimetric)", BEAM_SAMPLING,
             mode="spectrum")
-    print("[duv_3d] Abriendo ventana — [m] cambia modo de rayos, [w] wireframe,"
-          " arrastra para orbitar.", flush=True)
+    print("[duv_objective_3d] Opening window — [m] cycles ray mode, [w] wireframe,"
+          " drag to orbit.", flush=True)
     if "--beam" in sys.argv:
         viewer.set_ray_mode("beam")
     elif "--spectrum" in sys.argv:

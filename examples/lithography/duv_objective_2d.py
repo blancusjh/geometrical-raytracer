@@ -9,11 +9,13 @@ Meridional (z, y) layout of the folded catadioptric objective in the
 * a dense fan of exact rays per field fills the full object aperture and
   **terminates on a drawn observation screen** at the image plane (markers show
   where each ray lands);
-* rays accumulate additively so the converging cones glow.
+* rays accumulate additively ("beam" mode, ``use_solid_rays=False``) so the
+  converging cones glow — see ``examples/telescopes/*.py`` for the "geometric"
+  (crisp, non-additive) counterpart.
 
 Usage:
-    python -m examples.duv_2d_gl                 # interactive pan/zoom
-    python -m examples.duv_2d_gl --save out.png  # offscreen snapshot
+    python -m examples.lithography.duv_objective_2d                 # interactive pan/zoom
+    python -m examples.lithography.duv_objective_2d --save out.png  # offscreen snapshot
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -36,6 +38,12 @@ from raytracer.sequential import (
 )
 from raytracer.sequential.fields import trace_from_object
 from raytracer.viz.plots import DEFAULT_MATERIAL_COLORS
+from raytracer.viz.sag_drawing import (
+    lens_fill_mesh,
+    lens_outline,
+    sample_profile_curve,
+    surface_semidiameter as _semi,
+)
 
 GLASS_ALPHA = 0.30
 
@@ -46,34 +54,10 @@ FAN_HALF_SLOPE = 0.305          # ~asin(0.3) marginal slope -> full aperture
 RAYS_PER_FIELD = 121
 
 
-def _semi(row, fallback=50.0):
-    return row.semidiameter if row.semidiameter is not None else fallback
-
-
 def surface_curve(system, i, samples=260):
     """Open meridional profile (z, y) of surface ``i``."""
-    row = system.rows[i]
-    semi = _semi(row)
-    h = np.linspace(-semi, semi, samples)
-    z = system.vertices[i] + row.profile.sag(np.abs(h))
+    z, h = sample_profile_curve(system, i, samples=samples)
     return np.column_stack([z, h])
-
-
-def lens_fill_mesh(system, i, j, samples=200):
-    """Strip triangulation (verts, faces) of the element body between faces i and j."""
-    ri, rj = system.rows[i], system.rows[j]
-    semi = max(_semi(ri), _semi(rj))
-    h = np.linspace(-semi, semi, samples)
-    zf = system.vertices[i] + ri.profile.sag(np.abs(h))
-    zb = system.vertices[j] + rj.profile.sag(np.abs(h))
-    verts = np.empty((2 * samples, 2))
-    verts[0::2] = np.column_stack([zf, h])   # front-face vertices (even)
-    verts[1::2] = np.column_stack([zb, h])   # back-face vertices (odd)
-    k = np.arange(samples - 1)
-    faces = np.empty((2 * (samples - 1), 3), dtype=np.uint32)
-    faces[0::2] = np.column_stack([2 * k, 2 * k + 1, 2 * k + 2])
-    faces[1::2] = np.column_stack([2 * k + 1, 2 * k + 3, 2 * k + 2])
-    return verts, faces
 
 
 def material_rgba(material, alpha=GLASS_ALPHA):
@@ -82,20 +66,8 @@ def material_rgba(material, alpha=GLASS_ALPHA):
     return (float(r), float(g), float(b), alpha)
 
 
-def lens_outline(system, i, j, samples=220):
-    """Closed (z, y) outline of the element spanning surfaces i (front) and j (back)."""
-    ri, rj = system.rows[i], system.rows[j]
-    semi = max(_semi(ri), _semi(rj))
-    h = np.linspace(-semi, semi, samples)
-    zf = system.vertices[i] + ri.profile.sag(np.abs(h))
-    zb = system.vertices[j] + rj.profile.sag(np.abs(h))
-    front = np.column_stack([zf, h])
-    back = np.column_stack([zb, h])[::-1]
-    return np.vstack([front, back, front[:1]])  # closed loop
-
-
 def build_viewer():
-    print("[duv_2d_gl] Cargando prescripción y trazando 363 rayos exactos...", flush=True)
+    print("[duv_objective_2d] Loading the prescription and tracing 363 exact rays...", flush=True)
     csv = resources.files("raytracer") / "data" / "US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
     tracer = SequentialTracer(system)
@@ -110,6 +82,7 @@ def build_viewer():
     viewer = OpenGLViewer(
         x_lims=(z_lo - pad, z_hi + pad), y_lims=(-y_max, y_max),
         size=(1600, 640),
+        title="US7557996 DUV objective (2D) — raytracer",
         render_config=RenderConfig(
             ray_width=0.7, sigma_factor=0.42, min_pixels=1.0,
             use_solid_rays=False, background="black",
@@ -173,7 +146,7 @@ def main():
         mpimg.imsave(out, viewer.snapshot())
         print(f"wrote {out}")
         return
-    print("[duv_2d_gl] Abriendo ventana — arrastra para panear, rueda para zoom.",
+    print("[duv_objective_2d] Opening window — drag to pan, wheel to zoom.",
           flush=True)
     viewer.run()
 

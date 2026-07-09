@@ -1,4 +1,4 @@
-from .clean_ellipse_opengl import main
+from .stigmatic_surfaces.ellipse_mirror import main
 
 if __name__ == "__main__":
     main()

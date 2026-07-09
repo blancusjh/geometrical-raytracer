@@ -1,13 +1,16 @@
 """One scene, two interchangeable backends.
 
 A cemented doublet focuses a point source onto an observation screen. The
-same neutral Scene renders in matplotlib (publication diagram, few rays)
-or OpenGL (HDR caustic accumulation, many rays).
+same neutral Scene renders in matplotlib (publication diagram, few rays) or
+OpenGL (HDR caustic accumulation, many rays). The matplotlib run also
+reports the RMS spot size on the screen — a doublet is not stigmatic for an
+off-axis point source, so this is a small but nonzero number, not a
+diagnostic failure.
 
 Usage:
-    python -m examples.lens_screen_dual_backend            # matplotlib
-    python -m examples.lens_screen_dual_backend gl         # OpenGL viewer
-    python -m examples.lens_screen_dual_backend both --save out/  # PNGs only
+    python -m examples.imaging.single_lens_relay            # matplotlib
+    python -m examples.imaging.single_lens_relay gl         # OpenGL viewer
+    python -m examples.imaging.single_lens_relay both --save out/  # PNGs only
 """
 
 from __future__ import annotations
@@ -17,10 +20,11 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from raytracer.analysis import spot_data_from_points
 from raytracer.nonseq import (
     Lens2D,
     PointSource2D,
@@ -71,7 +75,11 @@ def main() -> None:
             print(f"wrote {save_dir / 'doublet_mpl.png'}")
         edges, values = screen.irradiance(bins=100)
         peak = edges[np.argmax(values)]
+        points = np.array([hit.point for hit in screen.hits])
+        spot = spot_data_from_points(points)
         print(f"screen: {len(screen.hits)} hits, irradiance peak at s={peak:.2f} mm")
+        print(f"RMS spot radius: {spot.rms_radius_um:.4g} um "
+              "(nonzero: a doublet is not a stigmatic surface)")
 
     if backend in ("gl", "both"):
         scene, _ = build_scene(samples=4000)  # dense: HDR caustics

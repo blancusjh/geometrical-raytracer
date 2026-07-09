@@ -78,35 +78,46 @@ viewer.draw_rays(tree)     # acumulación HDR + auto-exposición
 viewer.run()
 ```
 
-Demos ejecutables en `examples/`:
+Demos ejecutables en `examples/`, organizadas por carpeta:
 
-- `clean_ellipse_opengl.py`, `conic_showcase.py`, `refractive_sphere.py`,
-  `refractive_ovoid.py` — cáusticas y refracción en el visor OpenGL.
-- `lens_screen_dual_backend.py` — la misma escena por matplotlib y OpenGL.
-- `interactive_lens.py` — modo interactivo: arrastra la fuente/lente/pantalla
-  (handles cian), Tab cicla parámetros, ←/→ los ajusta con retrazado en vivo.
-- `image_formation.py` — formación de imágenes: relevo geométrico de un
-  objeto extendido (`ImageSource2D` → `Screen2D`) y formación difractiva de
-  una imagen cargada de archivo (`BinaryMask.from_image` → método de Abbe).
-- `duv_3d.py` — el objetivo DUV completo en 3D (mallas de revolución +
-  haces trazados, cámara turntable).
+- `stigmatic_surfaces/` — superficies diseñadas para estigmatismo perfecto:
+  `ellipse_mirror.py` (foco a foco), `cartesian_oval_refractor_2d.py` y
+  `cartesian_oval_refractor_3d.py` (óvalo de Descartes, parametrización GOTS,
+  2D implícito vs 3D con sag cerrado). Los tres verifican el estigmatismo
+  cuantitativamente (RMS/OPD ~0), no solo lo ilustran.
+- `telescopes/` — `galilean.py` y `keplerian.py` (motor secuencial, separación
+  resuelta para condición afocal exacta, magnificación angular medida por
+  trazado) y `newtonian.py` (motor 2D no-secuencial, primario parabólico +
+  secundario plano a 45°, con obstrucción central).
+- `imaging/` — `single_lens_relay.py` (misma escena en matplotlib y OpenGL),
+  `interactive_doublet.py` (arrastra fuente/lente/pantalla, Tab cicla
+  parámetros), `geometric_and_diffractive_imaging.py` (relevo geométrico de un
+  objeto extendido vs. formación difractiva por método de Abbe).
+- `lithography/` — `duv_objective_2d.py`/`duv_objective_3d.py`, el objetivo
+  DUV US7557996 completo (48 superficies) en 2D (HDR) y 3D (mallas de
+  revolución, cámara turntable).
 
 ## Estructura
 
 ```
 raytracer/
   core/        # vectores, marcos, materiales, leyes (Snell, Fresnel)
-  geometry/    # sag asférico compartido, cónicas 2D, ovoides
+  geometry/    # sag asférico compartido, cónicas 2D, ovoides, óvalo de
+               # Descartes (GOTS, compartido entre el ovoide 2D y el
+               # CartesianOvalProfile 3D)
   sequential/  # filas de superficie, sistema, prescripción CSV, trazador
                # vectorizado, capa paraxial, campos y pupilas
-  analysis/    # spots, fans, métricas, Zernike, eikonal, imaging escalar
+  analysis/    # spots, fans, métricas, Zernike, eikonal, imaging escalar,
+               # verificación de estigmatismo (spot RMS + OPD)
   nonseq/      # rayos, superficies, fuentes (incl. ImageSource2D), lentes/
                # espejos 2D, pantallas de observación, trazador no-secuencial
-  viz/         # plots matplotlib, escena neutral dual-backend (scene/mpl/
-               # protocol), color (CIE), visor OpenGL HDR (gl/), modo
-               # interactivo (interactive), visor 3D (gl3d)
+  viz/         # plots matplotlib, muestreo de sag compartido (sag_drawing),
+               # escena neutral dual-backend (scene/mpl/protocol), color
+               # (CIE), visor OpenGL HDR con modo geométrico no-aditivo (gl/),
+               # modo interactivo (interactive), visor 3D (gl3d)
   data/        # prescripción US7557996 empaquetada
-examples/      # demos GL + notebooks de réplica de patentes
+examples/      # demos por categoría (stigmatic_surfaces/, telescopes/,
+               # imaging/, lithography/) + notebooks de réplica de patentes
 reference/     # notebooks y módulo de referencia originales
 tests/         # verdades analíticas + regresiones de sistema completo
 ```
@@ -114,7 +125,7 @@ tests/         # verdades analíticas + regresiones de sistema completo
 ## Tests
 
 ```bash
-pytest                 # suite completa (54 tests)
+pytest                 # suite completa (87 tests)
 pytest -m "not gpu"    # sin los smoke tests de OpenGL
 ```
 
