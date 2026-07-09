@@ -15,8 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gl = ["vispy>=0.14"]
-dev = ["pytest>=8", "vispy>=0.14"]
+# vispy alone has no windowed backend: without one of these, it silently
+# falls back to the offscreen "_egl" backend and .run() never shows a window.
+gl = ["vispy>=0.14", "pyside6>=6.5"]
+dev = ["pytest>=8", "vispy>=0.14", "pyside6>=6.5"]
 
 [tool.setuptools.packages.find]
 include = ["raytracer*"]
