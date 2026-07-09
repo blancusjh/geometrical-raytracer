@@ -12,7 +12,13 @@ from .imaging import (
     scalar_psf,
 )
 from .metrics import export_metrics_csv, field_metrics
-from .spots import SpotData, spot_data
+from .spots import SpotData, spot_data, spot_data_from_points
+from .stigmatism import (
+    StigmatismReport,
+    point_line_distances,
+    rays_by_generation,
+    stigmatism_report,
+)
 from .wavefront import WavefrontSamples, exit_pupil_wavefront
 from .zernike import (
     Mode,
@@ -26,6 +32,11 @@ from .zernike import (
 __all__ = [
     "SpotData",
     "spot_data",
+    "spot_data_from_points",
+    "StigmatismReport",
+    "stigmatism_report",
+    "point_line_distances",
+    "rays_by_generation",
     "FanData",
     "ray_fans",
     "field_metrics",

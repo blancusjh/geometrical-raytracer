@@ -40,16 +40,12 @@ class SpotData:
         return weighted_quantile(radius, self.weights, fraction)
 
 
-def spot_data(pupil: PupilTrace) -> SpotData:
-    """Compute area-weighted spot statistics from a pupil trace."""
-
-    points = pupil.image_points[:, :2]
-    weights = pupil.weights
+def _spot_from_arrays(field_y: float, points: np.ndarray, weights: np.ndarray) -> SpotData:
     centroid = np.sum(points * weights[:, None], axis=0)
     relative_um = (points - centroid) * 1e3
     radius_um = np.linalg.norm(relative_um, axis=1)
     return SpotData(
-        field_y=pupil.field.y,
+        field_y=field_y,
         centroid=centroid,
         relative_um=relative_um,
         weights=weights,
@@ -59,4 +55,29 @@ def spot_data(pupil: PupilTrace) -> SpotData:
     )
 
 
-__all__ = ["SpotData", "spot_data", "weighted_mean", "weighted_quantile"]
+def spot_data(pupil: PupilTrace) -> SpotData:
+    """Compute area-weighted spot statistics from a pupil trace."""
+
+    return _spot_from_arrays(pupil.field.y, pupil.image_points[:, :2], pupil.weights)
+
+
+def spot_data_from_points(
+    points: np.ndarray, *, field_label: float = 0.0, weights: np.ndarray | None = None
+) -> SpotData:
+    """Spot statistics from raw ``(N, 2)`` image-plane points (mm), equal-weighted
+    by default. For engines with no :class:`PupilTrace` — e.g. the 2-D
+    non-sequential engine's ``Screen2D.coordinates()`` — this is the same
+    convergence metric (RMS radius from the centroid, in um) without needing a
+    sequential pupil trace.
+    """
+
+    points = np.asarray(points, dtype=float)
+    if weights is None:
+        weights = np.full(len(points), 1.0 / len(points))
+    else:
+        weights = np.asarray(weights, dtype=float)
+        weights = weights / weights.sum()
+    return _spot_from_arrays(field_label, points, weights)
+
+
+__all__ = ["SpotData", "spot_data", "spot_data_from_points", "weighted_mean", "weighted_quantile"]
