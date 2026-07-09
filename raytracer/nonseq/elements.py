@@ -87,6 +87,34 @@ class Lens2D:
         return cls(front=front, back=back, rims=rims, name=name)
 
     @classmethod
+    def spherical(
+        cls,
+        *,
+        R1: float,
+        R2: float,
+        thickness: float,
+        semidiameter: float,
+        n: float,
+        n_ambient: float = 1.0,
+        vertex=(0.0, 0.0),
+        angle: float = 0.0,
+        name: str = "lens",
+    ) -> "Lens2D":
+        """Lens bounded by two *spherical* surfaces of radii ``R1``/``R2``.
+
+        Named by the surface shape (a bare radius is only the first-order
+        curvature and does not determine a shape by itself); ``R = 0`` or
+        ``inf`` denotes a flat face. Sign convention: positive ``R`` curves
+        toward +axis (center of curvature after the vertex), so a biconvex
+        lens is ``R1 > 0, R2 < 0``.
+        """
+
+        return cls.from_radii(
+            r1=R1, r2=R2, thickness=thickness, semidiameter=semidiameter,
+            n=n, n_ambient=n_ambient, vertex=vertex, angle=angle, name=name,
+        )
+
+    @classmethod
     def biconvex(cls, *, focal_hint_radius: float, **kwargs) -> "Lens2D":
         return cls.from_radii(r1=focal_hint_radius, r2=-focal_hint_radius, **kwargs)
 
