@@ -20,6 +20,7 @@ from ..analysis.metrics import field_metrics  # noqa: F401  (re-export convenien
 from ..analysis.spots import SpotData
 from ..analysis.wavefront import WavefrontSamples
 from ..analysis.zernike import ZernikeExpansion
+from .sag_drawing import sample_profile_curve
 
 DEFAULT_MATERIAL_COLORS = {
     "SIO2": ("#bde0fe", "#2878b5"),
@@ -55,14 +56,18 @@ def layout_figure(
     fig, ax = plt.subplots(figsize=figsize)
 
     fallback = iter(_FALLBACK_COLORS * 10)
+    solid_signatures: set[tuple[float, float]] = set()
     for i, j, material in system.solid_elements():
+        for k in (i, j):
+            solid_signatures.add(
+                (round(float(system.vertices[k]), 6), round(system.rows[k].radius, 6))
+            )
         first, second = system.rows[i], system.rows[j]
         semi = min(
             s for s in (first.semidiameter, second.semidiameter) if s is not None
         ) if (first.semidiameter or second.semidiameter) else 50.0
-        h = np.linspace(-semi, semi, 240)
-        z1 = system.vertices[i] + first.profile.sag(np.abs(h))
-        z2 = system.vertices[j] + second.profile.sag(np.abs(h))
+        z1, h = sample_profile_curve(system, i, semidiameter=semi)
+        z2, _ = sample_profile_curve(system, j, semidiameter=semi)
         face, edge = colors.get(material) or next(fallback)
         colors.setdefault(material, (face, edge))
         ax.fill(
@@ -75,11 +80,28 @@ def layout_figure(
             zorder=1,
         )
 
+    # Bare refracting surfaces not part of a solid_elements() pair (e.g. a
+    # single dioptric surface with no matching second face) still need to be
+    # drawn, or they'd be invisible — plotted as an open curve, like a mirror.
+    # Skipped: index-matched dummy rows (no optical effect), and double-passed
+    # copies of surfaces already drawn as a solid element on a folded path
+    # (matched by the same geometric signature solid_elements() dedups with).
+    for i, row in enumerate(system.rows):
+        if row.kind is not SurfaceKind.REFRACT:
+            continue
+        if system.n_before[i] == system.n_after[i]:
+            continue
+        signature = (round(float(system.vertices[i]), 6), round(row.radius, 6))
+        if signature in solid_signatures:
+            continue
+        semi = row.semidiameter if row.semidiameter is not None else 50.0
+        z, h = sample_profile_curve(system, i, semidiameter=semi)
+        ax.plot(z, h, color="#3a6ea5", lw=2.0, zorder=2)
+
     for count, i in enumerate(system.mirror_indices, 1):
         row = system.rows[i]
         semi = row.semidiameter if row.semidiameter is not None else 50.0
-        h = np.linspace(-semi, semi, 240)
-        z = system.vertices[i] + row.profile.sag(np.abs(h))
+        z, h = sample_profile_curve(system, i, semidiameter=semi)
         ax.plot(z, h, color="#202020", lw=3.0, zorder=2)
         if mirror_labels:
             ax.text(float(np.mean(z)), semi + 8, f"M{count}", ha="center", fontsize=9)
@@ -127,22 +149,65 @@ def layout_figure(
     return fig
 
 
+def mirror_arcs_from_paths(
+    system: OpticalSystem,
+    paths,
+    *,
+    pad: float = 0.06,
+    samples: int = 200,
+) -> list[tuple[int, np.ndarray, np.ndarray]]:
+    """Per-mirror meridional arcs spanning the heights the rays actually hit.
+
+    For off-axis systems (ring fields, folded paths) a mirror's *used*
+    sub-aperture is displaced from the axis, so drawing the parent surface
+    as a symmetric on-axis cap puts the drawn curve away from the real
+    reflection points. This derives each mirror's arc from the traced
+    *paths* themselves (``keep_paths`` output, shape ``(N, n_surfaces+2, 3)``;
+    column ``i+1`` is the hit point on surface ``i``), extended by *pad*
+    fractionally beyond the hit envelope.
+
+    Returns ``[(mirror_number, z, y), ...]`` ready for ``ax.plot(z, y)``.
+    """
+
+    paths = np.asarray(paths, dtype=float)
+    arcs: list[tuple[int, np.ndarray, np.ndarray]] = []
+    for count, i in enumerate(system.mirror_indices, 1):
+        y_hits = paths[:, i + 1, 1]
+        y_hits = y_hits[np.isfinite(y_hits)]
+        if y_hits.size == 0:
+            continue
+        y_lo, y_hi = float(y_hits.min()), float(y_hits.max())
+        margin = pad * max(y_hi - y_lo, 1.0)
+        h = np.linspace(y_lo - margin, y_hi + margin, samples)
+        z = system.vertices[i] + system.rows[i].profile.sag(np.abs(h))
+        arcs.append((count, z, h))
+    return arcs
+
+
 def spots_figure(
     spots: Iterable[SpotData],
     *,
     airy_radius_um: float | None = None,
     figsize_per_panel: float = 4.0,
+    colors: Sequence | None = None,
 ) -> plt.Figure:
-    """Spot diagrams recentred on the weighted centroid, one panel per field."""
+    """Spot diagrams recentred on the weighted centroid, one panel per field.
+
+    Pass ``colors=FIELD_COLORS`` (one entry per field, same order as *spots*)
+    so each panel keeps the color its field's rays carry in
+    :func:`layout_figure` — the default leaves matplotlib's single color.
+    """
 
     spots = list(spots)
+    if colors is None:
+        colors = [None] * len(spots)
     fig, axes = plt.subplots(
         1, len(spots), figsize=(figsize_per_panel * len(spots), figsize_per_panel)
     )
     if len(spots) == 1:
         axes = [axes]
-    for spot, ax in zip(spots, axes):
-        ax.scatter(spot.relative_um[:, 0], spot.relative_um[:, 1], s=4, alpha=0.55)
+    for spot, ax, color in zip(spots, axes, colors):
+        ax.scatter(spot.relative_um[:, 0], spot.relative_um[:, 1], s=4, alpha=0.55, color=color)
         if airy_radius_um is not None:
             circle = plt.Circle(
                 (0, 0), airy_radius_um, fill=False, color="#d62728", ls="--", lw=1.0
@@ -372,6 +437,7 @@ def contrast_figure(
 
 __all__ = [
     "layout_figure",
+    "mirror_arcs_from_paths",
     "spots_figure",
     "fans_figure",
     "aberrations_figure",
