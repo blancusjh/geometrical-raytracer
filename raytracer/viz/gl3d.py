@@ -161,15 +161,136 @@ def _material_color(material, alpha=1.0):
     return (float(r), float(g), float(b), alpha)
 
 
+class _DynamicAxes:
+    """Meridional scale axes with zoom-adaptive tick labels.
+
+    Two world-anchored rulers in the x=0 plane — z (the optical axis, at
+    y=0) and y (vertical, through the current view center) — whose tick
+    spacing snaps to a 1/2/5 x 10^n "nice" step chosen from the visible
+    extent, and whose numeric labels regenerate on every camera zoom/pan.
+    """
+
+    COLOR_LINE = (0.55, 0.62, 0.58, 0.6)
+    COLOR_TEXT = (0.72, 0.80, 0.75, 0.95)
+
+    def __init__(self, viewer: "Viewer3D") -> None:
+        self.viewer = viewer
+        self.visible = True
+        self._state: tuple | None = None
+        self._lines = viewer._scene.visuals.Line(
+            pos=np.zeros((2, 3), dtype=np.float32), connect="segments",
+            color=self.COLOR_LINE, width=1.0, parent=viewer.view.scene, method="gl",
+        )
+        self._lines.set_gl_state(blend=True, depth_test=False)
+        self._lines.order = ORDER_GLASS + 1  # overlay: on top of glass and rays
+        self._text = viewer._scene.visuals.Text(
+            text="", pos=(0.0, 0.0, 0.0), color=self.COLOR_TEXT, font_size=7,
+            parent=viewer.view.scene,
+        )
+        self._text.order = ORDER_GLASS + 1
+        # Rebuild is driven from the viewer's wrapped _draw_scene funnel,
+        # which covers both live paints and offscreen render()/snapshot().
+
+    def set_visible(self, on: bool) -> None:
+        self.visible = on
+        self._lines.visible = on
+        self._text.visible = on
+
+    @staticmethod
+    def _nice_step(extent: float) -> float:
+        """A 1/2/5 x 10^n step giving roughly 5-8 ticks across *extent*."""
+
+        raw = max(extent, 1e-12) / 6.0
+        magnitude = 10.0 ** np.floor(np.log10(raw))
+        for mult in (1.0, 2.0, 5.0, 10.0):
+            if raw <= mult * magnitude:
+                return mult * magnitude
+        return 10.0 * magnitude
+
+    @staticmethod
+    def _fmt(value: float, step: float) -> str:
+        decimals = max(0, -int(np.floor(np.log10(step))))
+        return f"{value:.{decimals}f}"
+
+    def _maybe_rebuild(self, event=None) -> None:
+        if not self.visible:
+            return
+        # Text re-layout every frame is too costly for smooth orbit/zoom:
+        # freeze the axes during interaction; the idle-refinement pass
+        # rebuilds them (crisp, current) as soon as the mouse rests.
+        if self.viewer._interacting and self._state is not None:
+            return
+        cam = self.viewer.view.camera
+        state = (float(cam.scale_factor), tuple(np.round(cam.center, 9)))
+        if state == self._state:
+            return
+        self._state = state
+        self._rebuild(cam)
+
+    def _rebuild(self, cam) -> None:
+        cx, cy, cz = (float(v) for v in cam.center)
+        extent = float(cam.scale_factor)
+        step = self._nice_step(extent)
+        half = 0.72 * extent
+        tick = 0.012 * extent
+
+        segments: list[list[list[float]]] = []
+        labels: list[str] = []
+        positions: list[tuple[float, float, float]] = []
+
+        # Both rulers follow the camera center (they cross at the middle of
+        # the view), so they stay on screen wherever the user pans/zooms —
+        # the tick LABELS are absolute world coordinates regardless.
+        # z ruler (parallel to the optical axis, at height cy)
+        segments.append([[cx, cy, cz - half], [cx, cy, cz + half]])
+        z_ticks = np.arange(np.ceil((cz - half) / step) * step, cz + half, step)
+        for z in z_ticks:
+            segments.append([[cx, cy - tick, z], [cx, cy + tick, z]])
+            labels.append(self._fmt(z, step))
+            positions.append((cx, cy - 3.0 * tick, z))
+
+        # y ruler (vertical, at axial position cz)
+        segments.append([[cx, cy - half, cz], [cx, cy + half, cz]])
+        y_ticks = np.arange(np.ceil((cy - half) / step) * step, cy + half, step)
+        for y in y_ticks:
+            if abs(y - cy) < 0.5 * step:  # would sit on the crossing point
+                continue
+            segments.append([[cx, y, cz - tick], [cx, y, cz + tick]])
+            labels.append(self._fmt(y, step))
+            positions.append((cx, y, cz + 3.0 * tick))
+
+        pos = np.asarray(segments, dtype=np.float32).reshape(-1, 3)
+        self._lines.set_data(pos=pos, connect="segments", color=self.COLOR_LINE)
+        if labels:
+            self._text.text = labels
+            self._text.pos = np.asarray(positions, dtype=np.float32)
+        else:
+            self._text.text = ""
+
+
 class Viewer3D:
     """Orthographic turntable viewer with cutaway lenses and a headlight."""
 
-    def __init__(self, *, size=(1300, 820), background="#0a0a0f", title="raytracer 3D"):
+    def __init__(self, *, size=(1300, 820), background="#0a0a0f", title="raytracer 3D",
+                 ssaa: int = 2):
         from vispy import scene
 
         # NOTE: no MSAA (config samples): multisample framebuffers leave stale /
         # black frames on some drivers (frozen first frame over the scene).
-        # Lines use their own fragment antialiasing instead.
+        # Antialiasing comes from supersampling instead: the scene renders into
+        # the HDR buffer at ``ssaa``x resolution and the tonemap pass
+        # downsamples bilinearly (an exact box filter at 2:1, applied in
+        # linear light before the tonemap) — driver-safe and it smooths
+        # every primitive, including plain GL lines that ignore LINE_SMOOTH
+        # on core profiles.
+        #
+        # Progressive refinement: supersampling multiplies fragment work by
+        # ssaa^2, which dense additive beams cannot afford per interaction
+        # frame — so orbit/pan/zoom draws at 1x, and a short idle timer
+        # triggers one final crisp pass at full ssaa when the mouse rests.
+        self._ssaa = max(1, int(ssaa))
+        self._interacting = False
+        self._idle_timer = None
         self.canvas = scene.SceneCanvas(
             keys="interactive", size=size, bgcolor=background, title=title, show=False
         )
@@ -198,6 +319,11 @@ class Viewer3D:
         def _draw_scene_hdr(*args, **kwargs):
             from vispy import gloo
 
+            axes = getattr(self, "_axes", None)
+            if axes is not None:
+                # Runs for live paints AND offscreen render(); rebuilds only
+                # when the camera zoom/pan actually changed.
+                axes._maybe_rebuild()
             self._reset_gl_state()
             # Mouse interaction depends on vispy's PICKING passes (visual_at
             # renders id-colors and reads a pixel). Those must NOT go through
@@ -207,10 +333,27 @@ class Viewer3D:
             if getattr(scene, "picking", False):
                 return _orig_draw_scene(*args, **kwargs)
             w, h = self.canvas.physical_size
-            self._ensure_hdr(int(w), int(h))
-            with self._hdr_fbo:
-                gloo.set_viewport(0, 0, int(w), int(h))
+            ss = 1 if self._interacting else self._ssaa
+            self._ensure_hdr(int(w * ss), int(h * ss))
+            # push_fbo (not a bare FBO activate) so the whole frame renders
+            # into the larger buffer. vispy's push_fbo plumbing conflates the
+            # FBO's pixel size with its logical size, which would leave the
+            # scene in the lower-left 1/ss^2 of the buffer (its own
+            # render(size=...) has the same flaw) — so reconfigure the canvas
+            # TransformSystem with the true geometry: per-visual systems share
+            # these transform objects by reference, and pixel-sized visuals
+            # (text, markers, line widths) then scale into the supersampled
+            # buffer and come back crisp after the downsample.
+            self.canvas.push_fbo(self._hdr_fbo, (0, 0), self.canvas.size)
+            self.canvas.transforms.configure(
+                viewport=(0, 0, int(w * ss), int(h * ss)),
+                fbo_size=(int(w * ss), int(h * ss)),
+                fbo_rect=(0, 0, int(w), int(h)),
+            )
+            try:
                 _orig_draw_scene(*args, **kwargs)
+            finally:
+                self.canvas.pop_fbo()  # _update_transforms restores the outer state
             gloo.set_viewport(0, 0, int(w), int(h))
             gloo.set_state(blend=False, depth_test=False, cull_face=False)
             self._hdr_prog["u_tex"] = self._hdr_tex
@@ -220,6 +363,8 @@ class Viewer3D:
         # headlight: update the light direction whenever the camera moves
         self.canvas.events.mouse_move.connect(self._update_light)
         self.canvas.events.mouse_wheel.connect(self._update_light)
+        self.canvas.events.mouse_move.connect(self._on_interaction)
+        self.canvas.events.mouse_wheel.connect(self._on_interaction)
         self.canvas.events.key_press.connect(self._on_key)
 
     @staticmethod
@@ -227,6 +372,26 @@ class Viewer3D:
         from vispy import gloo
 
         gloo.set_state(depth_mask=True)
+
+    # -- progressive refinement -------------------------------------------
+    def _on_interaction(self, event=None) -> None:
+        if self._ssaa <= 1:
+            return
+        dragging = bool(getattr(event, "is_dragging", False))
+        wheeling = getattr(event, "type", "") == "mouse_wheel"
+        if not (dragging or wheeling):
+            return
+        self._interacting = True
+        if self._idle_timer is None:
+            from vispy.app import Timer
+
+            self._idle_timer = Timer(interval=0.28, connect=self._end_interaction)
+        self._idle_timer.stop()
+        self._idle_timer.start(iterations=1)
+
+    def _end_interaction(self, event=None) -> None:
+        self._interacting = False
+        self.canvas.update()  # one final crisp pass at full ssaa
 
     def _ensure_hdr(self, w: int, h: int) -> None:
         from vispy import gloo
@@ -236,13 +401,23 @@ class Viewer3D:
             self._hdr_prog["a_position"] = np.array(
                 [[-1.0, -1.0], [3.0, -1.0], [-1.0, 3.0]], dtype=np.float32
             )  # fullscreen triangle
-        if self._hdr_tex is None or self._hdr_tex.shape[:2] != (h, w):
-            self._hdr_tex = gloo.Texture2D(
-                shape=(h, w, 4), internalformat="rgba32f", interpolation="nearest"
+        if not hasattr(self, "_hdr_targets"):
+            self._hdr_targets: dict = {}
+        target = self._hdr_targets.get((h, w))
+        if target is None:
+            # Progressive refinement alternates between the 1x and ssaa-x
+            # buffers on every interaction start/stop — cache both instead of
+            # reallocating tens of MB of float32 texture each transition.
+            if len(self._hdr_targets) >= 2:  # window resized: sizes went stale
+                self._hdr_targets.clear()
+            # linear: the tonemap quad also downsamples the ssaa-times-larger
+            # buffer; at exactly 2:1 the bilinear tap is a perfect box filter.
+            tex = gloo.Texture2D(
+                shape=(h, w, 4), internalformat="rgba32f", interpolation="linear"
             )
-            self._hdr_fbo = gloo.FrameBuffer(
-                color=self._hdr_tex, depth=gloo.RenderBuffer((h, w))
-            )
+            fbo = gloo.FrameBuffer(color=tex, depth=gloo.RenderBuffer((h, w)))
+            target = self._hdr_targets[(h, w)] = (tex, fbo)
+        self._hdr_tex, self._hdr_fbo = target
 
     # -- meshes ----------------------------------------------------------
     def _add_mesh(self, vertices, faces, color, *, style="opaque"):
@@ -424,8 +599,8 @@ class Viewer3D:
             f = math.sqrt(MAX_BEAM_RAYS / (radial * azimuth))
             radial = max(4, int(radial * f))
             azimuth = max(16, int(azimuth * f))
-            print(f"[gl3d] {mode}: muestreo recortado a {radial * azimuth:,} "
-                  "rayos/campo (tope de display; visualmente equivalente)",
+            print(f"[gl3d] {mode}: sampling clamped to {radial * azimuth:,} "
+                  "rays/field (display cap; visually equivalent)",
                   flush=True)
 
         for k, field_y in enumerate(fields):
@@ -453,6 +628,31 @@ class Viewer3D:
                                group="lines")
 
     # -- interaction -----------------------------------------------------
+    def add_marker(self, position, *, color=(0.3, 1.0, 0.4, 1.0), size_px: float = 10.0) -> None:
+        """Screen-size point marker (constant pixel size at any zoom).
+
+        Prefer this over hand-drawn crosshair segments for tagging a point
+        (e.g. a design focus): world-sized segments turn into screen-filling
+        "infinite lines" once the user zooms in tighter than their length.
+        """
+
+        position = np.asarray(position, dtype=np.float32).reshape(1, 3)
+        marker = self._scene.visuals.Markers(
+            pos=position, face_color=color, edge_width=0, size=size_px,
+            scaling=False, parent=self.view.scene,
+        )
+        marker.order = ORDER_RAYS
+        marker.set_gl_state(blend=True, depth_test=False)
+        self._bounds.append(position)
+
+    def add_axes(self) -> None:
+        """Meridional scale axes (z along the optical axis, y vertical) with
+        tick labels that re-generate as the camera zooms or pans — toggle
+        with the **a** key."""
+
+        if getattr(self, "_axes", None) is None:
+            self._axes = _DynamicAxes(self)
+
     def _update_light(self, event=None):
         if not self._shading_filters:
             return
@@ -481,6 +681,11 @@ class Viewer3D:
             if modes:
                 i = modes.index(self._ray_mode) if self._ray_mode in modes else -1
                 self.set_ray_mode(modes[(i + 1) % len(modes)])
+        elif key == "a":
+            axes = getattr(self, "_axes", None)
+            if axes is not None:
+                axes.set_visible(not axes.visible)
+                self.canvas.update()
 
     def set_ray_mode(self, mode: str) -> None:
         """Show one ray layer: "lines", "beam" or "spectrum"."""
