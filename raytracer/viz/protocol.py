@@ -30,6 +30,25 @@ class Backend(Protocol):
     def show(self) -> None: ...
 
 
+def _lens_body_mesh(polygon: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Strip-triangulate a lens body polygon into (verts, faces).
+
+    ``Lens2D.body_polygon()`` lays out M front-face points (h: -semi -> +semi)
+    followed by the M back-face points reversed, so vertex ``i`` and vertex
+    ``2M-1-i`` sit at the same height — pairing them yields a quad strip
+    (same construction as ``sag_drawing.lens_fill_mesh``).
+    """
+
+    polygon = np.asarray(polygon, dtype=float)
+    m = polygon.shape[0] // 2
+    faces = np.empty((2 * (m - 1), 3), dtype=np.uint32)
+    i = np.arange(m - 1, dtype=np.uint32)
+    back = np.uint32(2 * m - 1) - i
+    faces[0::2] = np.column_stack([i, i + 1, back])
+    faces[1::2] = np.column_stack([i + 1, back - 1, back])
+    return polygon, faces
+
+
 class GLBackend:
     """Adapter mapping the neutral scene onto the OpenGL viewer."""
 
@@ -54,6 +73,7 @@ class GLBackend:
         self.viewer._surface_renderers.clear()
         self.viewer._fill_renderers.clear()
         self.viewer.clear_markers()
+        self.viewer.clear_rays()  # ray bundles accumulate across draw calls
         self._populate(scene)
         return self.viewer
 
@@ -71,6 +91,8 @@ class GLBackend:
             elif isinstance(item, SurfaceItem):
                 viewer.draw_polyline(item.polyline, color=item.color, width=item.width)
             elif isinstance(item, LensBodyItem):
+                verts, faces = _lens_body_mesh(item.polygon)
+                viewer.draw_filled_polygon(verts, faces, color=item.facecolor)
                 viewer.draw_polyline(
                     np.vstack([item.polygon, item.polygon[:1]]),
                     color=item.edgecolor,
@@ -89,8 +111,9 @@ class GLBackend:
     def save(self, path) -> None:
         import matplotlib.image as mpimg
 
-        image = self.viewer.snapshot()
-        mpimg.imsave(path, np.flipud(image))
+        # snapshot() already returns standard top-row-first image order;
+        # flipping here would mirror the scene vertically.
+        mpimg.imsave(path, self.viewer.snapshot())
 
 
 def show(
