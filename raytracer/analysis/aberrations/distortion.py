@@ -1,11 +1,23 @@
-"""Distortion grid: trace a square object-space grid through the system.
+"""Chief-ray distortion: a 1-D field sweep, and the classic warped grid.
 
-This is the classic optical-design-software distortion display — draw a
-regular grid of field points, trace each one's chief ray, and see the grid
-warp at the image plane (barrel/pincushion) instead of reading a single
-1-D distortion-vs-field curve. It uses the general 2-D chief-ray solver
+Distortion is the departure of the real object-to-image map from the ideal
+linear one, ``image = magnification * object``. Both routines here measure
+it with the *chief ray* (the ray through the centre of the aperture stop),
+the industry-standard reference: being a single ray it is immune to the
+coma and vignetting that pull a flux-weighted spot centroid around. See
+:func:`~raytracer.analysis.aberrations.metrics.field_metrics` for the
+centroid-based figure alongside the full aberration summary.
+
+- :func:`chief_ray_distortion` sweeps field height and returns the
+  familiar distortion-vs-field curve.
+- :func:`distortion_grid` traces a square grid of field points and returns
+  it warped at the image plane — the classic optical-design-software
+  display, where barrel/pincushion is visible as a shape rather than read
+  off a curve.
+
+Both use the general 2-D chief-ray solver
 (:func:`raytracer.sequential.fields.chief_ray_slopes`), not the
-rotationally-symmetric 1-D shortcut, so it is correct for a genuinely
+rotationally-symmetric 1-D shortcut, so they are correct for a genuinely
 off-axis (x, y) field point in any system this tracer can trace.
 """
 
@@ -17,6 +29,105 @@ import numpy as np
 
 from ...sequential.fields import FieldPoint, chief_ray_slopes, trace_from_object
 from ...sequential.trace import SequentialTracer
+
+
+def _solve_chief_ray(
+    tracer: SequentialTracer,
+    field: FieldPoint,
+    *,
+    stop_index: int | None,
+    fallback_guesses: tuple = (),
+) -> tuple[float, float] | None:
+    """Solve *field*'s chief ray, or return ``None`` if it vignettes.
+
+    The point's own paraxial estimate is always tried first. A neighbouring
+    field point's *solved* slope looks like the better warm start, but for a
+    system whose chief-ray direction is very sensitive to field height — a
+    huge finite-object stand-in for infinity threading a small front
+    aperture — even one step away it can miss the aperture outright, where
+    the per-point paraxial estimate lands close every time. Neighbour
+    solutions stay useful as fallbacks for systems where the paraxial line
+    is the poorer guess.
+    """
+
+    for guess in (None, *fallback_guesses):
+        try:
+            slopes = chief_ray_slopes(
+                tracer, field, stop_index=stop_index, initial_guess=guess
+            )
+        except RuntimeError:
+            continue
+        if trace_from_object(tracer, (field.x, field.y), slopes).ok:
+            return slopes
+    return None
+
+
+def chief_ray_distortion(
+    tracer: SequentialTracer,
+    fields,
+    *,
+    magnification: float,
+    field_unit: str = "mm",
+    stop_index: int | None = None,
+) -> list[dict]:
+    """Chief-ray distortion swept over a 1-D field range.
+
+    ``fields`` are object heights in mm by default; pass
+    ``field_unit="deg"`` to give them as field *angles* instead, which is
+    the natural parametrization when the object sits at (or stands in for)
+    infinity — they are converted with the system's own object distance.
+
+    Returns one dict per field point, with the same key names
+    :func:`~raytracer.analysis.aberrations.metrics.field_metrics` uses for
+    the corresponding quantities, so the two can be read interchangeably.
+    This is the cheap way to get just distortion: one chief ray per field,
+    where ``field_metrics`` traces a whole pupil bundle to also give spot
+    size, focus shifts, and astigmatism.
+    """
+
+    if field_unit not in ("mm", "deg"):
+        raise ValueError(f"field_unit must be 'mm' or 'deg', got {field_unit!r}")
+    object_z = tracer.system.object_z
+    if object_z is None:
+        raise ValueError(
+            "system.object_z is unset; call sequential.solve_object_plane(tracer) "
+            "or assign it explicitly"
+        )
+
+    rows = []
+    previous = None
+    for value in np.asarray(fields, dtype=float):
+        height = (
+            abs(object_z) * np.tan(np.deg2rad(value)) if field_unit == "deg" else value
+        )
+        field = FieldPoint(y=float(height))
+        fallbacks = (previous,) if previous is not None else ()
+        slopes = _solve_chief_ray(
+            tracer, field, stop_index=stop_index, fallback_guesses=fallbacks
+        )
+        if slopes is None:
+            raise RuntimeError(
+                f"No unvignetted chief ray at field {value:g} {field_unit} "
+                f"(object height {height:.4g} mm); trim the field range"
+            )
+        previous = slopes
+        ideal = height * magnification
+        actual = float(
+            trace_from_object(tracer, (0.0, field.y), slopes).image_point[1]
+        )
+        rows.append(
+            {
+                "field": float(value),
+                "object_height_mm": float(height),
+                "paraxial_image_height_mm": float(ideal),
+                "chief_image_height_mm": actual,
+                "chief_ray_distortion_um": (actual - ideal) * 1e3,
+                "chief_ray_relative_distortion_ppm": (
+                    (actual / ideal - 1.0) * 1e6 if ideal != 0.0 else 0.0
+                ),
+            }
+        )
+    return rows
 
 
 @dataclass
@@ -90,29 +201,21 @@ def distortion_grid(
     for i in range(n):
         for j in range(n):
             field = FieldPoint(x=float(xx[i, j]), y=float(yy[i, j]))
-            # The point's own paraxial estimate is tried first — a neighbor's
-            # *solved* slope looks like a good warm start, but for a system
-            # where the chief-ray direction is this sensitive to the field
-            # point (a huge finite-object stand-in for infinity threading a
-            # tiny front aperture), even one grid step away it can already
-            # miss the aperture outright, which a per-point paraxial estimate
-            # does not. Neighbor solutions remain useful *fallbacks* for
-            # systems where the paraxial line isn't as good an estimate.
-            candidates = [None, guesses.get((i, j - 1)), guesses.get((i - 1, j))]
-            for guess in candidates:
-                try:
-                    sx, sy = chief_ray_slopes(
-                        tracer, field, stop_index=stop_index, initial_guess=guess
-                    )
-                    result = trace_from_object(tracer, (field.x, field.y), (sx, sy))
-                    if not result.ok:
-                        raise RuntimeError("chief ray vignetted downstream of the stop")
-                except RuntimeError:
-                    continue
-                actual_points[i, j] = result.image_point[:2]
-                valid[i, j] = True
-                guesses[(i, j)] = (sx, sy)
-                break
+            neighbours = tuple(
+                guess
+                for guess in (guesses.get((i, j - 1)), guesses.get((i - 1, j)))
+                if guess is not None
+            )
+            slopes = _solve_chief_ray(
+                tracer, field, stop_index=stop_index, fallback_guesses=neighbours
+            )
+            if slopes is None:
+                continue
+            actual_points[i, j] = trace_from_object(
+                tracer, (field.x, field.y), slopes
+            ).image_point[:2]
+            valid[i, j] = True
+            guesses[(i, j)] = slopes
 
     return DistortionGrid(
         object_points=object_points,
@@ -123,4 +226,4 @@ def distortion_grid(
     )
 
 
-__all__ = ["DistortionGrid", "distortion_grid"]
+__all__ = ["DistortionGrid", "chief_ray_distortion", "distortion_grid"]

@@ -1,86 +1,20 @@
-"""Optical analysis: imaging (spots, PSF, contrast) and aberrations (field
-metrics, distortion, wavefront/Zernike, fans, stigmatism).
+"""Optical analysis, split by what is being measured.
 
-Everything below is also importable from its actual subpackage
-(``raytracer.analysis.imaging`` / ``raytracer.analysis.aberrations``); this
-top-level re-export exists so existing call sites don't need to know which
-side of that split a given name lives on.
+- :mod:`raytracer.analysis.imaging` — what the image looks like: spot
+  diagrams, PSF, aerial image, contrast.
+- :mod:`raytracer.analysis.aberrations` — what the ray/wavefront error
+  looks like and why: field metrics, distortion, Seidel coefficients,
+  chromatic aberration, wavefront/Zernike, ray fans, stigmatism.
+
+Every public name from both is re-exported here, so a call site that
+doesn't care which side of that split a name lives on can just use
+``from raytracer.analysis import ...``. The re-export is derived from the
+subpackages' own ``__all__`` rather than hand-listed, so the two cannot
+drift apart.
 """
 
-from .aberrations import (
-    AxialColor,
-    DistortionGrid,
-    FanData,
-    LateralColor,
-    Mode,
-    SeidelCoefficients,
-    StigmatismReport,
-    WavefrontSamples,
-    ZernikeExpansion,
-    axial_color,
-    distortion_grid,
-    export_metrics_csv,
-    exit_pupil_wavefront,
-    field_metrics,
-    fit_opd,
-    fit_transverse,
-    lateral_color,
-    point_line_distances,
-    ray_fans,
-    rays_by_generation,
-    seidel_coefficients,
-    stigmatism_report,
-    zernike,
-    zernike_modes,
-)
-from .imaging import (
-    BinaryMask,
-    PupilGrid,
-    SpotData,
-    abbe_image,
-    airy_radius_mm,
-    coherent_cutoff_half_pitch_nm,
-    contrast_curve,
-    pupil_function,
-    scalar_psf,
-    spot_data,
-    spot_data_from_points,
-)
+from . import aberrations, imaging
+from .aberrations import *  # noqa: F401,F403
+from .imaging import *  # noqa: F401,F403
 
-__all__ = [
-    "AxialColor",
-    "LateralColor",
-    "axial_color",
-    "lateral_color",
-    "DistortionGrid",
-    "distortion_grid",
-    "SeidelCoefficients",
-    "seidel_coefficients",
-    "SpotData",
-    "spot_data",
-    "spot_data_from_points",
-    "StigmatismReport",
-    "stigmatism_report",
-    "point_line_distances",
-    "rays_by_generation",
-    "FanData",
-    "ray_fans",
-    "field_metrics",
-    "export_metrics_csv",
-    "Mode",
-    "zernike",
-    "zernike_modes",
-    "ZernikeExpansion",
-    "fit_transverse",
-    "fit_opd",
-    "WavefrontSamples",
-    "exit_pupil_wavefront",
-    "PupilGrid",
-    "pupil_function",
-    "scalar_psf",
-    "airy_radius_mm",
-    "BinaryMask",
-    "abbe_image",
-    "contrast_curve",
-    "coherent_cutoff_half_pitch_nm",
-]
+__all__ = [*aberrations.__all__, *imaging.__all__]

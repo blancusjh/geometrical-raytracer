@@ -100,6 +100,15 @@ def chief_ray_slope(
     raise RuntimeError(f"No unvignetted chief ray found for field {field}")
 
 
+class _RayVignetted(RuntimeError):
+    """A probe ray failed to reach the stop — internal to the 2-D solve.
+
+    Distinct from the ``RuntimeError`` the solver raises to its caller, so
+    the backtracking loop can treat "that step was too long" separately
+    from "this field point has no chief ray at all".
+    """
+
+
 def chief_ray_slopes(
     tracer: SequentialTracer,
     field: FieldPoint,
@@ -147,41 +156,60 @@ def chief_ray_slopes(
         ok = batch.status[0] == TraceStatus.OK or batch.failed_surface[0] > stop_index
         position = batch.paths[0, stop_index + 1, :2]
         if not ok or not np.all(np.isfinite(position)):
-            raise RuntimeError("Ray vignetted before the stop")
+            raise _RayVignetted
         return position
 
-    try:
-        s = np.asarray(initial_guess, dtype=float)
-        residual = stop_position(s)
-        for _ in range(max_iterations):
-            if np.hypot(*residual) < xtol:
-                break
-            eps = 1e-6
-            jacobian = np.empty((2, 2))
-            for k in range(2):
-                step = s.copy()
-                step[k] += eps
-                jacobian[:, k] = (stop_position(step) - residual) / eps
-            delta = np.linalg.solve(jacobian, -residual)
-            damping = 1.0
-            trial, trial_residual = s, residual
-            while damping > 1e-3:
-                candidate = s + damping * delta
-                try:
-                    candidate_residual = stop_position(candidate)
-                except RuntimeError:
-                    damping *= 0.5
-                    continue
-                if np.hypot(*candidate_residual) < np.hypot(*residual):
-                    trial, trial_residual = candidate, candidate_residual
-                    break
+    def probe(slopes: np.ndarray) -> np.ndarray:
+        """``stop_position``, reporting a vignette against *field* by name."""
+
+        try:
+            return stop_position(slopes)
+        except _RayVignetted as exc:
+            raise RuntimeError(
+                f"No unvignetted chief ray found for field {field}"
+            ) from exc
+
+    s = np.asarray(initial_guess, dtype=float)
+    residual = probe(s)
+    for _ in range(max_iterations):
+        if np.hypot(*residual) < xtol:
+            break
+        eps = 1e-6
+        jacobian = np.empty((2, 2))
+        for k in range(2):
+            step = s.copy()
+            step[k] += eps
+            jacobian[:, k] = (probe(step) - residual) / eps
+        # lstsq, not solve: a singular Jacobian (a ray marching parallel to
+        # the stop, a degenerate afocal space) makes solve raise LinAlgError,
+        # which is a ValueError — it would sail straight past every caller's
+        # `except RuntimeError` and abort a whole field scan over one bad
+        # point. lstsq gives the Newton step whenever the Jacobian is well
+        # conditioned, and a sane minimum-norm step when it isn't.
+        delta = np.linalg.lstsq(jacobian, -residual, rcond=None)[0]
+        # Backtrack until the step both survives the system and actually
+        # reduces the residual; a vignetting trial is simply too long a step.
+        damping = 1.0
+        trial, trial_residual = s, residual
+        while damping > 1e-3:
+            candidate = s + damping * delta
+            try:
+                candidate_residual = stop_position(candidate)
+            except _RayVignetted:
                 damping *= 0.5
-            s, residual = trial, trial_residual
-        else:
-            if np.hypot(*residual) >= xtol:
-                raise RuntimeError("Chief-ray solve did not converge")
-    except RuntimeError as exc:
-        raise RuntimeError(f"No unvignetted chief ray found for field {field}") from exc
+                continue
+            if np.hypot(*candidate_residual) < np.hypot(*residual):
+                trial, trial_residual = candidate, candidate_residual
+                break
+            damping *= 0.5
+        s, residual = trial, trial_residual
+    else:
+        if np.hypot(*residual) >= xtol:
+            raise RuntimeError(
+                f"Chief-ray solve for field {field} did not converge in "
+                f"{max_iterations} iterations (residual {np.hypot(*residual):.3g} mm "
+                f"at the stop, tolerance {xtol:.3g})"
+            )
 
     return float(s[0]), float(s[1])
 
@@ -281,7 +309,7 @@ def trace_pupil(
     na_object_sine: float,
     sampling: PupilSampling | None = None,
     slope_model: Literal["tangent", "sine"] = "tangent",
-    chief_slope: float | None = None,
+    chief_slope: float | tuple[float, float] | None = None,
     stop_index: int | None = None,
     keep_paths: bool = False,
 ) -> PupilTrace:
@@ -291,11 +319,29 @@ def trace_pupil(
     slopes via s = p * sine / sqrt(1 - sine^2) added around the chief slope
     (the DUV reference convention). ``"sine"`` offsets direction cosines
     directly (the EUV notebook convention).
+
+    ``chief_slope`` accepts either a meridional slope ``s_y`` or a full
+    ``(s_x, s_y)`` pair, so a chief ray solved by :func:`chief_ray_slopes`
+    for a genuinely off-axis ``(x, y)`` field point can be used as-is.
+    Omitted, it is solved with :func:`chief_ray_slopes` — the general 2-D
+    solver rather than the 1-D :func:`chief_ray_slope`, which agrees with
+    it to machine precision where both converge but scans a fixed, fairly
+    coarse slope bracket that comes up empty whenever the true chief ray
+    occupies a needle-thin slice of it (any large finite-object stand-in
+    for infinity, such as the Cooke triplet and double-Gauss examples).
+
+    The ``"sine"`` model is meridional-only and rejects a non-zero ``s_x``
+    rather than silently applying a convention it was never defined for.
     """
 
     sampling = sampling or PupilSampling()
     if chief_slope is None:
-        chief_slope = chief_ray_slope(tracer, field, stop_index=stop_index)
+        chief_slope = chief_ray_slopes(tracer, field, stop_index=stop_index)
+    chief_sx, chief_sy = (
+        (0.0, float(chief_slope))
+        if np.isscalar(chief_slope)
+        else (float(chief_slope[0]), float(chief_slope[1]))
+    )
 
     points = sampling.points()
     object_z = _object_z(tracer)
@@ -303,12 +349,18 @@ def trace_pupil(
 
     if slope_model == "tangent":
         max_slope = na_object_sine / np.sqrt(1.0 - na_object_sine**2)
-        sx = points[:, 0] * max_slope
-        sy = chief_slope + points[:, 1] * max_slope
+        sx = chief_sx + points[:, 0] * max_slope
+        sy = chief_sy + points[:, 1] * max_slope
         norm = np.sqrt(1.0 + sx**2 + sy**2)
         directions = np.column_stack([sx / norm, sy / norm, 1.0 / norm])
     elif slope_model == "sine":
-        theta = np.arctan(chief_slope)
+        if chief_sx != 0.0:
+            raise ValueError(
+                "slope_model='sine' is a meridional convention and has no defined "
+                f"treatment of a sagittal chief slope (got s_x={chief_sx!r}); use "
+                "slope_model='tangent' for a genuinely off-axis field point"
+            )
+        theta = np.arctan(chief_sy)
         dx = points[:, 0] * na_object_sine
         a = theta + points[:, 1] * na_object_sine
         dz2 = 1.0 - dx**2 - np.sin(a) ** 2
@@ -317,7 +369,9 @@ def trace_pupil(
         raise ValueError(f"Unknown slope model {slope_model!r}")
 
     batch = tracer.trace_batch(origins, directions, keep_paths=keep_paths)
-    chief = trace_from_object(tracer, (field.x, field.y), (0.0, chief_slope), keep_path=True)
+    chief = trace_from_object(
+        tracer, (field.x, field.y), (chief_sx, chief_sy), keep_path=True
+    )
 
     weights_all = sampling.area_weights(points)
     weights = weights_all[batch.valid]

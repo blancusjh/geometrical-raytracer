@@ -70,3 +70,34 @@ def test_unaspherized_triplet_shows_growing_coma_and_astigmatism():
     assert coma_magnitude[-1] > coma_magnitude[0]
     assert astig_magnitude[-1] > astig_magnitude[0]
     assert np.isfinite(result.spherical_coefficient)
+
+
+def test_rejects_too_few_fields_instead_of_fabricating_a_fit():
+    """The defocus/field-curvature split is a two-parameter fit in y**2;
+    with fewer points lstsq happily returns a minimum-norm answer that
+    looks plausible and means nothing."""
+
+    system = OpticalSystem.from_prescription(TRIPLET_CSV)
+    tracer = SequentialTracer(system)
+    conjugate = solve_object_plane(tracer)
+    na = 6.5 / abs(conjugate.object_z)
+
+    for fields in ([100.0], [100.0, 200.0], [50.0, -50.0]):  # too few, or degenerate y**2
+        with pytest.raises(ValueError, match="at least 3 field heights"):
+            seidel_coefficients(
+                tracer, fields, na_object_sine=na,
+                na_image=na / abs(conjugate.magnification), wavelength_mm=0.5876e-3,
+            )
+
+
+def test_wavelength_defaults_to_the_traced_system():
+    system = OpticalSystem.from_prescription(TRIPLET_CSV)
+    tracer = SequentialTracer(system)
+    conjugate = solve_object_plane(tracer)
+    na = 6.5 / abs(conjugate.object_z)
+    fields = np.abs(conjugate.object_z) * np.tan(np.deg2rad(np.linspace(0.0, 6.0, 4)))
+    kwargs = dict(na_object_sine=na, na_image=na / abs(conjugate.magnification))
+
+    explicit = seidel_coefficients(tracer, fields, wavelength_mm=0.5876e-3, **kwargs)
+    defaulted = seidel_coefficients(tracer, fields, **kwargs)
+    assert defaulted.spherical_coefficient == pytest.approx(explicit.spherical_coefficient)

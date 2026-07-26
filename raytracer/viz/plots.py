@@ -11,13 +11,13 @@ from typing import Iterable, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..sequential.fields import FieldPoint, chief_ray_slope
+from ..sequential.fields import FieldPoint, chief_ray_slope, trace_from_object
 from ..sequential.surfaces import SurfaceKind
 from ..sequential.system import OpticalSystem
 from ..sequential.trace import SequentialTracer
+from ..analysis.aberrations.chromatic import AxialColor, ChromaticSpots, LateralColor
 from ..analysis.aberrations.distortion import DistortionGrid
 from ..analysis.aberrations.fans import FanData
-from ..analysis.aberrations.metrics import field_metrics  # noqa: F401  (re-export convenience)
 from ..analysis.aberrations.wavefront import WavefrontSamples
 from ..analysis.aberrations.zernike import ZernikeExpansion
 from ..analysis.imaging.spots import SpotData
@@ -120,8 +120,6 @@ def layout_figure(
         for field_y, color in zip(fields, FIELD_COLORS):
             sy0 = chief_ray_slope(tracer, FieldPoint(y=field_y))
             for delta in np.linspace(-fan_half_slope, fan_half_slope, fan_count):
-                from ..sequential.fields import trace_from_object
-
                 result = trace_from_object(
                     tracer, (0.0, field_y), (0.0, sy0 + delta), keep_path=True
                 )
@@ -316,12 +314,9 @@ def distortion_grid_figure(
 
     ideal = grid.ideal_points
     n = ideal.shape[0]
-
-    if exaggeration != 1.0:
-        displayed = ideal + exaggeration * (grid.actual_points - ideal)
-    else:
-        displayed = grid.actual_points.copy()
-    displayed[~grid.valid] = np.nan
+    # Vignetted points are already NaN in actual_points, and NaN survives the
+    # scaling, so the broken lines fall out for free.
+    displayed = ideal + exaggeration * (grid.actual_points - ideal)
 
     fig, ax = plt.subplots(figsize=figsize)
     for i in range(n):
@@ -346,6 +341,116 @@ def distortion_grid_figure(
     subtitle = f" (distortion ×{exaggeration:g})" if exaggeration != 1.0 else ""
     ax.set_title((title or "Distortion grid") + subtitle)
     ax.grid(alpha=0.15)
+    fig.tight_layout()
+    return fig
+
+
+def _mark_reference_lines(ax, wavelengths_um: Sequence[float]) -> None:
+    for wavelength_um in wavelengths_um:
+        ax.axvline(wavelength_um, color="#999999", ls=":", lw=0.8)
+
+
+def dispersion_figure(
+    materials: Sequence,
+    wavelengths_um: np.ndarray,
+    *,
+    reference_lines_um: Sequence[float] = (),
+    title: str | None = None,
+) -> plt.Figure:
+    """Refractive index vs. wavelength for each material.
+
+    Each material only needs an ``index(wavelength_um)`` method, so a
+    measured :class:`~raytracer.core.materials.SellmeierMaterial` and an
+    approximate :class:`~raytracer.core.materials.AbbeMaterial` plot the
+    same way; the legend names the model actually behind each curve, since
+    the difference matters when reading the chromatic results downstream.
+    """
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    for material in materials:
+        index = [material.index(float(w)) for w in wavelengths_um]
+        ax.plot(wavelengths_um, index, "-", lw=1.6,
+                label=f"{material.name} ({type(material).__name__})")
+    _mark_reference_lines(ax, reference_lines_um)
+    ax.set(xlabel="wavelength (µm)", ylabel="refractive index n",
+           title=title or "Glass dispersion")
+    ax.legend()
+    ax.grid(alpha=0.2)
+    fig.tight_layout()
+    return fig
+
+
+def chromatic_figure(
+    axial: AxialColor,
+    lateral: LateralColor | None = None,
+    *,
+    reference_lines_um: Sequence[float] = (),
+    suptitle: str | None = None,
+) -> plt.Figure:
+    """Axial color, and optionally lateral color, against wavelength."""
+
+    panels = 1 if lateral is None else 2
+    fig, axes = plt.subplots(1, panels, figsize=(5.5 * panels, 4.2), squeeze=False)
+    flat = axes[0]
+
+    flat[0].plot(axial.wavelengths_um, axial.focus_shift_mm * 1e3, "-",
+                 color="#b3421b", lw=1.6)
+    flat[0].set(xlabel="wavelength (µm)", ylabel="focus shift (µm)", title="Axial color")
+
+    if lateral is not None:
+        flat[1].plot(lateral.wavelengths_um, lateral.lateral_color_um, "-",
+                     color="#2878b5", lw=1.6)
+        flat[1].set(xlabel="wavelength (µm)", ylabel="image height shift (µm)",
+                    title=f"Lateral color at y={lateral.field_height_mm:.4g} mm")
+
+    for ax in flat:
+        ax.axhline(0, color="black", lw=0.7)
+        _mark_reference_lines(ax, reference_lines_um)
+        ax.grid(alpha=0.2)
+    if suptitle:
+        fig.suptitle(suptitle)
+    fig.tight_layout()
+    return fig
+
+
+def chromatic_spots_figure(
+    spots: ChromaticSpots,
+    *,
+    limit_um: float | None = None,
+    title: str | None = None,
+    figsize: tuple[float, float] = (6.0, 6.0),
+) -> plt.Figure:
+    """Every wavelength's spot overlaid in one common reference frame.
+
+    Colors run blue-to-red across the sampled spectrum, so the plot reads
+    the way the aberration does. Pass ``limit_um`` to hold the axes fixed
+    across several figures — otherwise each autoscales and a tight spot and
+    a hugely blurred one look deceptively alike.
+    """
+
+    wavelengths = spots.wavelengths_um
+    lo, hi = float(wavelengths.min()), float(wavelengths.max())
+    colormap = plt.get_cmap("turbo")
+
+    fig, ax = plt.subplots(figsize=figsize)
+    for wavelength_um, offsets in zip(wavelengths, spots.offsets_um):
+        fraction = 0.5 if hi == lo else (wavelength_um - lo) / (hi - lo)
+        # turbo runs blue -> green -> red, matching the spectrum's own order,
+        # so the shortest wavelength must take the *low* end. Both ends are
+        # squeezed inward off turbo's near-black extremes to stay legible.
+        ax.scatter(
+            offsets[:, 0], offsets[:, 1], s=5, alpha=0.6,
+            color=colormap(0.06 + 0.88 * fraction),
+            label=f"{wavelength_um * 1e3:.0f} nm",
+        )
+    if limit_um is not None:
+        ax.set_xlim(-limit_um, limit_um)
+        ax.set_ylim(-limit_um, limit_um)
+    ax.set_aspect("equal")
+    ax.set(xlabel="Δx (µm)", ylabel="Δy (µm)",
+           title=title or f"Polychromatic spot — RMS {spots.polychromatic_rms_um:.2f} µm")
+    ax.grid(alpha=0.2)
+    ax.legend(fontsize=7, markerscale=2, loc="upper right")
     fig.tight_layout()
     return fig
 
@@ -499,6 +604,9 @@ __all__ = [
     "fans_figure",
     "aberrations_figure",
     "distortion_grid_figure",
+    "dispersion_figure",
+    "chromatic_figure",
+    "chromatic_spots_figure",
     "zernike_figure",
     "wavefront_figure",
     "psf_figure",

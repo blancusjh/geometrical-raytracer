@@ -30,6 +30,7 @@ def field_metrics(
     na_object_sine: float,
     magnification: float,
     sampling: PupilSampling | None = None,
+    stop_index: int | None = None,
 ) -> list[dict]:
     """Aberration metrics per field point.
 
@@ -43,7 +44,8 @@ def field_metrics(
         if not isinstance(field, FieldPoint):
             field = FieldPoint(y=float(field))
         pupil = trace_pupil(
-            tracer, field, na_object_sine=na_object_sine, sampling=sampling
+            tracer, field, na_object_sine=na_object_sine, sampling=sampling,
+            stop_index=stop_index,
         )
         points = pupil.image_points[:, :2]
         directions = pupil.directions

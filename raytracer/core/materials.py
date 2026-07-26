@@ -39,13 +39,32 @@ _LAMBDA_F_UM = 0.48613
 _LAMBDA_C_UM = 0.65627
 
 
+def _check_wavelength(wavelength_um: float, material_name: str) -> None:
+    """Reject a non-positive wavelength for a dispersive material.
+
+    :class:`ConstantIndex` ignores its wavelength argument, so callers have
+    historically been able to get away with passing ``0.0`` — notably
+    :meth:`OpticalSystem._rebuild`, which substitutes ``0.0`` when a system
+    carries no ``wavelength_um``. A dispersive curve evaluated there would
+    silently return a physically meaningless index (the Sellmeier form
+    returns exactly 1.0, i.e. vacuum), so refuse it loudly instead.
+    """
+
+    if not wavelength_um > 0.0:
+        raise ValueError(
+            f"{material_name} is dispersive and needs a positive wavelength, got "
+            f"{wavelength_um!r}; set wavelength_um on the OpticalSystem"
+        )
+
+
 @dataclass(frozen=True)
 class AbbeMaterial:
     """Refractive index from (n_d, V_d) via a 2-term Cauchy dispersion curve.
 
-    Real glass dispersion needs a manufacturer's measured Sellmeier
-    coefficients to get right; this package doesn't carry a glass catalog,
-    so this is a standard textbook-level stand-in: fit a Cauchy curve
+    Measured Sellmeier coefficients (see :class:`SellmeierMaterial` and
+    ``_SELLMEIER_CATALOG``) describe a real glass far better; use this only
+    for a glass whose catalog nd/Vd pair is all that's known. It is a
+    standard textbook-level stand-in: fit a Cauchy curve
     ``n(lambda) = A + B / lambda**2`` to match ``n_d`` exactly at the d
     line (587.6 nm) and reproduce the F-C principal dispersion the Abbe
     number defines (``n_F - n_C = (n_d - 1) / V_d``). That's the same
@@ -60,6 +79,7 @@ class AbbeMaterial:
     vd: float
 
     def index(self, wavelength_um: float) -> float:
+        _check_wavelength(wavelength_um, f"AbbeMaterial {self.name!r}")
         n_f_minus_c = (self.nd - 1.0) / self.vd
         inverse_square_spread = (1.0 / _LAMBDA_F_UM**2) - (1.0 / _LAMBDA_C_UM**2)
         b = n_f_minus_c / inverse_square_spread
@@ -81,10 +101,28 @@ class SellmeierMaterial:
     name: str
     b: tuple[float, float, float]
     c: tuple[float, float, float]
+    #: The catalog's own stated d-line index, kept for display and as an
+    #: independent cross-check on the fitted curve (``index(0.58756)`` should
+    #: reproduce it). Not used in the computation.
+    catalog_nd: float | None = None
 
     def index(self, wavelength_um: float) -> float:
+        _check_wavelength(wavelength_um, f"SellmeierMaterial {self.name!r}")
         lambda2 = wavelength_um * wavelength_um
-        n2_minus_1 = sum(bi * lambda2 / (lambda2 - ci) for bi, ci in zip(self.b, self.c))
+        n2_minus_1 = 0.0
+        for bi, ci in zip(self.b, self.c):
+            denominator = lambda2 - ci
+            if denominator == 0.0:
+                raise ValueError(
+                    f"{self.name} evaluated exactly at a Sellmeier resonance "
+                    f"(lambda^2 == {ci}); the fit is undefined there"
+                )
+            n2_minus_1 += bi * lambda2 / denominator
+        if n2_minus_1 <= -1.0:
+            raise ValueError(
+                f"{self.name} Sellmeier fit gives n^2 = {1.0 + n2_minus_1:.4g} at "
+                f"{wavelength_um} um; the wavelength is outside the fit's valid range"
+            )
         return math.sqrt(1.0 + n2_minus_1)
 
 
@@ -114,8 +152,8 @@ def sellmeier_glass(name: str) -> SellmeierMaterial:
     """
 
     key = name.strip().upper()
-    _, b, c = _SELLMEIER_CATALOG[key]
-    return SellmeierMaterial(key, b, c)
+    nd, b, c = _SELLMEIER_CATALOG[key]
+    return SellmeierMaterial(key, b, c, catalog_nd=nd)
 
 
 VACUUM = ConstantIndex("VACUUM", 1.0)

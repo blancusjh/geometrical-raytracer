@@ -75,3 +75,49 @@ def test_off_origin_center_shifts_the_grid_but_not_the_ideal_map(tracer):
         result.ideal_points, result.object_points * conjugate.magnification
     )
     assert result.valid_fraction == 1.0
+
+
+def test_chief_ray_distortion_matches_field_metrics(tracer):
+    """The cheap chief-ray-only sweep must agree with the value
+    field_metrics derives from a full pupil trace."""
+
+    from raytracer.analysis import chief_ray_distortion, field_metrics
+
+    conjugate = solve_object_plane(tracer)
+    heights = abs(conjugate.object_z) * np.tan(np.deg2rad([2.0, 4.0, 6.0]))
+
+    swept = chief_ray_distortion(
+        tracer, heights, magnification=conjugate.magnification
+    )
+    full = field_metrics(
+        tracer, heights, na_object_sine=6.5 / abs(conjugate.object_z),
+        magnification=conjugate.magnification,
+    )
+    for cheap, reference in zip(swept, full):
+        assert cheap["chief_ray_distortion_um"] == pytest.approx(
+            reference["chief_ray_distortion_um"], rel=1e-6
+        )
+
+
+def test_chief_ray_distortion_accepts_field_angles(tracer):
+    from raytracer.analysis import chief_ray_distortion
+
+    conjugate = solve_object_plane(tracer)
+    by_angle = chief_ray_distortion(
+        tracer, [4.0], magnification=conjugate.magnification, field_unit="deg"
+    )
+    height = abs(conjugate.object_z) * np.tan(np.deg2rad(4.0))
+    by_height = chief_ray_distortion(
+        tracer, [height], magnification=conjugate.magnification
+    )
+    assert by_angle[0]["object_height_mm"] == pytest.approx(height)
+    assert by_angle[0]["chief_ray_distortion_um"] == pytest.approx(
+        by_height[0]["chief_ray_distortion_um"]
+    )
+
+
+def test_chief_ray_distortion_rejects_an_unknown_field_unit(tracer):
+    from raytracer.analysis import chief_ray_distortion
+
+    with pytest.raises(ValueError, match="field_unit"):
+        chief_ray_distortion(tracer, [1.0], magnification=1.0, field_unit="radians")

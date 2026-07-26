@@ -95,16 +95,24 @@ def seidel_coefficients(
     *,
     na_object_sine: float,
     na_image: float,
-    wavelength_mm: float,
+    wavelength_mm: float | None = None,
     n_image: float = 1.0,
     sampling: PupilSampling | None = None,
+    stop_index: int | None = None,
 ) -> SeidelCoefficients:
     """Fit Seidel-style coefficients from wavefronts traced at several fields.
 
-    ``field_heights_mm`` should span the field of interest with at least
-    3-4 points (more improves the field-scaling fits); a field height of
-    exactly 0 is fine and helps anchor the spherical/defocus fits. Each
-    field is independently traced and its wavefront reconstructed from
+    ``field_heights_mm`` must contain at least three points, spanning the
+    field of interest, with at least two distinct ``y**2`` values — the
+    field-curvature/defocus split is a two-parameter fit in ``y**2`` and is
+    not identifiable otherwise. A field height of exactly 0 is fine and
+    helps anchor the spherical/defocus fits.
+
+    ``wavelength_mm`` defaults to the traced system's own
+    ``wavelength_um``; pass it only to override that deliberately, since a
+    value inconsistent with the system actually being traced would silently
+    rescale every "waves" figure below. Each field is independently traced
+    and its wavefront reconstructed from
     transverse ray aberrations via :func:`~.zernike.fit_transverse`
     (Hamilton's relation) rather than the OPL/reference-sphere route — the
     latter needs a ``reference_radius`` tuned to the system's own exit-pupil
@@ -123,15 +131,27 @@ def seidel_coefficients(
     """
 
     field_heights_mm = np.asarray(field_heights_mm, dtype=float)
+    if field_heights_mm.size < 3 or np.unique(field_heights_mm**2).size < 2:
+        raise ValueError(
+            "seidel_coefficients needs at least 3 field heights with at least 2 "
+            f"distinct y**2 values to identify the field-scaling laws; got "
+            f"{field_heights_mm.size} height(s): {field_heights_mm}"
+        )
+    if wavelength_mm is None:
+        if tracer.system.wavelength_um is None:
+            raise ValueError(
+                "system.wavelength_um is unset; pass wavelength_mm explicitly"
+            )
+        wavelength_mm = tracer.system.wavelength_um * 1e-3
     sampling = sampling or PupilSampling(kind="rings", radial=10, azimuth=48)
 
     spherical, coma, astig, defocus = [], [], [], []
     for y in field_heights_mm:
         field = FieldPoint(y=float(y))
-        _, chief_slope = chief_ray_slopes(tracer, field)
+        chief_slopes = chief_ray_slopes(tracer, field, stop_index=stop_index)
         pupil = trace_pupil(
             tracer, field, na_object_sine=na_object_sine, sampling=sampling,
-            chief_slope=chief_slope,
+            chief_slope=chief_slopes, stop_index=stop_index,
         )
         expansion = fit_transverse(
             pupil, na_image=na_image, n_image=n_image,

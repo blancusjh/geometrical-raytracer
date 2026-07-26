@@ -1,7 +1,14 @@
 """Aberration analysis: field metrics, distortion, wavefront, Zernike, fans."""
 
-from .chromatic import AxialColor, LateralColor, axial_color, lateral_color
-from .distortion import DistortionGrid, distortion_grid
+from .chromatic import (
+    AxialColor,
+    ChromaticSpots,
+    LateralColor,
+    axial_color,
+    chromatic_spots,
+    lateral_color,
+)
+from .distortion import DistortionGrid, chief_ray_distortion, distortion_grid
 from .fans import FanData, ray_fans
 from .metrics import export_metrics_csv, field_metrics
 from .seidel import SeidelCoefficients, seidel_coefficients
@@ -24,9 +31,12 @@ from .zernike import (
 __all__ = [
     "AxialColor",
     "LateralColor",
+    "ChromaticSpots",
     "axial_color",
     "lateral_color",
+    "chromatic_spots",
     "DistortionGrid",
+    "chief_ray_distortion",
     "distortion_grid",
     "SeidelCoefficients",
     "seidel_coefficients",
