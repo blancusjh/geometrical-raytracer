@@ -123,6 +123,12 @@ def test_field_metrics_regression(tracer):
     for row, ee80, ts in zip(metrics, expected_ee80, expected_ts):
         assert row["ee80_radius_um"] == pytest.approx(ee80, rel=5e-3)
         assert row["astigmatic_separation_mm"] == pytest.approx(ts, rel=2e-2)
+        # Chief-ray distortion: industry-standard definition (single ray
+        # through the stop center), unaffected by vignetting/apodization.
+        # No external reference value is known for this metric, so this is
+        # a sanity bound rather than a regression check.
+        assert np.isfinite(row["chief_ray_distortion_um"])
+        assert abs(row["chief_ray_distortion_um"]) < 50.0
 
 
 @pytest.mark.slow

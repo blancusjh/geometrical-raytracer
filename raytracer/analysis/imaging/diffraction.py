@@ -2,8 +2,8 @@
 
 The pupil grid maps FFT spatial frequencies to normalized pupil coordinates
 ``u = f_x * lambda / NA``. Wavefronts can come from a fitted
-:class:`~raytracer.analysis.zernike.ZernikeExpansion` (mm) or interpolated
-:class:`~raytracer.analysis.wavefront.WavefrontSamples` (waves).
+:class:`~raytracer.analysis.aberrations.zernike.ZernikeExpansion` (mm) or interpolated
+:class:`~raytracer.analysis.aberrations.wavefront.WavefrontSamples` (waves).
 """
 
 from __future__ import annotations

@@ -5,6 +5,7 @@ from .fields import (
     PupilSampling,
     PupilTrace,
     chief_ray_slope,
+    chief_ray_slopes,
     trace_from_object,
     trace_pupil,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "PupilSampling",
     "PupilTrace",
     "chief_ray_slope",
+    "chief_ray_slopes",
     "trace_from_object",
     "trace_pupil",
 ]

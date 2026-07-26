@@ -1,0 +1,8 @@
+surface,surface_type,radius_mm,thickness_to_next_mm,material_after,index_587.6_nm,clear_semidiameter_mm,aspheric,K,C1_mm^-3,C2_mm^-5,C3_mm^-7,C4_mm^-9,C5_mm^-11,C6_mm^-13,vertex_z_mm
+1,refractive,21.250000000,2.000000000,SK16,1.62041000,6.500,False,,,,,,,,0.000000000
+2,refractive,-158.650000000,6.000000000,AIR,1.00000000,6.500,False,,,,,,,,2.000000000
+3,refractive,-20.250000000,1.000000000,F4,1.61700000,5.000,False,,,,,,,,8.000000000
+4,refractive,19.300000000,0.000000000,AIR,1.00000000,5.000,False,,,,,,,,9.000000000
+5,aperture_stop,0.000000000,6.000000000,AIR,1.00000000,4.750,False,,,,,,,,9.000000000
+6,refractive,141.250000000,2.000000000,SK16,1.62041000,6.500,False,,,,,,,,15.000000000
+7,refractive,-17.285000000,42.950000000,AIR,1.00000000,6.500,False,,,,,,,,17.000000000

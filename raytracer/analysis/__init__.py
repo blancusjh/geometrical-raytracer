@@ -1,60 +1,20 @@
-"""Optical analysis: spots, fans, aberration metrics, Zernike, imaging."""
+"""Optical analysis, split by what is being measured.
 
-from .fans import FanData, ray_fans
-from .imaging import (
-    BinaryMask,
-    PupilGrid,
-    abbe_image,
-    airy_radius_mm,
-    coherent_cutoff_half_pitch_nm,
-    contrast_curve,
-    pupil_function,
-    scalar_psf,
-)
-from .metrics import export_metrics_csv, field_metrics
-from .spots import SpotData, spot_data, spot_data_from_points
-from .stigmatism import (
-    StigmatismReport,
-    point_line_distances,
-    rays_by_generation,
-    stigmatism_report,
-)
-from .wavefront import WavefrontSamples, exit_pupil_wavefront
-from .zernike import (
-    Mode,
-    ZernikeExpansion,
-    fit_opd,
-    fit_transverse,
-    zernike,
-    zernike_modes,
-)
+- :mod:`raytracer.analysis.imaging` — what the image looks like: spot
+  diagrams, PSF, aerial image, contrast.
+- :mod:`raytracer.analysis.aberrations` — what the ray/wavefront error
+  looks like and why: field metrics, distortion, Seidel coefficients,
+  chromatic aberration, wavefront/Zernike, ray fans, stigmatism.
 
-__all__ = [
-    "SpotData",
-    "spot_data",
-    "spot_data_from_points",
-    "StigmatismReport",
-    "stigmatism_report",
-    "point_line_distances",
-    "rays_by_generation",
-    "FanData",
-    "ray_fans",
-    "field_metrics",
-    "export_metrics_csv",
-    "Mode",
-    "zernike",
-    "zernike_modes",
-    "ZernikeExpansion",
-    "fit_transverse",
-    "fit_opd",
-    "WavefrontSamples",
-    "exit_pupil_wavefront",
-    "PupilGrid",
-    "pupil_function",
-    "scalar_psf",
-    "airy_radius_mm",
-    "BinaryMask",
-    "abbe_image",
-    "contrast_curve",
-    "coherent_cutoff_half_pitch_nm",
-]
+Every public name from both is re-exported here, so a call site that
+doesn't care which side of that split a name lives on can just use
+``from raytracer.analysis import ...``. The re-export is derived from the
+subpackages' own ``__all__`` rather than hand-listed, so the two cannot
+drift apart.
+"""
+
+from . import aberrations, imaging
+from .aberrations import *  # noqa: F401,F403
+from .imaging import *  # noqa: F401,F403
+
+__all__ = [*aberrations.__all__, *imaging.__all__]

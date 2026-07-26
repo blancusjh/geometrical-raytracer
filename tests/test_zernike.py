@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from raytracer.analysis.zernike import ZernikeExpansion, fit_opd, zernike, zernike_modes
+from raytracer.analysis.aberrations.zernike import ZernikeExpansion, fit_opd, zernike, zernike_modes
 
 
 def _disk_grid(n=301):

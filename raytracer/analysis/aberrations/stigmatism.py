@@ -1,8 +1,8 @@
 """Quantitative stigmatism verification for a traced pupil bundle.
 
 Packages the two existing convergence metrics — geometric spot size
-(:func:`raytracer.analysis.spots.spot_data`) and wavefront OPD
-(:func:`raytracer.analysis.wavefront.exit_pupil_wavefront`) — into a single
+(:func:`raytracer.analysis.imaging.spots.spot_data`) and wavefront OPD
+(:func:`raytracer.analysis.aberrations.wavefront.exit_pupil_wavefront`) — into a single
 printable/assertable verdict, so an example can *confirm* "these rays
 converge to a point" instead of only asserting it in a comment or a print
 banner.
@@ -14,8 +14,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..sequential.fields import PupilTrace
-from .spots import SpotData, spot_data
+from ...sequential.fields import PupilTrace
+from ..imaging.spots import SpotData, spot_data
 from .wavefront import WavefrontSamples, exit_pupil_wavefront
 
 

@@ -2,6 +2,14 @@
 
 Direct port of the reference ``aberration_metrics``: all quantities are
 computed from exact rays with pupil-area weights.
+
+Distortion is reported two ways. ``chief_ray_distortion_um`` is the
+industry-standard definition (Zemax/OpticStudio convention): the deviation
+of the chief ray's image-plane intersection from the paraxial ideal height.
+It is unaffected by vignetting/apodization since it depends on a single ray.
+``distortion_um`` is the flux-weighted centroid of the full ray bundle
+instead; it mixes in coma and vignetting, so it is kept for reference but is
+not the default plotted quantity.
 """
 
 from __future__ import annotations
@@ -10,9 +18,9 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from ..sequential.fields import FieldPoint, PupilSampling, trace_pupil
-from ..sequential.trace import SequentialTracer
-from .spots import weighted_mean, weighted_quantile
+from ...sequential.fields import FieldPoint, PupilSampling, trace_pupil
+from ...sequential.trace import SequentialTracer
+from ..imaging.spots import weighted_mean, weighted_quantile
 
 
 def field_metrics(
@@ -22,6 +30,7 @@ def field_metrics(
     na_object_sine: float,
     magnification: float,
     sampling: PupilSampling | None = None,
+    stop_index: int | None = None,
 ) -> list[dict]:
     """Aberration metrics per field point.
 
@@ -35,7 +44,8 @@ def field_metrics(
         if not isinstance(field, FieldPoint):
             field = FieldPoint(y=float(field))
         pupil = trace_pupil(
-            tracer, field, na_object_sine=na_object_sine, sampling=sampling
+            tracer, field, na_object_sine=na_object_sine, sampling=sampling,
+            stop_index=stop_index,
         )
         points = pupil.image_points[:, :2]
         directions = pupil.directions
@@ -71,6 +81,7 @@ def field_metrics(
         )
 
         ideal_y = field.y * magnification
+        chief_y = float(pupil.chief.image_point[1])
         results.append(
             {
                 "object_height_mm": field.y,
@@ -79,6 +90,11 @@ def field_metrics(
                 "distortion_um": float((centroid[1] - ideal_y) * 1e3),
                 "relative_distortion_ppm": (
                     float((centroid[1] / ideal_y - 1) * 1e6) if ideal_y != 0.0 else 0.0
+                ),
+                "chief_image_height_mm": chief_y,
+                "chief_ray_distortion_um": float((chief_y - ideal_y) * 1e3),
+                "chief_ray_relative_distortion_ppm": (
+                    float((chief_y / ideal_y - 1) * 1e6) if ideal_y != 0.0 else 0.0
                 ),
                 "rms_spot_radius_um": float(rms_radius_um),
                 "rms_sagittal_um": float(rms_x_um),

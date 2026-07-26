@@ -16,7 +16,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from ..sequential.fields import PupilTrace
+from ...sequential.fields import PupilTrace
 
 ZERNIKE_NAMES = {
     (0, 0): "Piston",
