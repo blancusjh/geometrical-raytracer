@@ -265,9 +265,9 @@ def aberrations_figure(metrics: Sequence[dict], *, suptitle: str | None = None) 
     )
     axes[0, 0].set(ylabel="RMS radius (µm)", title="Transverse aberration")
     axes[0, 0].legend()
-    axes[0, 1].plot(image_height, [row["distortion_um"] for row in metrics], "o-")
+    axes[0, 1].plot(image_height, [row["chief_ray_distortion_um"] for row in metrics], "o-")
     axes[0, 1].axhline(0, color="black", lw=0.7)
-    axes[0, 1].set(ylabel="Centroid distortion (µm)", title="Distortion")
+    axes[0, 1].set(ylabel="Chief-ray distortion (µm)", title="Distortion")
     axes[1, 0].plot(
         image_height, [row["sagittal_focus_shift_mm"] for row in metrics], "o-",
         label="sagittal",

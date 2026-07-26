@@ -2,6 +2,14 @@
 
 Direct port of the reference ``aberration_metrics``: all quantities are
 computed from exact rays with pupil-area weights.
+
+Distortion is reported two ways. ``chief_ray_distortion_um`` is the
+industry-standard definition (Zemax/OpticStudio convention): the deviation
+of the chief ray's image-plane intersection from the paraxial ideal height.
+It is unaffected by vignetting/apodization since it depends on a single ray.
+``distortion_um`` is the flux-weighted centroid of the full ray bundle
+instead; it mixes in coma and vignetting, so it is kept for reference but is
+not the default plotted quantity.
 """
 
 from __future__ import annotations
@@ -71,6 +79,7 @@ def field_metrics(
         )
 
         ideal_y = field.y * magnification
+        chief_y = float(pupil.chief.image_point[1])
         results.append(
             {
                 "object_height_mm": field.y,
@@ -79,6 +88,11 @@ def field_metrics(
                 "distortion_um": float((centroid[1] - ideal_y) * 1e3),
                 "relative_distortion_ppm": (
                     float((centroid[1] / ideal_y - 1) * 1e6) if ideal_y != 0.0 else 0.0
+                ),
+                "chief_image_height_mm": chief_y,
+                "chief_ray_distortion_um": float((chief_y - ideal_y) * 1e3),
+                "chief_ray_relative_distortion_ppm": (
+                    float((chief_y / ideal_y - 1) * 1e6) if ideal_y != 0.0 else 0.0
                 ),
                 "rms_spot_radius_um": float(rms_radius_um),
                 "rms_sagittal_um": float(rms_x_um),
