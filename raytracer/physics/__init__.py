@@ -1,19 +1,11 @@
-"""The physics of light: refractive materials and the laws at an interface.
+"""The physics of light: refractive materials, direction laws, and power laws.
 
 This is the crown of the package — a raytracer exists to simulate these
-laws. It is built on :mod:`raytracer.math` (vectors, frames) and nothing
-else; :mod:`raytracer.geometry` and the sequential/non-sequential engines
-are built on *it*, not the reverse.
+laws. It is built on :mod:`raytracer.math` alone; :mod:`raytracer.shapes`,
+:mod:`raytracer.optics`, and the propagation engines are built on *it*, not
+the reverse.
 """
 
-from .laws import (
-    FresnelCoefficients,
-    SnellResult,
-    fresnel_coefficients,
-    reflect,
-    refract,
-    snell,
-)
 from .materials import (
     AIR,
     VACUUM,
@@ -25,13 +17,15 @@ from .materials import (
     default_materials,
     sellmeier_glass,
 )
+from .radiometry import FresnelCoefficients, fresnel_coefficients
+from .refraction import reflect, reflect_batch, refract, refract_batch
 
 __all__ = [
-    "SnellResult",
-    "FresnelCoefficients",
-    "snell",
     "reflect",
     "refract",
+    "reflect_batch",
+    "refract_batch",
+    "FresnelCoefficients",
     "fresnel_coefficients",
     "Material",
     "ConstantIndex",

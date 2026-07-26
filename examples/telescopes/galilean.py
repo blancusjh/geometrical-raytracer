@@ -6,7 +6,7 @@ giving an upright image in a short tube. Compare with the Keplerian design
 (``examples/telescopes/keplerian.py``), which forms a real intermediate image
 at the cost of a longer tube and an inverted view.
 
-Each lens is a real element (`Lens2D.spherical`): two spherical surfaces
+Each lens is a real element (`Lens.spherical`): two spherical surfaces
 enclosing the glass, closed by absorbing rims at the clear aperture — drawn
 as a filled body, exactly like the lithography examples. The input beams are
 sized so the compressed output beam fits through the eyepiece aperture.
@@ -36,10 +36,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer import ParallelSource2D, RayTracer2D, RenderConfig, TraceConfig
+from raytracer import BranchingTracer, ParallelSource, RenderConfig, TraceConfig
+from raytracer.design import OpticalSystem, SurfaceRow
+from raytracer.optics import Lens
 from raytracer.physics.materials import AIR, ConstantIndex
-from raytracer.nonseq.elements import Lens2D
-from raytracer.sequential import OpticalSystem, SequentialTracer, SurfaceRow
+from raytracer.propagation import SequentialTracer
 from raytracer.viz import Scene, show
 from examples.telescopes._afocal import solve_afocal_gap
 
@@ -92,22 +93,22 @@ def angular_magnification(system: OpticalSystem, theta_in: float = 0.01) -> tupl
 
 
 def build_scene(gap: float) -> Scene:
-    objective = Lens2D.spherical(
+    objective = Lens.spherical(
         R1=R_OBJ, R2=-R_OBJ, thickness=OBJ_THICKNESS, semidiameter=OBJ_SEMI,
         n=GLASS_N, vertex=(0.0, 0.0), name="objective",
     )
-    eyepiece = Lens2D.spherical(
+    eyepiece = Lens.spherical(
         R1=R_EYE, R2=-R_EYE, thickness=EYE_THICKNESS, semidiameter=EYE_SEMI,
         n=GLASS_N, vertex=(OBJ_THICKNESS + gap, 0.0), name="eyepiece",
     )
     surfaces = [*objective.surfaces(), *eyepiece.surfaces()]
-    tracer = RayTracer2D(surfaces, TraceConfig(max_generations=8, fresnel_split=False))
+    tracer = BranchingTracer(surfaces, TraceConfig(max_generations=8, fresnel_split=False))
 
-    on_axis = ParallelSource2D(
+    on_axis = ParallelSource(
         origin=np.array([-25.0, 0.0]), direction=np.array([1.0, 0.0]),
         width=2.0 * BEAM_HALF_WIDTH, samples=17,
     )
-    off_axis = ParallelSource2D(
+    off_axis = ParallelSource(
         origin=np.array([-25.0, -25.0 * np.tan(FIELD_ANGLE)]),
         direction=np.array([np.cos(FIELD_ANGLE), np.sin(FIELD_ANGLE)]),
         width=2.0 * BEAM_HALF_WIDTH, samples=17,

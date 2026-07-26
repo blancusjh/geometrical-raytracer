@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from raytracer.geometry.sag import AsphereProfile
+from raytracer.shapes.profile import AsphereProfile
 
 
 def test_plane_is_zero():

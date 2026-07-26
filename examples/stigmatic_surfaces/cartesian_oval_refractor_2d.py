@@ -3,7 +3,7 @@
 Descartes' construction gives a surface shape (not a sphere) that images an
 object at ``z0`` in air exactly onto ``zi`` inside the glass — every ray from
 the object point refracts through precisely the same image point, with no
-spherical aberration at any aperture. ``CartesianOvoid2D`` traces this via
+spherical aberration at any aperture. ``CartesianOvalSurface`` traces this via
 Fermat's principle: ``n0 * dist(object, surface) + ni * dist(surface, image)
 = const``.
 
@@ -13,8 +13,7 @@ distance from the image point to each refracted ray's line
 diagram — near zero confirms stigmatism.
 
 The surface's clear aperture (``semidiameter``) clips rays that would land
-outside it, exactly like a real lens edge (see ``raytracer.geometry.
-conics2d``/``ovoid2d`` aperture clipping).
+outside it, exactly like a real lens edge (see ``raytracer.optics.conics``/``cartesian_oval`` aperture clipping).
 
 Usage:
     python -m examples.stigmatic_surfaces.cartesian_oval_refractor_2d
@@ -32,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer import CartesianOvoid2D, OpenGLViewer, PointSource2D, RayTracer2D, RenderConfig, TraceConfig
+from raytracer import BranchingTracer, CartesianOvalSurface, OpenGLViewer, PointSource, RenderConfig, TraceConfig
 from raytracer.analysis import point_line_distances, rays_by_generation
 
 AMBIENT_N = 1.0
@@ -44,17 +43,17 @@ ZI = 10.0  # image position, inside the glass
 
 
 def build_scene(samples: int = 300):
-    ovoid = CartesianOvoid2D(
+    ovoid = CartesianOvalSurface(
         z0=Z0, zi=ZI, n_exterior=AMBIENT_N, n_interior=GLASS_N,
         semidiameter=SEMIDIAMETER, surface_id="cartesian_oval",
     )
-    source = PointSource2D(
+    source = PointSource(
         origin=np.array([Z0, 0.0]),
         axis_direction=np.array([1.0, 0.0]),
         aperture=np.deg2rad(APERTURE_DEG),
         samples=samples,
     )
-    tracer = RayTracer2D(
+    tracer = BranchingTracer(
         surfaces=[ovoid],
         config=TraceConfig(
             max_generations=2,  # 1 = incident (air), 2 = refracted (glass)

@@ -1,22 +1,37 @@
 # raytracer
 
-Toolkit de trazado de rayos óptico con dos motores que comparten primitivas:
+Toolkit de trazado de rayos óptico, organizado estrictamente por la
+naturaleza de cada pieza:
 
-- **`raytracer.sequential`** — motor secuencial 3D exacto para sistemas
-  definidos por prescripción (radios, espesores firmados, cónicas + asféricas
-  pares, espejos, stop), con recuperación de conjugados paraxiales, resolución
-  de rayo principal, muestreo de pupila vectorizado y una suite de análisis
-  profesional: spot diagrams, ray fans, métricas de aberración, expansión de
-  Zernike ANSI/OSA, frente de onda por eikonal, PSF escalar e imagen aérea
-  parcialmente coherente (método de Abbe).
-- **`raytracer.nonseq`** — motor 2D no-secuencial que produce el árbol
-  completo de reflexiones/refracciones (cáusticas, exploración), con OPL,
-  intensidad y división de Fresnel opcional.
-
-Visualización en `raytracer.viz`: figuras de análisis en matplotlib
-(`viz.plots`) y un visor OpenGL (`viz.gl`) con acumulación HDR en float y
-tone-mapping auto-expuesto — la intensidad de miles de rayos superpuestos se
-suma linealmente sin saturar el framebuffer.
+- **`raytracer.math`** — utilidad: vectores, transformaciones rígidas, y los
+  solvers numéricos puros de intersección rayo/forma.
+- **`raytracer.physics`** — la corona: materiales refractivos, las leyes de
+  óptica geométrica (reflexión/refracción) y las leyes energéticas
+  (Fresnel), separadas por naturaleza.
+- **`raytracer.shapes`** — matemática pura de formas: perfiles asféricos,
+  cónicas, óvalo de Descartes (GOTS y forma implícita de Fermat). Sin noción
+  de rayo, medio, ni superficie trazable.
+- **`raytracer.optics`** — las abstracciones de los objetos físicos: `Ray`
+  (la primitiva de la luz — no sabe detectar sus propias intersecciones),
+  `Surface`/`Instrument`, `Source`, y los elementos construidos
+  `Lens`/`Mirror`.
+- **`raytracer.propagation`** — los algoritmos que emiten rayos, los
+  prolongan hasta la colisión y deciden el nuevo rayo: `sequential` (cada
+  rayo por cada superficie en orden, vectorizado, sin ramificar) y
+  `branching` (árbol completo de reflexión/refracción, con OPL, intensidad y
+  división de Fresnel opcional).
+- **`raytracer.design`** — el modelo de datos de un sistema óptico
+  (`SurfaceRow`/`OpticalSystem`), independiente de cualquier motor de
+  propagación.
+- **`raytracer.io`** — lectura/escritura de un diseño (prescripciones CSV).
+- **`raytracer.analysis`** — spot diagrams, ray fans, métricas de
+  aberración, Zernike ANSI/OSA, frente de onda por eikonal, PSF escalar e
+  imagen aérea parcialmente coherente (método de Abbe), construidos sobre un
+  sistema ya trazado.
+- **`raytracer.viz`** — figuras de análisis en matplotlib (`viz.plots`) y un
+  visor OpenGL (`viz.gl`) con acumulación HDR en float y tone-mapping
+  auto-expuesto — la intensidad de miles de rayos superpuestos se suma
+  linealmente sin saturar el framebuffer.
 
 ## Instalación
 
@@ -25,18 +40,19 @@ pip install -e .          # numpy, scipy, matplotlib
 pip install -e ".[gl]"    # + vispy para el visor OpenGL
 ```
 
-## Motor secuencial: cargar una prescripción y analizarla
+## Propagación secuencial: cargar una prescripción y analizarla
 
 ```python
-from importlib import resources
-from raytracer.sequential import (
-    OpticalSystem, SequentialTracer, FieldPoint, PupilSampling,
+from pathlib import Path
+from raytracer.design import OpticalSystem
+from raytracer.propagation import (
+    SequentialTracer, FieldPoint, PupilSampling,
     solve_object_plane, trace_pupil,
 )
 from raytracer.analysis import spot_data, fit_transverse
 from raytracer.viz import plots
 
-csv = resources.files("raytracer") / "data" / "US7557996_Fig3_Table3_prescription.csv"
+csv = Path("data/US7557996_Fig3_Table3_prescription.csv")
 system = OpticalSystem.from_prescription(csv)   # 48 superficies, 12 asféricas
 tracer = SequentialTracer(system)
 solve_object_plane(tracer)                      # recupera el plano objeto (B=0)
@@ -50,7 +66,8 @@ fig.savefig("layout.png", dpi=180)
 ```
 
 Los notebooks en `examples/notebooks/` reproducen dos objetivos de patente
-completos y sirven como referencia de la API:
+completos y sirven como referencia de la API (algunos todavía importan las
+rutas previas a esta reorganización — ver la nota en "Estructura").
 
 - `us7557996_objective.ipynb` — objetivo litográfico DUV catadióptrico de
   inmersión (NA 1.2, λ=193.368 nm): réplica dígito a dígito del análisis de
@@ -59,18 +76,18 @@ completos y sirven como referencia de la API:
   NA 0.22, λ=13.4 nm): validación analítica, refit de asféricas por mínimos
   cuadrados, frente de onda por eikonal, imagen de Abbe y curva de contraste.
 
-## Motor 2D no-secuencial + visor OpenGL
+## Propagación por ramificación (branching) + visor OpenGL
 
 ```python
 import numpy as np
-from raytracer import EllipseConic, PointSource2D, RayTracer2D, TraceConfig
+from raytracer import EllipseSurface, PointSource, BranchingTracer, TraceConfig
 from raytracer import OpenGLViewer, RenderConfig
 
-mirror = EllipseConic(semi_major=4.0, semi_minor=2.5)
-source = PointSource2D(origin=np.array([0.0, 0.1]),
-                       axis_direction=np.array([-1.0, 0.0]),
-                       aperture=np.deg2rad(60.0), samples=2000)
-tree = RayTracer2D([mirror], TraceConfig(max_generations=3)).trace([source])
+mirror = EllipseSurface(semi_major=4.0, semi_minor=2.5)
+source = PointSource(origin=np.array([0.0, 0.1]),
+                     axis_direction=np.array([-1.0, 0.0]),
+                     aperture=np.deg2rad(60.0), samples=2000)
+tree = BranchingTracer([mirror], TraceConfig(max_generations=3)).trace([source])
 
 viewer = OpenGLViewer(x_lims=(-8, 2), y_lims=(-4, 4))
 viewer.draw_surfaces([mirror])
@@ -85,10 +102,10 @@ Demos ejecutables en `examples/`, organizadas por carpeta:
   `cartesian_oval_refractor_3d.py` (óvalo de Descartes, parametrización GOTS,
   2D implícito vs 3D con sag cerrado). Los tres verifican el estigmatismo
   cuantitativamente (RMS/OPD ~0), no solo lo ilustran.
-- `telescopes/` — `galilean.py` y `keplerian.py` (motor secuencial, separación
-  resuelta para condición afocal exacta, magnificación angular medida por
-  trazado) y `newtonian.py` (motor 2D no-secuencial, primario parabólico +
-  secundario plano a 45°, con obstrucción central).
+- `telescopes/` — `galilean.py` y `keplerian.py` (propagación secuencial,
+  separación resuelta para condición afocal exacta, magnificación angular
+  medida por trazado) y `newtonian.py` (propagación por ramificación,
+  primario parabólico + secundario plano a 45°, con obstrucción central).
 - `imaging/` — `single_lens_relay.py` (misma escena en matplotlib y OpenGL),
   `interactive_doublet.py` (arrastra fuente/lente/pantalla, Tab cicla
   parámetros), `geometric_and_diffractive_imaging.py` (relevo geométrico de un
@@ -101,31 +118,43 @@ Demos ejecutables en `examples/`, organizadas por carpeta:
 
 ```
 raytracer/
-  core/        # vectores, marcos, materiales, leyes (Snell, Fresnel)
-  geometry/    # sag asférico compartido, cónicas 2D, ovoides, óvalo de
-               # Descartes (GOTS, compartido entre el ovoide 2D y el
-               # CartesianOvalProfile 3D)
-  sequential/  # filas de superficie, sistema, prescripción CSV, trazador
-               # vectorizado, capa paraxial, campos y pupilas
-  analysis/    # spots, fans, métricas, Zernike, eikonal, imaging escalar,
-               # verificación de estigmatismo (spot RMS + OPD)
-  nonseq/      # rayos, superficies, fuentes (incl. ImageSource2D), lentes/
-               # espejos 2D, pantallas de observación, trazador no-secuencial
-  viz/         # plots matplotlib, muestreo de sag compartido (sag_drawing),
-               # escena neutral dual-backend (scene/mpl/protocol), color
-               # (CIE), visor OpenGL HDR con modo geométrico no-aditivo (gl/),
-               # modo interactivo (interactive), visor 3D (gl3d)
-  data/        # prescripción US7557996 empaquetada
-examples/      # demos por categoría (stigmatic_surfaces/, telescopes/,
-               # imaging/, lithography/) + notebooks de réplica de patentes
-reference/     # notebooks y módulo de referencia originales
-tests/         # verdades analíticas + regresiones de sistema completo
+  math/          # vectores, transformaciones rígidas (RigidTransform),
+                 # solvers puros de intersección (intersections.py)
+  physics/       # materiales, leyes de dirección (refraction.py: reflect/
+                 # refract), leyes energéticas (radiometry.py: Fresnel)
+  shapes/        # perfil asférico, álgebra de cónicas, óvalo de Descartes
+                 # (GOTS y forma implícita de Fermat) -- sin motor
+  optics/        # Ray, Surface/Instrument, Source, Lens/Mirror -- las
+                 # abstracciones físicas, compartidas por ambos motores
+  propagation/   # sequential.py (trazador vectorizado, sin ramificar) y
+                 # branching.py (árbol de reflexión/refracción); paraxial.py
+                 # y fields.py son extensiones específicas de sequential
+  design/        # SurfaceRow/SurfaceKind, OpticalSystem -- el modelo de un
+                 # sistema, independiente de cómo se propague o se lea
+  io/            # lectura/escritura de prescripciones (CSV)
+  analysis/      # spots, fans, métricas, Zernike, eikonal, imaging escalar,
+                 # verificación de estigmatismo (spot RMS + OPD)
+  viz/           # plots matplotlib, muestreo de sag compartido (sag_drawing),
+                 # escena neutral dual-backend (scene/mpl/protocol), color
+                 # (CIE), visor OpenGL HDR con modo geométrico no-aditivo (gl/),
+                 # modo interactivo (interactive), visor 3D (gl3d)
+data/            # prescripciones de ejemplo (CSV), fuera del paquete
+                 # importable -- son datos, no código
+examples/        # demos por categoría (stigmatic_surfaces/, telescopes/,
+                 # imaging/, lithography/) + notebooks de réplica de patentes
+reference/       # notebooks y módulo de referencia originales
+tests/           # verdades analíticas + regresiones de sistema completo
 ```
+
+Esta es una reorganización sin retrocompatibilidad: no quedan alias
+diferidos de la estructura anterior (`core`/`geometry`/`sequential`/`nonseq`).
+Los notebooks en `examples/notebooks/` y `reference/` no se tocaron en este
+pase y pueden requerir actualización de sus imports.
 
 ## Tests
 
 ```bash
-pytest                 # suite completa (87 tests)
+pytest                 # suite completa
 pytest -m "not gpu"    # sin los smoke tests de OpenGL
 ```
 

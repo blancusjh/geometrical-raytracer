@@ -33,7 +33,7 @@ class Backend(Protocol):
 def _lens_body_mesh(polygon: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Strip-triangulate a lens body polygon into (verts, faces).
 
-    ``Lens2D.body_polygon()`` lays out M front-face points (h: -semi -> +semi)
+    ``Lens.body_polygon()`` lays out M front-face points (h: -semi -> +semi)
     followed by the M back-face points reversed, so vertex ``i`` and vertex
     ``2M-1-i`` sit at the same height — pairing them yields a quad strip
     (same construction as ``sag_drawing.lens_fill_mesh``).

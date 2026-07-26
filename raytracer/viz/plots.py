@@ -11,10 +11,10 @@ from typing import Iterable, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..sequential.fields import FieldPoint, chief_ray_slope, trace_from_object
-from ..sequential.surfaces import SurfaceKind
-from ..sequential.system import OpticalSystem
-from ..sequential.trace import SequentialTracer
+from ..propagation.fields import FieldPoint, chief_ray_slope, trace_from_object
+from ..design.surfaces import SurfaceKind
+from ..design.system import OpticalSystem
+from ..propagation.sequential import SequentialTracer
 from ..analysis.aberrations.chromatic import AxialColor, ChromaticSpots, LateralColor
 from ..analysis.aberrations.distortion import DistortionGrid
 from ..analysis.aberrations.fans import FanData

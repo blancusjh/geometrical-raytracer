@@ -18,7 +18,7 @@ Three classical quantities:
   shifts along z with wavelength, since the system's optical power itself
   is index-, hence wavelength-, dependent. Found from one differential ray
   per wavelength — the same technique
-  :func:`~raytracer.sequential.paraxial.differential_conjugates` uses to
+  :func:`~raytracer.propagation.paraxial.differential_conjugates` uses to
   recover an object plane, but solving for the *image*-side focus instead
   since here the object plane is fixed and known.
 - **Lateral color**: at the *reference* wavelength's paraxial image plane,
@@ -37,16 +37,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...sequential.fields import (
+from ...propagation.fields import (
     FieldPoint,
     PupilSampling,
     chief_ray_slopes,
     trace_from_object,
     trace_pupil,
 )
-from ...sequential.paraxial import direction_from_slopes
-from ...sequential.system import OpticalSystem
-from ...sequential.trace import SequentialTracer
+from ...propagation.paraxial import direction_from_slopes
+from ...design.system import OpticalSystem
+from ...propagation.sequential import SequentialTracer
 
 
 def _reference_index(wavelengths_um: np.ndarray, reference_wavelength_um: float) -> int:
@@ -180,7 +180,7 @@ def axial_color(
     """Paraxial focus position vs. wavelength, object plane held fixed.
 
     ``system.object_z`` must already be set (e.g. via
-    :func:`~raytracer.sequential.paraxial.solve_object_plane` at the
+    :func:`~raytracer.propagation.paraxial.solve_object_plane` at the
     reference wavelength) — the same physical object plane is reused for
     every wavelength; only the resulting focus position changes.
     """

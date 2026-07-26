@@ -13,9 +13,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.sequential import (
+from raytracer.design import OpticalSystem
+from raytracer.propagation import (
     FieldPoint,
-    OpticalSystem,
     ParaxialModel,
     SequentialTracer,
     chief_ray_slope,
@@ -23,7 +23,7 @@ from raytracer.sequential import (
     trace_from_object,
 )
 
-CSV = Path(__file__).resolve().parents[1] / "raytracer" / "data" / "cooke_triplet_prescription.csv"
+CSV = Path(__file__).resolve().parents[1] / "data" / "cooke_triplet_prescription.csv"
 
 
 @pytest.fixture(scope="module")

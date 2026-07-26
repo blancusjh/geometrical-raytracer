@@ -3,19 +3,20 @@
 import numpy as np
 import pytest
 
-from raytracer.physics.laws import fresnel_coefficients, reflect, refract, snell
+from raytracer.physics.radiometry import fresnel_coefficients
+from raytracer.physics.refraction import reflect, reflect_batch, refract, refract_batch
 
 
-def test_snell_angles_match_analytic():
+def test_refraction_angle_matches_analytic_snell():
     n1, n2 = 1.0, 1.5
     theta_i = np.deg2rad(30.0)
     direction = np.array([np.sin(theta_i), -np.cos(theta_i)])
     normal = np.array([0.0, 1.0])
 
-    result = snell(direction, normal, n1, n2)
+    out = refract(direction, normal, n1, n2)
     theta_t_expected = np.arcsin(n1 / n2 * np.sin(theta_i))
-    assert result.cos_incident == pytest.approx(np.cos(theta_i), abs=1e-12)
-    assert result.cos_transmitted == pytest.approx(np.cos(theta_t_expected), abs=1e-12)
+    expected = np.array([np.sin(theta_t_expected), -np.cos(theta_t_expected)])
+    assert out == pytest.approx(expected, abs=1e-12)
 
 
 def test_refraction_direction_is_unit_and_in_plane():
@@ -56,6 +57,43 @@ def test_reflection_3d():
     normal = np.array([0.0, 0.0, 1.0])
     out = reflect(direction, normal)
     assert out == pytest.approx(np.array([1.0, 0.0, 1.0]) / np.sqrt(2), abs=1e-12)
+
+
+def test_reflect_batch_matches_scalar_reflect():
+    directions = np.array([[0.6, -0.8], [1.0, 0.0], [-0.3, -0.95]])
+    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+    normal = np.array([0.0, 1.0])
+    normals = np.tile(normal, (len(directions), 1))
+
+    batch = reflect_batch(directions, normals)
+    for d, out in zip(directions, batch):
+        assert out == pytest.approx(reflect(d, normal), abs=1e-12)
+
+
+def test_refract_batch_matches_scalar_refract():
+    n1, n2 = 1.0, 1.5
+    thetas = np.deg2rad([5.0, 20.0, 40.0])
+    directions = np.column_stack([np.sin(thetas), -np.cos(thetas)])
+    normal = np.array([0.0, 1.0])
+    normals = np.tile(normal, (len(directions), 1))
+
+    out, tir = refract_batch(directions, normals, n1, n2)
+    assert not tir.any()
+    for d, o in zip(directions, out):
+        assert o == pytest.approx(refract(d, normal, n1, n2), abs=1e-12)
+
+
+def test_refract_batch_flags_tir():
+    n1, n2 = 1.5, 1.0
+    theta_c = np.arcsin(n2 / n1)
+    thetas = np.array([theta_c - 1e-3, theta_c + 1e-3])
+    directions = np.column_stack([np.sin(thetas), -np.cos(thetas)])
+    normal = np.array([0.0, 1.0])
+    normals = np.tile(normal, (len(directions), 1))
+
+    _, tir = refract_batch(directions, normals, n1, n2)
+    assert not tir[0]
+    assert tir[1]
 
 
 def test_fresnel_energy_conservation():

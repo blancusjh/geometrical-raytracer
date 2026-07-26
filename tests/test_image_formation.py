@@ -3,21 +3,16 @@
 import numpy as np
 import pytest
 
-from raytracer.nonseq import (
-    ImageSource2D,
-    Lens2D,
-    RayTracer2D,
-    Screen2D,
-    TraceConfig,
-)
+from raytracer.optics import ImageSource, Lens, Screen
+from raytracer.propagation import BranchingTracer, TraceConfig
 
 
 def _relay(profile, *, object_height=6.0, rays_per_point=41):
-    lens = Lens2D.from_radii(
+    lens = Lens.from_radii(
         r1=60.0, r2=-60.0, thickness=9.0, semidiameter=16.0, n=1.5168,
         vertex=(0.0, 0.0), name="relay",
     )
-    source = ImageSource2D(
+    source = ImageSource(
         profile=np.asarray(profile, dtype=float),
         p0=np.array([-90.0, -object_height]),
         p1=np.array([-90.0, object_height]),
@@ -25,8 +20,8 @@ def _relay(profile, *, object_height=6.0, rays_per_point=41):
         aperture=np.deg2rad(8.0),
         rays_per_point=rays_per_point,
     )
-    screen = Screen2D([171.4, -20.0], [171.4, 20.0])
-    tracer = RayTracer2D([*lens.surfaces(), screen], TraceConfig(max_generations=4))
+    screen = Screen([171.4, -20.0], [171.4, 20.0])
+    tracer = BranchingTracer([*lens.surfaces(), screen], TraceConfig(max_generations=4))
     tracer.trace([source])
     return screen
 

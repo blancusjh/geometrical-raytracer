@@ -1,24 +1,24 @@
-"""Geometric ground truths for the 2-D conic interfaces."""
+"""Geometric ground truths for the 2-D conic surfaces."""
 
 import numpy as np
 import pytest
 
 from raytracer import (
-    CircleConic,
-    EllipseConic,
-    ParabolaConic,
-    ParallelSource2D,
-    PointSource2D,
-    Ray2D,
-    RayTracer2D,
+    BranchingTracer,
+    CircleSurface,
+    EllipseSurface,
+    ParabolaSurface,
+    ParallelSource,
+    PointSource,
+    Ray,
     TraceConfig,
 )
 
 
 def test_circle_intersection_distance():
-    circle = CircleConic(radius=2.0)
-    ray = Ray2D(origin=[-5.0, 0.0], direction=[1.0, 0.0])
-    hit = circle.intersect(ray)
+    circle = CircleSurface(radius=2.0)
+    ray = Ray(origin=[-5.0, 0.0], direction=[1.0, 0.0])
+    hit = circle.hit(ray)
     assert hit is not None
     assert hit.distance == pytest.approx(3.0, abs=1e-12)
     assert hit.point == pytest.approx(np.array([-2.0, 0.0]), abs=1e-12)
@@ -30,17 +30,17 @@ def test_ellipse_focus_to_focus_reflection():
 
     a, b = 4.0, 2.5
     c = np.sqrt(a**2 - b**2)
-    # ConicInterface2D places the *focus* argument at the polar-form origin.
-    ellipse = EllipseConic(semi_major=a, semi_minor=b, focus=[0.0, 0.0])
+    # ConicSurface places the *focus* argument at the polar-form origin.
+    ellipse = EllipseSurface(semi_major=a, semi_minor=b, focus=[0.0, 0.0])
     other_focus = np.array([-2.0 * c, 0.0])
 
-    source = PointSource2D(
+    source = PointSource(
         origin=np.array([0.0, 0.0]),
         axis_direction=np.array([1.0, 0.0]),
         aperture=np.deg2rad(300.0),
         samples=41,
     )
-    tree = RayTracer2D([ellipse], TraceConfig(max_generations=2)).trace([source])
+    tree = BranchingTracer([ellipse], TraceConfig(max_generations=2)).trace([source])
 
     checked = 0
     for node in tree.nodes():
@@ -60,14 +60,14 @@ def test_parabola_focuses_collimated_beam():
     """A collimated beam along the axis reflects through the parabola focus."""
 
     p = 2.0  # semi-latus rectum; focus at origin in polar form
-    parabola = ParabolaConic(p=p)
-    source = ParallelSource2D(
+    parabola = ParabolaSurface(p=p)
+    source = ParallelSource(
         origin=np.array([-6.0, 0.0]),
         direction=np.array([1.0, 0.0]),
         width=2.5,
         samples=21,
     )
-    tree = RayTracer2D([parabola], TraceConfig(max_generations=2)).trace([source])
+    tree = BranchingTracer([parabola], TraceConfig(max_generations=2)).trace([source])
 
     checked = 0
     for node in tree.nodes():
@@ -82,28 +82,21 @@ def test_parabola_focuses_collimated_beam():
     assert checked > 10
 
 
-def test_old_name_emits_deprecation_warning():
-    import raytracer
-
-    with pytest.warns(DeprecationWarning):
-        raytracer.ConicalDioptrique(e=0.0, p=1.0)
-
-
 def test_semidiameter_clips_rays_beyond_the_aperture():
     """A ray that would hit the conic outside its clear aperture must miss."""
 
-    circle = CircleConic(radius=5.0, center=np.array([10.0, 0.0]), semidiameter=2.0)
+    circle = CircleSurface(radius=5.0, center=np.array([10.0, 0.0]), semidiameter=2.0)
 
-    within = Ray2D(origin=[0.0, 1.0], direction=[1.0, 0.0])
-    assert circle.intersect(within) is not None
+    within = Ray(origin=[0.0, 1.0], direction=[1.0, 0.0])
+    assert circle.hit(within) is not None
 
-    beyond = Ray2D(origin=[0.0, 3.0], direction=[1.0, 0.0])
-    assert circle.intersect(beyond) is None
+    beyond = Ray(origin=[0.0, 3.0], direction=[1.0, 0.0])
+    assert circle.hit(beyond) is None
 
 
 def test_unset_semidiameter_does_not_clip():
     """Default (None) semidiameter keeps the old, unclipped behaviour."""
 
-    circle = CircleConic(radius=5.0, center=np.array([10.0, 0.0]))
-    ray = Ray2D(origin=[0.0, 4.9], direction=[1.0, 0.0])
-    assert circle.intersect(ray) is not None
+    circle = CircleSurface(radius=5.0, center=np.array([10.0, 0.0]))
+    ray = Ray(origin=[0.0, 4.9], direction=[1.0, 0.0])
+    assert circle.hit(ray) is not None

@@ -8,7 +8,7 @@ observation screen at the eyepiece's focal plane. The incoming beam is
 annular, as in a real Newtonian: the secondary's silhouette (the central
 obstruction) carries no light.
 
-Built on the 2-D non-sequential engine, because the sequential engine is
+Built on the 2-D branching propagation, because the sequential propagation is
 on-axis only and cannot represent a tilted fold mirror. The primary is drawn
 exactly over its used clear aperture (the same ``semidiameter`` that clips
 the rays), so the drawn surface and the ray reflection points coincide.
@@ -35,10 +35,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer import ParabolaConic, ParallelSource2D, RayTracer2D, RenderConfig, TraceConfig
+from raytracer import BranchingTracer, ParabolaSurface, ParallelSource, RenderConfig, TraceConfig
 from raytracer.analysis import point_line_distances, rays_by_generation
-from raytracer.nonseq.detectors import Screen2D
-from raytracer.nonseq.elements import Mirror2D
+from raytracer.optics import Mirror, Screen
 from raytracer.viz import Scene, show
 from raytracer.viz.scene import MarkerItem, SurfaceItem
 
@@ -63,21 +62,21 @@ def primary_arc(samples: int = 400) -> np.ndarray:
     """
 
     theta_max = 2.0 * np.arctan(PRIMARY_SEMI / SEMI_LATUS)
-    parabola = ParabolaConic(p=SEMI_LATUS, focus=np.array([0.0, 0.0]))
+    parabola = ParabolaSurface(p=SEMI_LATUS, focus=np.array([0.0, 0.0]))
     return parabola.as_points(samples=samples, theta_span=(-theta_max, theta_max))
 
 
 def build_scene(samples_per_strip: int = 10):
-    primary = ParabolaConic(
+    primary = ParabolaSurface(
         p=SEMI_LATUS, focus=np.array([0.0, 0.0]), surface_id="primary",
         semidiameter=PRIMARY_SEMI,
     )
-    secondary = Mirror2D.from_radius(
+    secondary = Mirror.from_radius(
         radius=0.0, semidiameter=SECONDARY_SEMI, vertex=(SECONDARY_X, 0.0),
         angle=np.deg2rad(45.0), name="secondary",
     ).face
     folded_focus = np.array([SECONDARY_X, SECONDARY_X])
-    screen = Screen2D(
+    screen = Screen(
         p0=folded_focus + np.array([-1.4, 0.0]), p1=folded_focus + np.array([1.4, 0.0]),
         surface_id="focal_screen",
     )
@@ -85,12 +84,12 @@ def build_scene(samples_per_strip: int = 10):
     inner, outer = ANNULUS
     mid, width = 0.5 * (inner + outer), outer - inner
     strips = [
-        ParallelSource2D(origin=np.array([-10.0, sign * mid]), direction=np.array([1.0, 0.0]),
+        ParallelSource(origin=np.array([-10.0, sign * mid]), direction=np.array([1.0, 0.0]),
                          width=width, samples=samples_per_strip)
         for sign in (+1.0, -1.0)
     ]
 
-    tracer = RayTracer2D(
+    tracer = BranchingTracer(
         [primary, secondary, screen],
         TraceConfig(max_generations=4, allow_reflection=True, fresnel_split=False),
     )

@@ -1,12 +1,21 @@
-"""Dimension-agnostic math utilities: vectors and rigid-frame transforms.
+"""Dimension-agnostic math utilities: vectors, rigid transforms, and the
+pure numeric ray/shape intersection solvers.
 
 This is the utility layer: it knows nothing about optics. Everything above
-it (:mod:`raytracer.physics`, :mod:`raytracer.geometry`, the sequential and
-non-sequential engines) is built out of these primitives, never the other
+it (:mod:`raytracer.physics`, :mod:`raytracer.shapes`, :mod:`raytracer.optics`,
+the propagation engines) is built out of these primitives, never the other
 way around.
 """
 
-from .frames import LocalFrame
+from .intersections import (
+    intersect_fermat_oval,
+    intersect_profile,
+    intersect_profile_batch,
+    intersect_quadratic,
+    intersect_segment,
+    quadratic_normal,
+)
+from .transforms import RigidTransform
 from .vectors import (
     EPS,
     as_vector,
@@ -25,5 +34,11 @@ __all__ = [
     "direction_from_angle",
     "perpendicular_2d",
     "rotation_2d",
-    "LocalFrame",
+    "RigidTransform",
+    "intersect_segment",
+    "intersect_quadratic",
+    "quadratic_normal",
+    "intersect_profile",
+    "intersect_profile_batch",
+    "intersect_fermat_oval",
 ]

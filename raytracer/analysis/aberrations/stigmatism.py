@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...sequential.fields import PupilTrace
+from ...propagation.fields import PupilTrace
 from ..imaging.spots import SpotData, spot_data
 from .wavefront import WavefrontSamples, exit_pupil_wavefront
 

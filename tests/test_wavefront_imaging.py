@@ -12,14 +12,8 @@ from raytracer.analysis.imaging import (
 )
 from raytracer.analysis.aberrations.wavefront import exit_pupil_wavefront
 from raytracer.physics.materials import AIR, ConstantIndex
-from raytracer.sequential import (
-    FieldPoint,
-    OpticalSystem,
-    PupilSampling,
-    SequentialTracer,
-    SurfaceRow,
-    trace_pupil,
-)
+from raytracer.design import OpticalSystem, SurfaceRow
+from raytracer.propagation import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
 
 
 def test_eikonal_opd_is_zero_for_stigmatic_conjugates():

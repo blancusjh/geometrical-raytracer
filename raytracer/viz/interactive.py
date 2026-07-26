@@ -21,9 +21,9 @@ from typing import Callable, Iterable, Optional, Sequence
 
 import numpy as np
 
-from ..nonseq.detectors import Screen2D
-from ..nonseq.elements import Lens2D, Mirror2D
-from ..nonseq.tracer import RayTracer2D, TraceConfig
+from ..optics.instruments import Screen
+from ..optics.elements import Lens, Mirror
+from ..propagation.branching import BranchingTracer, TraceConfig
 from .scene import Scene
 
 
@@ -67,7 +67,7 @@ class Editable:
 # -- adapters -----------------------------------------------------------------
 
 
-def _rebuild_lens(lens: Lens2D, **overrides) -> None:
+def _rebuild_lens(lens: Lens, **overrides) -> None:
     """Rebuild a lens in place from its current geometry plus overrides."""
 
     front = lens.front
@@ -85,7 +85,7 @@ def _rebuild_lens(lens: Lens2D, **overrides) -> None:
         "name": lens.name,
     }
     current.update(overrides)
-    rebuilt = Lens2D.from_radii(**current)
+    rebuilt = Lens.from_radii(**current)
     lens.front = rebuilt.front
     lens.back = rebuilt.back
     lens.rims = rebuilt.rims
@@ -94,9 +94,9 @@ def _rebuild_lens(lens: Lens2D, **overrides) -> None:
 def editable_for(obj) -> Editable:
     """Build the default Editable wrapper for a known scene object."""
 
-    from ..nonseq.sources import ParallelSource2D, PointSource2D
+    from ..optics.sources import ParallelSource, PointSource
 
-    if isinstance(obj, PointSource2D):
+    if isinstance(obj, PointSource):
         def move(p, o=obj):
             o.origin = np.asarray(p, dtype=float)
 
@@ -131,7 +131,7 @@ def editable_for(obj) -> Editable:
             ],
         )
 
-    if isinstance(obj, ParallelSource2D):
+    if isinstance(obj, ParallelSource):
         def move(p, o=obj):
             o.origin = np.asarray(p, dtype=float)
 
@@ -149,7 +149,7 @@ def editable_for(obj) -> Editable:
             ],
         )
 
-    if isinstance(obj, Lens2D):
+    if isinstance(obj, Lens):
         def move(p, lens=obj):
             _rebuild_lens(lens, vertex=np.asarray(p, dtype=float))
 
@@ -196,13 +196,13 @@ def editable_for(obj) -> Editable:
             ],
         )
 
-    if isinstance(obj, Mirror2D):
+    if isinstance(obj, Mirror):
         def move(p, m=obj):
             m.face.vertex = np.asarray(p, dtype=float)
             m.face.__post_init__()
 
         def set_radius(v, m=obj):
-            from ..geometry.sag import AsphereProfile
+            from ..shapes.profile import AsphereProfile
 
             m.face.profile = AsphereProfile.from_radius(
                 float(v), m.face.profile.conic, m.face.profile.coefficients
@@ -222,7 +222,7 @@ def editable_for(obj) -> Editable:
             ],
         )
 
-    if isinstance(obj, Screen2D):
+    if isinstance(obj, Screen):
         def move0(p, s=obj):
             s.p0 = np.asarray(p, dtype=float)
 
@@ -259,7 +259,7 @@ class InteractiveSession:
         *,
         sources: Sequence,
         elements: Sequence = (),
-        screens: Sequence[Screen2D] = (),
+        screens: Sequence[Screen] = (),
         trace_config: TraceConfig | None = None,
         editables: Optional[Iterable[Editable]] = None,
         on_update: Optional[Callable[[Scene], None]] = None,
@@ -294,7 +294,7 @@ class InteractiveSession:
     def retrace(self) -> Scene:
         for screen in self.screens:
             screen.clear()
-        tracer = RayTracer2D(self._surfaces(), self.trace_config)
+        tracer = BranchingTracer(self._surfaces(), self.trace_config)
         self.tree = tracer.trace(self.sources)
 
         scene = Scene()
