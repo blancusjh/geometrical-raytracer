@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -66,6 +67,57 @@ class AbbeMaterial:
         return a + b / wavelength_um**2
 
 
+@dataclass(frozen=True)
+class SellmeierMaterial:
+    """Refractive index from a measured 3-term Sellmeier dispersion curve.
+
+    ``n(lambda)^2 - 1 = sum_i B_i * lambda^2 / (lambda^2 - C_i)``, with
+    ``lambda`` in micrometres and ``B``/``C`` the manufacturer's fitted
+    coefficients (``C`` in um^2) — this is the real catalog dispersion
+    curve, unlike :class:`AbbeMaterial`'s nd/Vd approximation. Use this
+    whenever a glass's actual Sellmeier coefficients are known.
+    """
+
+    name: str
+    b: tuple[float, float, float]
+    c: tuple[float, float, float]
+
+    def index(self, wavelength_um: float) -> float:
+        lambda2 = wavelength_um * wavelength_um
+        n2_minus_1 = sum(bi * lambda2 / (lambda2 - ci) for bi, ci in zip(self.b, self.c))
+        return math.sqrt(1.0 + n2_minus_1)
+
+
+# Verified Sellmeier coefficients (SCHOTT Zemax catalog 2017-01-20b, via
+# refractiveindex.info) for a small, deliberately minimal set of glasses
+# spanning the classic crown-to-flint range: N-BK7 (the most common optical
+# glass in existence), N-F2 (classic flint), N-SF11 (dense flint / high
+# index), N-SK16 and N-SK4 (dense crowns; also the glasses the Cooke
+# triplet/double-Gauss prescriptions use), and N-LAK21 (lanthanum crown,
+# high index with comparatively low dispersion).
+_SELLMEIER_CATALOG: dict[str, tuple[float, tuple[float, float, float], tuple[float, float, float]]] = {
+    "N-BK7": (1.5168, (1.03961212, 0.231792344, 1.01046945), (0.00600069867, 0.0200179144, 103.560653)),
+    "N-F2": (1.62005, (1.39757037, 0.159201403, 1.2686543), (0.00995906143, 0.0546931752, 119.248346)),
+    "N-SF11": (1.78472, (1.73759695, 0.313747346, 1.89878101), (0.013188707, 0.0623068142, 155.23629)),
+    "N-SK16": (1.62041, (1.34317774, 0.241144399, 0.994317969), (0.00704687339, 0.0229005, 92.7508526)),
+    "N-SK4": (1.61272, (1.32993741, 0.228542996, 0.988465211), (0.00716874107, 0.0246455892, 100.886364)),
+    "N-LAK21": (1.64049, (1.22718116, 0.420783743, 1.01284843), (0.00602075682, 0.0196862889, 88.4370099)),
+}
+
+
+def sellmeier_glass(name: str) -> SellmeierMaterial:
+    """A :class:`SellmeierMaterial` for one of the built-in catalog glasses.
+
+    Raises ``KeyError`` for anything not in ``_SELLMEIER_CATALOG`` — this
+    is a small, curated set (see the module-level comment above it), not a
+    general glass database.
+    """
+
+    key = name.strip().upper()
+    _, b, c = _SELLMEIER_CATALOG[key]
+    return SellmeierMaterial(key, b, c)
+
+
 VACUUM = ConstantIndex("VACUUM", 1.0)
 AIR = ConstantIndex("AIR", 1.0)
 
@@ -93,15 +145,20 @@ class MaterialLibrary(dict):
 
 def default_materials() -> MaterialLibrary:
     """Library preloaded with vacuum/air, the DUV materials at 193.368 nm,
-    and the visible-spectrum glasses used by the Cooke triplet/double-Gauss
-    prescriptions.
+    and a small common-glass catalog spanning crown to flint.
 
     The DUV materials are single-wavelength ``ConstantIndex`` (that
-    prescription is only ever evaluated at one wavelength). The visible
-    glasses are ``AbbeMaterial`` — registering them under their prescription
-    names means ``OpticalSystem.from_prescription`` picks up real (if
-    approximate) dispersion for those two lenses automatically, with no
-    change to the CSV files themselves.
+    prescription is only ever evaluated at one wavelength). SK16 and SK4 —
+    used by the Cooke triplet/double-Gauss prescriptions — are registered
+    with their real measured Sellmeier dispersion (see
+    ``_SELLMEIER_CATALOG``), so ``OpticalSystem.from_prescription`` picks
+    up accurate chromatic behavior for those two lenses automatically, with
+    no change to the CSV files themselves. F4 has no verified Sellmeier
+    data available (an older, largely-discontinued lead glass), so it stays
+    an ``AbbeMaterial`` approximation from its catalog nd/Vd. N-BK7, N-F2,
+    N-SF11, and N-LAK21 are registered too, for prescriptions that want a
+    common, accurately-dispersive glass but aren't tied to a specific
+    catalog match.
     """
 
     lib = MaterialLibrary()
@@ -112,10 +169,16 @@ def default_materials() -> MaterialLibrary:
     lib.register(ConstantIndex("CAF2", 1.50185255))
     lib.register(ConstantIndex("HIINDEX1", 1.70196985))
     lib.register(ConstantIndex("HIINDEX2", 1.59667693))
-    # Schott glass catalog nd/Vd (d-line index / Abbe number), used by the
-    # Cooke triplet and double-Gauss prescriptions.
-    lib.register(AbbeMaterial("SK16", nd=1.62041, vd=60.32))
-    lib.register(AbbeMaterial("SK4", nd=1.61272, vd=58.63))
+    # Real Sellmeier dispersion for the common-glass catalog.
+    for glass_name in _SELLMEIER_CATALOG:
+        lib.register(sellmeier_glass(glass_name))
+    # Prescription aliases: the Cooke triplet/double-Gauss CSVs spell these
+    # without the "N-" (lead-free) prefix, since that distinction isn't
+    # meaningful for this package's purposes.
+    lib["SK16"] = lib["N-SK16"]
+    lib["SK4"] = lib["N-SK4"]
+    # F4: no verified Sellmeier coefficients found (older, largely
+    # discontinued lead glass) — approximate from its catalog nd/Vd instead.
     lib.register(AbbeMaterial("F4", nd=1.61700, vd=36.6))
     return lib
 
@@ -124,6 +187,8 @@ __all__ = [
     "Material",
     "ConstantIndex",
     "AbbeMaterial",
+    "SellmeierMaterial",
+    "sellmeier_glass",
     "MaterialLibrary",
     "default_materials",
     "VACUUM",
