@@ -15,6 +15,7 @@ from ..sequential.fields import FieldPoint, chief_ray_slope
 from ..sequential.surfaces import SurfaceKind
 from ..sequential.system import OpticalSystem
 from ..sequential.trace import SequentialTracer
+from ..analysis.distortion import DistortionGrid
 from ..analysis.fans import FanData
 from ..analysis.metrics import field_metrics  # noqa: F401  (re-export convenience)
 from ..analysis.spots import SpotData
@@ -293,6 +294,62 @@ def aberrations_figure(metrics: Sequence[dict], *, suptitle: str | None = None) 
     return fig
 
 
+def distortion_grid_figure(
+    grid: DistortionGrid,
+    *,
+    exaggeration: float = 1.0,
+    title: str | None = None,
+    figsize: tuple[float, float] = (6.5, 6.5),
+) -> plt.Figure:
+    """Square-grid distortion display: trace a grid, see it warp.
+
+    The ideal (undistorted) grid is drawn as dashed gray lines; the traced
+    chief-ray grid is drawn as solid lines over it. ``exaggeration``
+    amplifies each point's departure from ideal (``ideal + exaggeration *
+    (actual - ideal)``) around its own ideal position — real distortion is
+    usually far too small to see at 1:1 scale, and optical design software
+    conventionally offers this as an adjustable dial, not a fixed
+    multiplier. Vignetted grid points (see ``grid.valid``) break the line
+    they'd otherwise be part of rather than being interpolated over, and
+    are marked with an ``x`` so missing coverage is visible, not silent.
+    """
+
+    ideal = grid.ideal_points
+    n = ideal.shape[0]
+
+    if exaggeration != 1.0:
+        displayed = ideal + exaggeration * (grid.actual_points - ideal)
+    else:
+        displayed = grid.actual_points.copy()
+    displayed[~grid.valid] = np.nan
+
+    fig, ax = plt.subplots(figsize=figsize)
+    for i in range(n):
+        ax.plot(ideal[i, :, 0], ideal[i, :, 1], color="#999999", ls="--", lw=0.7, zorder=1)
+        ax.plot(displayed[i, :, 0], displayed[i, :, 1], color="#1f77b4", lw=1.4, zorder=2)
+    for j in range(n):
+        ax.plot(ideal[:, j, 0], ideal[:, j, 1], color="#999999", ls="--", lw=0.7, zorder=1)
+        ax.plot(displayed[:, j, 0], displayed[:, j, 1], color="#1f77b4", lw=1.4, zorder=2)
+
+    if not grid.valid.all():
+        dropped = ideal[~grid.valid]
+        n_dropped = int((~grid.valid).sum())
+        ax.scatter(
+            dropped[:, 0], dropped[:, 1], marker="x", color="#d62728", s=24,
+            zorder=3, label=f"vignetted ({n_dropped}/{grid.valid.size})",
+        )
+        ax.legend(loc="best", fontsize=8)
+
+    ax.set_aspect("equal")
+    ax.set_xlabel("image x (mm)")
+    ax.set_ylabel("image y (mm)")
+    subtitle = f" (distortion ×{exaggeration:g})" if exaggeration != 1.0 else ""
+    ax.set_title((title or "Distortion grid") + subtitle)
+    ax.grid(alpha=0.15)
+    fig.tight_layout()
+    return fig
+
+
 def zernike_figure(expansion: ZernikeExpansion) -> plt.Figure:
     """Coefficient bars plus nominal/refocused wavefront maps."""
 
@@ -441,6 +498,7 @@ __all__ = [
     "spots_figure",
     "fans_figure",
     "aberrations_figure",
+    "distortion_grid_figure",
     "zernike_figure",
     "wavefront_figure",
     "psf_figure",

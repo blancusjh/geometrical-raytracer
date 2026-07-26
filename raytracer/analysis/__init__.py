@@ -1,5 +1,6 @@
 """Optical analysis: spots, fans, aberration metrics, Zernike, imaging."""
 
+from .distortion import DistortionGrid, distortion_grid
 from .fans import FanData, ray_fans
 from .imaging import (
     BinaryMask,
@@ -30,6 +31,8 @@ from .zernike import (
 )
 
 __all__ = [
+    "DistortionGrid",
+    "distortion_grid",
     "SpotData",
     "spot_data",
     "spot_data_from_points",

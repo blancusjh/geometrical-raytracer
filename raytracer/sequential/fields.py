@@ -100,6 +100,92 @@ def chief_ray_slope(
     raise RuntimeError(f"No unvignetted chief ray found for field {field}")
 
 
+def chief_ray_slopes(
+    tracer: SequentialTracer,
+    field: FieldPoint,
+    *,
+    stop_index: int | None = None,
+    initial_guess: tuple[float, float] | None = None,
+    xtol: float = 1e-9,
+    max_iterations: int = 30,
+) -> tuple[float, float]:
+    """General ``(s_x, s_y)`` whose ray crosses the axis at the stop surface.
+
+    Unlike :func:`chief_ray_slope`, this does not fix ``s_x = 0`` or lean on
+    rotational symmetry to reduce the problem to one dimension: it solves
+    for both transverse slopes jointly, by damped Newton iteration (a
+    numerical 2x2 Jacobian, backtracked whenever a trial step vignettes or
+    makes the residual worse) on the ray's transverse position at the stop
+    surface. That makes it correct for a field point with ``x`` and ``y``
+    both nonzero in *any* system this tracer can trace — including a future
+    decentered or tilted one where the meridional-plane shortcut wouldn't
+    apply — not only the rotationally symmetric systems in this repo today.
+
+    The default initial guess is the paraxial straight line from the object
+    point to the stop center; pass ``initial_guess`` (e.g. the converged
+    solution for a neighboring field point) to warm-start a scan over many
+    field points, which converges faster and is more robust near the edge
+    of the field than restarting from the paraxial guess each time.
+    """
+
+    system = tracer.system
+    if stop_index is None:
+        stop_index = system.stop_index
+    if stop_index is None:
+        raise ValueError("System has no aperture stop; pass stop_index explicitly")
+    object_z = _object_z(tracer)
+
+    if initial_guess is None:
+        z_stop = float(system.vertices[stop_index])
+        denom = z_stop - object_z
+        initial_guess = (-field.x / denom, -field.y / denom)
+
+    def stop_position(slopes: np.ndarray) -> np.ndarray:
+        origin = np.array([[field.x, field.y, object_z]])
+        direction = direction_from_slopes(float(slopes[0]), float(slopes[1]))[None, :]
+        batch = tracer.trace_batch(origin, direction, keep_paths=True)
+        ok = batch.status[0] == TraceStatus.OK or batch.failed_surface[0] > stop_index
+        position = batch.paths[0, stop_index + 1, :2]
+        if not ok or not np.all(np.isfinite(position)):
+            raise RuntimeError("Ray vignetted before the stop")
+        return position
+
+    try:
+        s = np.asarray(initial_guess, dtype=float)
+        residual = stop_position(s)
+        for _ in range(max_iterations):
+            if np.hypot(*residual) < xtol:
+                break
+            eps = 1e-6
+            jacobian = np.empty((2, 2))
+            for k in range(2):
+                step = s.copy()
+                step[k] += eps
+                jacobian[:, k] = (stop_position(step) - residual) / eps
+            delta = np.linalg.solve(jacobian, -residual)
+            damping = 1.0
+            trial, trial_residual = s, residual
+            while damping > 1e-3:
+                candidate = s + damping * delta
+                try:
+                    candidate_residual = stop_position(candidate)
+                except RuntimeError:
+                    damping *= 0.5
+                    continue
+                if np.hypot(*candidate_residual) < np.hypot(*residual):
+                    trial, trial_residual = candidate, candidate_residual
+                    break
+                damping *= 0.5
+            s, residual = trial, trial_residual
+        else:
+            if np.hypot(*residual) >= xtol:
+                raise RuntimeError("Chief-ray solve did not converge")
+    except RuntimeError as exc:
+        raise RuntimeError(f"No unvignetted chief ray found for field {field}") from exc
+
+    return float(s[0]), float(s[1])
+
+
 @dataclass(frozen=True)
 class PupilSampling:
     """Normalized pupil sample layout.
@@ -254,6 +340,7 @@ __all__ = [
     "FieldPoint",
     "trace_from_object",
     "chief_ray_slope",
+    "chief_ray_slopes",
     "PupilSampling",
     "PupilTrace",
     "trace_pupil",
