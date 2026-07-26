@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from raytracer.core.physics import fresnel_coefficients, reflect, refract, snell
+from raytracer.physics.laws import fresnel_coefficients, reflect, refract, snell
 
 
 def test_snell_angles_match_analytic():

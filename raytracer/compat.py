@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import warnings
 
-from .geometry.conics2d import ConicInterface2D
-from .geometry.ovoid2d import CartesianOvoid2D  # noqa: F401 (old import path)
+from .nonseq.conics2d import ConicInterface2D
+from .nonseq.ovoid2d import CartesianOvoid2D  # noqa: F401 (old import path)
 
 
 def _deprecated(old: str, new: str) -> None:

@@ -11,7 +11,7 @@ from raytracer.analysis.imaging import (
     scalar_psf,
 )
 from raytracer.analysis.aberrations.wavefront import exit_pupil_wavefront
-from raytracer.core.materials import AIR, ConstantIndex
+from raytracer.physics.materials import AIR, ConstantIndex
 from raytracer.sequential import (
     FieldPoint,
     OpticalSystem,

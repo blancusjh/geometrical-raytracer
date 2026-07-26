@@ -7,9 +7,9 @@ from typing import Sequence
 
 import numpy as np
 
-from ..core.vectors import rotation_2d
 from ..geometry.sag import AsphereProfile
-from ..geometry.segments2d import LineSegment2D, ProfileFace2D
+from ..math.vectors import rotation_2d
+from .segments2d import LineSegment2D, ProfileFace2D
 from .surfaces import Surface2D
 
 

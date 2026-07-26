@@ -360,8 +360,8 @@ def dispersion_figure(
     """Refractive index vs. wavelength for each material.
 
     Each material only needs an ``index(wavelength_um)`` method, so a
-    measured :class:`~raytracer.core.materials.SellmeierMaterial` and an
-    approximate :class:`~raytracer.core.materials.AbbeMaterial` plot the
+    measured :class:`~raytracer.physics.materials.SellmeierMaterial` and an
+    approximate :class:`~raytracer.physics.materials.AbbeMaterial` plot the
     same way; the legend names the model actually behind each curve, since
     the difference matters when reading the chromatic results downstream.
     """

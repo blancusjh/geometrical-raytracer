@@ -7,8 +7,8 @@ from typing import Optional
 
 import numpy as np
 
-from ..geometry.segments2d import LineSegment2D
 from .rays import Intersection2D, Ray2D
+from .segments2d import LineSegment2D
 
 
 @dataclass

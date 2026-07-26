@@ -9,7 +9,7 @@ from typing import Dict, Iterable, Optional
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..core.vectors import as_vector, direction_from_angle, normalize
+from ..math.vectors import as_vector, direction_from_angle, normalize
 
 
 @dataclass

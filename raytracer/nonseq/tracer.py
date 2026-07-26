@@ -8,7 +8,7 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from ..core.physics import fresnel_coefficients, reflect, refract
+from ..physics.laws import fresnel_coefficients, reflect, refract
 from .rays import Ray2D, RayLabeler, RayNode, RayTree
 from .sources import Source2D
 from .surfaces import Surface2D

@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.core.materials import AbbeMaterial
+from raytracer.physics.materials import AbbeMaterial
 from raytracer.sequential import OpticalSystem, SequentialTracer, solve_object_plane
 from raytracer.analysis import axial_color, lateral_color
 

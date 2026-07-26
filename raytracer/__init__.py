@@ -1,19 +1,38 @@
-"""Optical ray-tracing toolkit.
+"""Optical ray-tracing toolkit, layered by what each piece knows about:
 
-Two engines share the same primitives:
-
-- ``raytracer.sequential`` — sequential 3-D tracer for prescription-defined
-  systems (aspheres, mirrors, stops) with professional analysis.
-- ``raytracer.nonseq`` — non-sequential 2-D tracer producing full
-  reflection/refraction trees (caustics, exploration).
-
-Visualization lives in ``raytracer.viz`` with interchangeable matplotlib
-and OpenGL backends.
+- ``raytracer.math`` — dimension-agnostic vector/frame utilities. Knows
+  nothing about optics.
+- ``raytracer.physics`` — the crown: refractive materials and the laws
+  (Snell, Fresnel) a ray obeys at an interface. Everything below exists to
+  give these laws something to act on.
+- ``raytracer.geometry`` — pure shape math (sag profiles, conic/implicit-form
+  algebra). Knows nothing about rays or tracers.
+- ``raytracer.sequential`` / ``raytracer.nonseq`` — the engineering layer:
+  two tracer engines built from the above. ``sequential`` is the 3-D tracer
+  for prescription-defined systems (aspheres, mirrors, stops), including
+  reading/writing prescriptions from files; ``nonseq`` is the 2-D tracer
+  producing full reflection/refraction trees (caustics, exploration).
+- ``raytracer.analysis`` — aberration and image-quality analysis (Seidel,
+  Zernike, spot diagrams, PSF) built on top of a traced system.
+- ``raytracer.viz`` — presentation, with interchangeable matplotlib and
+  OpenGL backends.
 """
 
-from .core.frames import LocalFrame
-from .core.materials import AIR, VACUUM, ConstantIndex, MaterialLibrary, default_materials
-from .core.physics import (
+from .math.frames import LocalFrame
+from .math.vectors import direction_from_angle, normalize
+from .nonseq.conics2d import (
+    CircleConic,
+    ConicInterface2D,
+    EllipseConic,
+    HyperbolaConic,
+    ParabolaConic,
+)
+from .nonseq.ovoid2d import CartesianOvoid2D
+from .nonseq.rays import Intersection2D, Ray2D, RayLabeler, RayNode, RayTree, ray_from_angle
+from .nonseq.sources import ParallelSource2D, PointSource2D, RaySeed, Source2D
+from .nonseq.surfaces import Surface2D
+from .nonseq.tracer import RayTracer2D, TraceConfig
+from .physics.laws import (
     FresnelCoefficients,
     SnellResult,
     fresnel_coefficients,
@@ -21,27 +40,16 @@ from .core.physics import (
     refract,
     snell,
 )
-from .core.vectors import direction_from_angle, normalize
-from .geometry.conics2d import (
-    CircleConic,
-    ConicInterface2D,
-    EllipseConic,
-    HyperbolaConic,
-    ParabolaConic,
-)
-from .geometry.ovoid2d import CartesianOvoid2D
-from .nonseq.rays import Intersection2D, Ray2D, RayLabeler, RayNode, RayTree, ray_from_angle
-from .nonseq.sources import ParallelSource2D, PointSource2D, RaySeed, Source2D
-from .nonseq.surfaces import Surface2D
-from .nonseq.tracer import RayTracer2D, TraceConfig
+from .physics.materials import AIR, VACUUM, ConstantIndex, MaterialLibrary, default_materials
 
 __version__ = "0.2.0"
 
 __all__ = [
-    # core
+    # math
     "LocalFrame",
     "normalize",
     "direction_from_angle",
+    # physics
     "SnellResult",
     "FresnelCoefficients",
     "snell",
@@ -53,7 +61,7 @@ __all__ = [
     "default_materials",
     "AIR",
     "VACUUM",
-    # geometry
+    # non-sequential surfaces (geometry adapted to the 2-D engine)
     "ConicInterface2D",
     "EllipseConic",
     "CircleConic",

@@ -7,7 +7,7 @@ from typing import List, Optional
 
 import numpy as np
 
-from ..core.vectors import normalize, perpendicular_2d
+from ..math.vectors import normalize, perpendicular_2d
 
 
 @dataclass

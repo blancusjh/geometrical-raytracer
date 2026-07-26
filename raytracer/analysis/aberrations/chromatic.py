@@ -7,8 +7,8 @@ aberration" here means literally rebuilding the system at each wavelength
 of interest (same surfaces, same fixed object plane) and comparing where
 rays land. That only produces something meaningful once a material's
 ``index()`` actually varies with wavelength, i.e. an
-:class:`~raytracer.core.materials.AbbeMaterial` rather than a
-:class:`~raytracer.core.materials.ConstantIndex` — the DUV materials in
+:class:`~raytracer.physics.materials.AbbeMaterial` rather than a
+:class:`~raytracer.physics.materials.ConstantIndex` — the DUV materials in
 this package are only ever evaluated at one wavelength and have no real
 dispersion to show.
 

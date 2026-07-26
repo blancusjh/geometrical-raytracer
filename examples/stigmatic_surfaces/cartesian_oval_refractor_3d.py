@@ -45,7 +45,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from raytracer.analysis import stigmatism_report
-from raytracer.core.materials import AIR, ConstantIndex
+from raytracer.physics.materials import AIR, ConstantIndex
 from raytracer.sequential import (
     FieldPoint,
     OpticalSystem,

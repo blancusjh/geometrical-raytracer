@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from raytracer.geometry.segments2d import LineSegment2D, ProfileFace2D
+from raytracer.nonseq.segments2d import LineSegment2D, ProfileFace2D
 from raytracer.geometry.sag import AsphereProfile
 from raytracer.nonseq import (
     Lens2D,
@@ -108,7 +108,7 @@ def test_system_to_2d_bridge_matches_sequential_trace():
     """A dioptric doublet sliced to 2-D must land rays exactly where the
     sequential 3-D tracer does (meridional rays are common to both)."""
 
-    from raytracer.core.materials import ConstantIndex
+    from raytracer.physics.materials import ConstantIndex
     from raytracer.sequential import (
         OpticalSystem,
         SequentialTracer,

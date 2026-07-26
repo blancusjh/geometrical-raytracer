@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from ..core.materials import AIR, Material
+from ..physics.materials import AIR, Material
 from ..geometry.cartesian_oval import CartesianOvalProfile
 from ..geometry.sag import AsphereProfile
 

@@ -6,7 +6,7 @@ from typing import Iterator, Sequence
 
 import numpy as np
 
-from ..core.materials import AIR, Material
+from ..physics.materials import AIR, Material
 from .surfaces import SurfaceKind, SurfaceRow
 
 

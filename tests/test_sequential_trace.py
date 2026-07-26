@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from raytracer.core.materials import ConstantIndex
+from raytracer.physics.materials import ConstantIndex
 from raytracer.sequential import (
     OpticalSystem,
     SequentialTracer,
