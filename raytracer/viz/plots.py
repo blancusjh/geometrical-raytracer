@@ -15,12 +15,12 @@ from ..sequential.fields import FieldPoint, chief_ray_slope
 from ..sequential.surfaces import SurfaceKind
 from ..sequential.system import OpticalSystem
 from ..sequential.trace import SequentialTracer
-from ..analysis.distortion import DistortionGrid
-from ..analysis.fans import FanData
-from ..analysis.metrics import field_metrics  # noqa: F401  (re-export convenience)
-from ..analysis.spots import SpotData
-from ..analysis.wavefront import WavefrontSamples
-from ..analysis.zernike import ZernikeExpansion
+from ..analysis.aberrations.distortion import DistortionGrid
+from ..analysis.aberrations.fans import FanData
+from ..analysis.aberrations.metrics import field_metrics  # noqa: F401  (re-export convenience)
+from ..analysis.aberrations.wavefront import WavefrontSamples
+from ..analysis.aberrations.zernike import ZernikeExpansion
+from ..analysis.imaging.spots import SpotData
 from .sag_drawing import sample_profile_curve
 
 DEFAULT_MATERIAL_COLORS = {

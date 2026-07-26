@@ -18,9 +18,9 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from ..sequential.fields import FieldPoint, PupilSampling, trace_pupil
-from ..sequential.trace import SequentialTracer
-from .spots import weighted_mean, weighted_quantile
+from ...sequential.fields import FieldPoint, PupilSampling, trace_pupil
+from ...sequential.trace import SequentialTracer
+from ..imaging.spots import weighted_mean, weighted_quantile
 
 
 def field_metrics(

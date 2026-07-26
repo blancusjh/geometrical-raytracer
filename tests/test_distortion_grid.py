@@ -1,4 +1,4 @@
-"""Square-grid distortion tracing (``raytracer.analysis.distortion``)."""
+"""Square-grid distortion tracing (``raytracer.analysis.aberrations.distortion``)."""
 
 from pathlib import Path
 

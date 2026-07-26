@@ -10,7 +10,7 @@ from raytracer.analysis.imaging import (
     pupil_function,
     scalar_psf,
 )
-from raytracer.analysis.wavefront import exit_pupil_wavefront
+from raytracer.analysis.aberrations.wavefront import exit_pupil_wavefront
 from raytracer.core.materials import AIR, ConstantIndex
 from raytracer.sequential import (
     FieldPoint,
@@ -108,7 +108,7 @@ def test_defocused_reference_sphere_gives_defocus():
     """Displacing the image plane of a perfect system produces a wavefront
     dominated by Z(2,0) defocus."""
 
-    from raytracer.analysis.zernike import fit_opd
+    from raytracer.analysis.aberrations.zernike import fit_opd
 
     a, b = 1000.0, 600.0
     c = np.sqrt(a * a - b * b)

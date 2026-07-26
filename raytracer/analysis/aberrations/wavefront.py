@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..sequential.fields import PupilTrace
+from ...sequential.fields import PupilTrace
 
 
 @dataclass

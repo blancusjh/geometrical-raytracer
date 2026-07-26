@@ -15,8 +15,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..sequential.fields import FieldPoint, chief_ray_slopes, trace_from_object
-from ..sequential.trace import SequentialTracer
+from ...sequential.fields import FieldPoint, chief_ray_slopes, trace_from_object
+from ...sequential.trace import SequentialTracer
 
 
 @dataclass

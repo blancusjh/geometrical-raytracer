@@ -1,38 +1,61 @@
-"""Optical analysis: spots, fans, aberration metrics, Zernike, imaging."""
+"""Optical analysis: imaging (spots, PSF, contrast) and aberrations (field
+metrics, distortion, wavefront/Zernike, fans, stigmatism).
 
-from .distortion import DistortionGrid, distortion_grid
-from .fans import FanData, ray_fans
+Everything below is also importable from its actual subpackage
+(``raytracer.analysis.imaging`` / ``raytracer.analysis.aberrations``); this
+top-level re-export exists so existing call sites don't need to know which
+side of that split a given name lives on.
+"""
+
+from .aberrations import (
+    AxialColor,
+    DistortionGrid,
+    FanData,
+    LateralColor,
+    Mode,
+    SeidelCoefficients,
+    StigmatismReport,
+    WavefrontSamples,
+    ZernikeExpansion,
+    axial_color,
+    distortion_grid,
+    export_metrics_csv,
+    exit_pupil_wavefront,
+    field_metrics,
+    fit_opd,
+    fit_transverse,
+    lateral_color,
+    point_line_distances,
+    ray_fans,
+    rays_by_generation,
+    seidel_coefficients,
+    stigmatism_report,
+    zernike,
+    zernike_modes,
+)
 from .imaging import (
     BinaryMask,
     PupilGrid,
+    SpotData,
     abbe_image,
     airy_radius_mm,
     coherent_cutoff_half_pitch_nm,
     contrast_curve,
     pupil_function,
     scalar_psf,
-)
-from .metrics import export_metrics_csv, field_metrics
-from .spots import SpotData, spot_data, spot_data_from_points
-from .stigmatism import (
-    StigmatismReport,
-    point_line_distances,
-    rays_by_generation,
-    stigmatism_report,
-)
-from .wavefront import WavefrontSamples, exit_pupil_wavefront
-from .zernike import (
-    Mode,
-    ZernikeExpansion,
-    fit_opd,
-    fit_transverse,
-    zernike,
-    zernike_modes,
+    spot_data,
+    spot_data_from_points,
 )
 
 __all__ = [
+    "AxialColor",
+    "LateralColor",
+    "axial_color",
+    "lateral_color",
     "DistortionGrid",
     "distortion_grid",
+    "SeidelCoefficients",
+    "seidel_coefficients",
     "SpotData",
     "spot_data",
     "spot_data_from_points",
