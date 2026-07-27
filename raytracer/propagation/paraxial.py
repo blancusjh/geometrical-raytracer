@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..design.surfaces import SurfaceKind
+from ..design.rows import SurfaceKind
 from ..design.system import OpticalSystem
 from .sequential import SequentialTracer
 

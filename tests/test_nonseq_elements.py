@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 
 from raytracer.optics import Lens, ParallelSource, PointSource, Screen
-from raytracer.optics.profiles import LineSegment, ProfileSurface
 from raytracer.optics.ray import Ray
 from raytracer.propagation import BranchingTracer, TraceConfig
-from raytracer.shapes.profile import AsphereProfile
+from raytracer.surfaces.profile import AsphereProfile, ProfileSurface
+from raytracer.surfaces.segment import LineSegment
 
 
 def test_segment_intersection_and_miss():
@@ -102,7 +102,7 @@ def test_design_bridge_matches_sequential_trace():
     sequential 3-D propagation does (meridional rays are common to both)."""
 
     from raytracer.design import OpticalSystem, SurfaceRow, to_branching_surfaces
-    from raytracer.physics.materials import ConstantIndex
+    from raytracer.optics.materials import ConstantIndex
     from raytracer.propagation import SequentialTracer, solve_object_plane, trace_from_object
 
     glass = ConstantIndex("BK7", 1.5168)

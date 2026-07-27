@@ -13,7 +13,7 @@ distance from the image point to each refracted ray's line
 diagram — near zero confirms stigmatism.
 
 The surface's clear aperture (``semidiameter``) clips rays that would land
-outside it, exactly like a real lens edge (see ``raytracer.optics.conics``/``cartesian_oval`` aperture clipping).
+outside it, exactly like a real lens edge (see ``raytracer.surfaces.conic``/``cartesian_oval`` aperture clipping).
 
 Usage:
     python -m examples.stigmatic_surfaces.cartesian_oval_refractor_2d

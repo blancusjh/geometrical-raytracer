@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from raytracer.physics.radiometry import fresnel_coefficients
-from raytracer.physics.refraction import reflect, reflect_batch, refract, refract_batch
+from raytracer.optics.radiometry import fresnel_coefficients
+from raytracer.optics.laws import reflect, reflect_batch, refract, refract_batch
 
 
 def test_refraction_angle_matches_analytic_snell():

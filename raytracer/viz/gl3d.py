@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 from vispy.color import Color
 
-from ..shapes.profile import AsphereProfile
+from ..surfaces.profile import AsphereProfile
 from .plots import DEFAULT_MATERIAL_COLORS
 
 TWO_PI = 2.0 * np.pi
@@ -492,7 +492,7 @@ class Viewer3D:
     def add_system(self, system, *, section="full", angular_samples: int = 64) -> None:
         """Render lens elements (coloured by material) + mirrors as full closed
         solids by default; ``section='half'`` gives a cutaway."""
-        from ..design.surfaces import SurfaceKind
+        from ..design.rows import SurfaceKind
 
         covered: set[int] = set()
         for i, j, material in system.solid_elements():

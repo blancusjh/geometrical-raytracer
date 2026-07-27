@@ -1,11 +1,13 @@
-"""Reflection and refraction: the geometric-optics laws of ray direction.
+"""The laws of geometrical optics: reflection and refraction.
+
+Given an incident direction, a surface normal, and the indices on either
+side, these give the direction the light leaves in. They are the crown of
+the package — surfaces, sources, and propagation all exist to set up an
+interface for these laws to act on.
 
 All functions are dimension-agnostic: directions and normals may be 2-D or
-3-D unit vectors. This is the crown of the package — everything else
-(shapes, the physical-object abstractions in :mod:`raytracer.optics`, the
-propagation engines) exists to set up an interface for these laws to act
-on. Energetic (power) laws are a different nature and live in
-:mod:`raytracer.radiometry`.
+3-D unit vectors. How much *power* goes each way is a different question,
+answered by :mod:`raytracer.optics.radiometry`.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ def _refraction_cosines(
     """Return ``(eta, cos_incident, cos_transmitted)`` for a ray crossing an
     interface from index *n1* to *n2*; ``cos_transmitted`` is ``None`` under
     total internal reflection. Shared by :func:`refract` and
-    :func:`~raytracer.physics.radiometry.fresnel_coefficients`, which both
+    :func:`~raytracer.optics.radiometry.fresnel_coefficients`, which both
     need the same angle relationship at the interface."""
 
     d = normalize(direction)

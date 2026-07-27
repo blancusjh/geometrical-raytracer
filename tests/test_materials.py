@@ -2,7 +2,7 @@
 
 import pytest
 
-from raytracer.physics.materials import (
+from raytracer.optics.materials import (
     AbbeMaterial,
     SellmeierMaterial,
     _SELLMEIER_CATALOG,

@@ -2,7 +2,7 @@
 
 A ``Ray`` only knows how to extend itself through space (:meth:`Ray.point_at`).
 It has no notion of hitting anything — detecting where a ray meets a
-surface is the surface's job (:mod:`raytracer.optics.surface`), and
+surface is the surface's job (:mod:`raytracer.surfaces.surface`), and
 deciding what a source emits and what a hit produces next is the
 propagation algorithm's job (:mod:`raytracer.propagation`). Keeping those
 three responsibilities apart is deliberate: conflating "what a ray is"

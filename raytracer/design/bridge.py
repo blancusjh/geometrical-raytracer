@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..optics.profiles import ProfileSurface
-from ..optics.surface import Surface
-from .surfaces import SurfaceKind
+from ..surfaces.profile import ProfileSurface
+from ..surfaces.surface import Surface
+from .rows import SurfaceKind
 
 
 def to_branching_surfaces(system) -> list[Surface]:

@@ -39,7 +39,7 @@ if str(ROOT) not in sys.path:
 from raytracer import BranchingTracer, ParallelSource, RenderConfig, TraceConfig
 from raytracer.design import OpticalSystem, SurfaceRow
 from raytracer.optics import Lens
-from raytracer.physics.materials import AIR, ConstantIndex
+from raytracer.optics.materials import AIR, ConstantIndex
 from raytracer.propagation import SequentialTracer
 from raytracer.viz import Scene, show
 from examples.telescopes._afocal import solve_afocal_gap

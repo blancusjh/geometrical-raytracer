@@ -11,7 +11,7 @@ nature again -- see :mod:`raytracer.io`.
 """
 
 from .bridge import to_branching_surfaces
-from .surfaces import SurfaceKind, SurfaceRow
+from .rows import SurfaceKind, SurfaceRow
 from .system import OpticalSystem
 
 __all__ = [

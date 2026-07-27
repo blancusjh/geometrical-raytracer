@@ -1,23 +1,21 @@
 """Optical ray-tracing toolkit, layered strictly by the nature of each piece:
 
 - ``raytracer.math`` — dimension-agnostic vectors, rigid transforms, and the
-  pure numeric ray/shape intersection solvers. A utility layer: it knows
+  solvers that find where a ray meets a surface. A utility layer: it knows
   nothing about optics.
-- ``raytracer.physics`` — the crown: refractive materials, the geometric-
-  optics direction laws (reflect/refract), and the separate energetic
-  (Fresnel) laws. Everything else exists to give these laws something to
-  act on.
-- ``raytracer.shapes`` — pure shape math (sag profiles, conic and Cartesian-
-  oval/Fermat-oval definitions). No notion of a ray, a medium, or a
-  traceable surface.
-- ``raytracer.optics`` — the physical-object abstractions an optical system
-  is made of: ``Ray`` (the light primitive, which cannot detect its own
-  intersections), ``Surface``/``Instrument``, ``Source``, and the built
-  ``Lens``/``Mirror`` elements.
-- ``raytracer.propagation`` — the algorithms that actually emit rays,
-  prolong them to a collision, and decide what happens next:
-  ``sequential`` (every ray through every surface in order, vectorized) and
-  ``branching`` (a breadth-first tree of reflected/refracted rays).
+- ``raytracer.surfaces`` — the shapes a ray can meet. Each states its own
+  geometry, either implicitly (``f_Sigma(x) = 0``) or parametrically
+  (``x = P(t)``), plus its placement, extent, and the media it separates.
+  It never solves for an intersection itself.
+- ``raytracer.optics`` — light and the laws it obeys: ``Ray`` (the light
+  primitive, which cannot detect its own intersections), the laws of
+  reflection and refraction (``optics.laws``), the energetic Fresnel laws
+  (``optics.radiometry``), refractive materials, emitters, instruments, and
+  built ``Lens``/``Mirror`` elements.
+- ``raytracer.propagation`` — the algorithms that emit rays, prolong them to
+  a collision, and decide what happens next: ``sequential`` (every ray
+  through every surface in order, vectorized) and ``branching`` (a
+  breadth-first tree of reflected/refracted rays).
 - ``raytracer.design`` — the data model of an engineered system
   (``SurfaceRow``/``OpticalSystem``), independent of any propagation engine.
 - ``raytracer.io`` — reading/writing a design (prescription CSVs today).
@@ -32,41 +30,41 @@ from .io import read_csv, write_csv
 from .math.transforms import RigidTransform
 from .math.vectors import direction_from_angle, normalize
 from .optics import (
-    CartesianOvalSurface,
-    CircleSurface,
-    ConicSurface,
-    EllipseSurface,
-    HyperbolaSurface,
+    AIR,
+    VACUUM,
+    ConstantIndex,
+    FresnelCoefficients,
     ImageSource,
     Instrument,
-    Intersection,
     Lens,
-    LineSegment,
+    MaterialLibrary,
     Mirror,
-    ParabolaSurface,
     ParallelSource,
     PointSource,
-    ProfileSurface,
     Ray,
     RaySeed,
     Screen,
     ScreenHit,
     Source,
-    Surface,
-    ray_from_angle,
-)
-from .physics import (
-    AIR,
-    VACUUM,
-    ConstantIndex,
-    FresnelCoefficients,
-    MaterialLibrary,
     default_materials,
     fresnel_coefficients,
+    ray_from_angle,
     reflect,
     refract,
 )
 from .propagation import BranchingTracer, RayLabeler, RayNode, RayTree, TraceConfig
+from .surfaces import (
+    CartesianOvalSurface,
+    CircleSurface,
+    ConicSurface,
+    EllipseSurface,
+    HyperbolaSurface,
+    Intersection,
+    LineSegment,
+    ParabolaSurface,
+    ProfileSurface,
+    Surface,
+)
 
 __version__ = "0.3.0"
 
@@ -75,21 +73,18 @@ __all__ = [
     "RigidTransform",
     "normalize",
     "direction_from_angle",
-    # physics
-    "FresnelCoefficients",
+    # optics: light, media, and the laws
+    "Ray",
+    "ray_from_angle",
     "reflect",
     "refract",
+    "FresnelCoefficients",
     "fresnel_coefficients",
     "ConstantIndex",
     "MaterialLibrary",
     "default_materials",
     "AIR",
     "VACUUM",
-    # optics: the physical-object abstractions
-    "Ray",
-    "ray_from_angle",
-    "Surface",
-    "Intersection",
     "Source",
     "PointSource",
     "ParallelSource",
@@ -98,6 +93,11 @@ __all__ = [
     "Instrument",
     "Screen",
     "ScreenHit",
+    "Lens",
+    "Mirror",
+    # surfaces
+    "Surface",
+    "Intersection",
     "LineSegment",
     "ProfileSurface",
     "ConicSurface",
@@ -106,8 +106,6 @@ __all__ = [
     "ParabolaSurface",
     "HyperbolaSurface",
     "CartesianOvalSurface",
-    "Lens",
-    "Mirror",
     # propagation: the branching (tree) algorithm
     "BranchingTracer",
     "TraceConfig",

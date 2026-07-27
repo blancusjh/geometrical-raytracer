@@ -4,7 +4,7 @@ import numpy as np
 
 from raytracer import CartesianOvalSurface
 from raytracer.optics.ray import Ray
-from raytracer.shapes.fermat_oval import fermat_oval_F
+from raytracer.surfaces.cartesian_oval import cartesian_oval_implicit
 
 Z0, ZI, N0, NI = -30.0, 10.0, 1.0, 1.7
 
@@ -21,13 +21,13 @@ def test_semidiameter_clips_rays_beyond_the_aperture():
 
 def test_drawn_curve_matches_the_traced_fermat_surface():
     """Regression for the sigma_parametric() placeholder: as_points() must lie
-    on the same surface fermat_oval_F()/hit() actually trace."""
+    on the same surface cartesian_oval_implicit()/hit() actually trace."""
 
     oval = CartesianOvalSurface(z0=Z0, zi=ZI, n_exterior=N0, n_interior=NI)
     points = oval.as_points(samples=64)
     assert points.shape[0] > 10  # not the degenerate near-empty placeholder curve
 
     residuals = [
-        fermat_oval_F(z, abs(r), Z0, ZI, N0, NI) for z, r in points
+        cartesian_oval_implicit(z, abs(r), Z0, ZI, N0, NI) for z, r in points
     ]
     assert np.max(np.abs(residuals)) < 1e-8

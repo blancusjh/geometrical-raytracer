@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..math.vectors import rotation_2d
-from ..shapes.profile import AsphereProfile
-from .profiles import LineSegment, ProfileSurface
-from .surface import Surface
+from ..surfaces.profile import AsphereProfile, ProfileSurface
+from ..surfaces.segment import LineSegment
+from ..surfaces.surface import Surface
 
 
 @dataclass

@@ -14,8 +14,8 @@ from typing import Optional
 
 import numpy as np
 
-from .profiles import LineSegment
-from .surface import Intersection, Surface
+from ..surfaces.segment import LineSegment
+from ..surfaces.surface import Intersection, Surface
 
 
 class Instrument(Surface):

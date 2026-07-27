@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from raytracer.shapes.profile import AsphereProfile
+from raytracer.surfaces.profile import AsphereProfile
 from raytracer.viz.gl3d import lathe
 
 

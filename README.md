@@ -3,18 +3,20 @@
 Toolkit de trazado de rayos óptico, organizado estrictamente por la
 naturaleza de cada pieza:
 
-- **`raytracer.math`** — utilidad: vectores, transformaciones rígidas, y los
-  solvers numéricos puros de intersección rayo/forma.
-- **`raytracer.physics`** — la corona: materiales refractivos, las leyes de
-  óptica geométrica (reflexión/refracción) y las leyes energéticas
-  (Fresnel), separadas por naturaleza.
-- **`raytracer.shapes`** — matemática pura de formas: perfiles asféricos,
-  cónicas, óvalo de Descartes (GOTS y forma implícita de Fermat). Sin noción
-  de rayo, medio, ni superficie trazable.
-- **`raytracer.optics`** — las abstracciones de los objetos físicos: `Ray`
-  (la primitiva de la luz — no sabe detectar sus propias intersecciones),
-  `Surface`/`Instrument`, `Source`, y los elementos construidos
-  `Lens`/`Mirror`.
+- **`raytracer.math`** — utilidad: vectores, transformaciones rígidas, y el
+  solver único de intersección rayo/superficie
+  (`intersect_ray_with_surface`), con sus dos métodos: resolver
+  `f_Σ(A + λu) = 0` para la menor λ, o resolver `A + λu = P(t)`.
+- **`raytracer.surfaces`** — las superficies: cada una declara su propia
+  geometría, de forma **implícita** (`f_Σ(x) = 0`) o **paramétrica**
+  (`x = P(t)`), más dónde está, hasta dónde llega y qué medios separa.
+  Ninguna resuelve su propia intersección.
+- **`raytracer.optics`** — la luz y las leyes que obedece: `Ray` (la
+  primitiva de la luz — no sabe detectar sus propias intersecciones), las
+  leyes de reflexión y refracción (`optics.laws`), las leyes energéticas de
+  Fresnel (`optics.radiometry`), los materiales refractivos, los emisores,
+  los instrumentos (un detector es un instrumento, que es una superficie) y
+  los elementos construidos `Lens`/`Mirror`.
 - **`raytracer.propagation`** — los algoritmos que emiten rayos, los
   prolongan hasta la colisión y deciden el nuevo rayo: `sequential` (cada
   rayo por cada superficie en orden, vectorizado, sin ramificar) y
@@ -119,13 +121,16 @@ Demos ejecutables en `examples/`, organizadas por carpeta:
 ```
 raytracer/
   math/          # vectores, transformaciones rígidas (RigidTransform),
-                 # solvers puros de intersección (intersections.py)
-  physics/       # materiales, leyes de dirección (refraction.py: reflect/
-                 # refract), leyes energéticas (radiometry.py: Fresnel)
-  shapes/        # perfil asférico, álgebra de cónicas, óvalo de Descartes
-                 # (GOTS y forma implícita de Fermat) -- sin motor
-  optics/        # Ray, Surface/Instrument, Source, Lens/Mirror -- las
-                 # abstracciones físicas, compartidas por ambos motores
+                 # intersections.py: intersect_ray_with_surface, único punto
+                 # de entrada, con el método implícito y el paramétrico
+  surfaces/      # Surface (el contrato: implícita o paramétrica) +
+                 # Intersection, y las superficies concretas: perfil de
+                 # revolución (profile.py), segmento (segment.py), cónicas
+                 # (conic.py), óvalo de Descartes (cartesian_oval.py, con
+                 # sus dos descripciones en un solo archivo)
+  optics/        # Ray, laws.py (reflexión/refracción), radiometry.py
+                 # (Fresnel), materials.py, sources.py, instruments.py,
+                 # elements.py -- la luz, los medios y sus leyes
   propagation/   # sequential.py (trazador vectorizado, sin ramificar) y
                  # branching.py (árbol de reflexión/refracción); paraxial.py
                  # y fields.py son extensiones específicas de sequential
@@ -147,7 +152,8 @@ tests/           # verdades analíticas + regresiones de sistema completo
 ```
 
 Esta es una reorganización sin retrocompatibilidad: no quedan alias
-diferidos de la estructura anterior (`core`/`geometry`/`sequential`/`nonseq`).
+diferidos de la estructura anterior (`core`/`geometry`/`sequential`/`nonseq`/
+`physics`/`shapes`).
 Los notebooks en `examples/notebooks/` y `reference/` no se tocaron en este
 pase y pueden requerir actualización de sus imports.
 

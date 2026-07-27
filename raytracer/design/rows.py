@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from ..physics.materials import AIR, Material
-from ..shapes.cartesian_oval import CartesianOvalProfile
-from ..shapes.profile import AsphereProfile
+from ..optics.materials import AIR, Material
+from ..surfaces.cartesian_oval import CartesianOvalProfile
+from ..surfaces.profile import AsphereProfile
 
 
 class SurfaceKind(Enum):
@@ -70,7 +70,7 @@ class SurfaceRow:
     ) -> "SurfaceRow":
         """Stigmatic refracting surface between object (n0, z0) and image (ni, zi).
 
-        See :class:`raytracer.shapes.cartesian_oval.CartesianOvalProfile`;
+        See :class:`raytracer.surfaces.cartesian_oval.CartesianOvalProfile`;
         keep ``semidiameter`` within ``profile.max_usable_height`` for a
         physically meaningful (single-valued) surface.
         """

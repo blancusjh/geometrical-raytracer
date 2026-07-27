@@ -1,6 +1,6 @@
 """Fresnel coefficients: the energetic (power) laws at an interface.
 
-Distinct in nature from the direction laws in :mod:`raytracer.physics.refraction`
+Distinct in nature from the direction laws in :mod:`raytracer.optics.laws`
 (reflect/refract answer "which way does the ray go"; this answers "how much
 power does it carry there").
 """
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .refraction import _refraction_cosines
+from .laws import _refraction_cosines
 
 
 @dataclass(frozen=True)

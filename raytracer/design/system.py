@@ -6,8 +6,8 @@ from typing import Iterator, Sequence
 
 import numpy as np
 
-from ..physics.materials import AIR, Material
-from .surfaces import SurfaceKind, SurfaceRow
+from ..optics.materials import AIR, Material
+from .rows import SurfaceKind, SurfaceRow
 
 
 class OpticalSystem:

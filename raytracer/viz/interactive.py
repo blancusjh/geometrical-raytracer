@@ -202,7 +202,7 @@ def editable_for(obj) -> Editable:
             m.face.__post_init__()
 
         def set_radius(v, m=obj):
-            from ..shapes.profile import AsphereProfile
+            from ..surfaces.profile import AsphereProfile
 
             m.face.profile = AsphereProfile.from_radius(
                 float(v), m.face.profile.conic, m.face.profile.coefficients

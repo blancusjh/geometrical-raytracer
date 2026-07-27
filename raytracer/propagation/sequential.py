@@ -4,8 +4,8 @@ Rays are traced through the system's surfaces in prescription order, one
 deterministic path per ray -- no branching into reflected+refracted
 children (a row is either a mirror or a dielectric interface). All N rays
 are advanced together with vectorized numpy operations for performance;
-:func:`~raytracer.math.intersections.intersect_profile_batch` and
-:func:`~raytracer.physics.refraction.reflect_batch`/``refract_batch`` do
+:func:`~raytracer.math.intersections.intersect_rays_with_profile_surface` and
+:func:`~raytracer.optics.laws.reflect_batch`/``refract_batch`` do
 the actual math this loop is built from. Failures (vignetting, TIR,
 non-convergence) do not raise: rays carry a status and the surface index
 where they died, so pupil-filling bundles can simply be filtered afterwards.
@@ -19,10 +19,10 @@ from enum import IntEnum
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..design.surfaces import SurfaceKind
+from ..design.rows import SurfaceKind
 from ..design.system import OpticalSystem
-from ..math.intersections import intersect_profile_batch
-from ..physics.refraction import reflect_batch, refract_batch
+from ..math.intersections import intersect_rays_with_profile_surface
+from ..optics.laws import reflect_batch, refract_batch
 
 
 class TraceStatus(IntEnum):
@@ -159,7 +159,7 @@ class SequentialTracer:
             vz = system.vertices[i]
             profile = row.profile
 
-            t, h, slope, parallel, diverged = intersect_profile_batch(
+            t, h, slope, parallel, diverged = intersect_rays_with_profile_surface(
                 p, d, vz, profile, alive,
                 max_newton=self.max_newton, newton_tol=self.newton_tol,
             )

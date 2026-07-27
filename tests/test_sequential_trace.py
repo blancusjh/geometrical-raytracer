@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from raytracer.design import OpticalSystem, SurfaceRow
-from raytracer.physics.materials import ConstantIndex
+from raytracer.optics.materials import ConstantIndex
 from raytracer.propagation import SequentialTracer, TraceStatus
 
 

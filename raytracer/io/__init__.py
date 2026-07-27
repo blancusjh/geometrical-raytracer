@@ -1,6 +1,6 @@
 """Reading and writing optical-system data.
 
-A different nature from math/physics/design: this is about serialization
+A different nature from math/optics/design: this is about serialization
 format (a CSV dialect, today), not about what a system *is* or how light
 moves through it.
 """

@@ -1,7 +1,7 @@
 """3-D Cartesian oval: a stigmatic refracting surface of revolution, in 3-D.
 
 The 3-D counterpart of ``cartesian_oval_refractor_2d.py``: the same GOTS
-closed-form surface (:class:`~raytracer.shapes.cartesian_oval.
+closed-form surface (:class:`~raytracer.surfaces.cartesian_oval.
 CartesianOvalProfile`, ``SurfaceRow.cartesian_oval``), here revolved into its
 actual 3-D shape and traversed by a full 3-D pupil bundle traced with the
 exact sequential engine — the same viewer as
@@ -45,7 +45,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from raytracer.analysis import stigmatism_report
-from raytracer.physics.materials import AIR, ConstantIndex
+from raytracer.optics.materials import AIR, ConstantIndex
 from raytracer.design import OpticalSystem, SurfaceRow
 from raytracer.propagation import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
 from raytracer.viz.gl3d import Viewer3D, spectral_rgb

@@ -14,7 +14,7 @@ surface. Two independent strategies are provided:
   both the reflected and refracted child at every collision.
 
 Both tracers call into :mod:`raytracer.math.intersections` for the actual
-root-finding and :mod:`raytracer.physics` for the reflection/refraction/
+root-finding and :mod:`raytracer.optics.laws` for the reflection/refraction/
 Fresnel laws; neither re-derives that math itself.
 """
 

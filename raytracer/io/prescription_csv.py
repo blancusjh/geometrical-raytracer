@@ -15,10 +15,10 @@ import re
 from pathlib import Path
 from typing import Callable
 
-from ..design.surfaces import SurfaceKind, SurfaceRow
+from ..design.rows import SurfaceKind, SurfaceRow
 from ..design.system import OpticalSystem
-from ..physics.materials import MaterialLibrary, default_materials
-from ..shapes.profile import AsphereProfile
+from ..optics.materials import MaterialLibrary, default_materials
+from ..surfaces.profile import AsphereProfile
 
 logger = logging.getLogger("raytracer.prescription")
 

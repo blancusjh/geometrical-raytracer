@@ -2,7 +2,7 @@
 
 Given sources and surfaces, this is what actually emits rays, prolongs them
 to their first collision, decides the new ray(s) there (by calling into
-:mod:`raytracer.physics` for the direction/energy laws), and repeats. The
+:mod:`raytracer.optics` for the direction/energy laws), and repeats. The
 ray-genealogy bookkeeping (:class:`RayNode`, :class:`RayTree`,
 :class:`RayLabeler`) belongs to *this* algorithm, not to
 :class:`~raytracer.optics.ray.Ray` itself -- a ray does not know its own
@@ -21,9 +21,9 @@ import numpy as np
 
 from ..optics.ray import Ray
 from ..optics.sources import Source
-from ..optics.surface import Intersection, Surface
-from ..physics.radiometry import fresnel_coefficients
-from ..physics.refraction import reflect, refract
+from ..surfaces.surface import Intersection, Surface
+from ..optics.radiometry import fresnel_coefficients
+from ..optics.laws import reflect, refract
 
 
 @dataclass

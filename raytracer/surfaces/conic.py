@@ -1,9 +1,9 @@
-"""Conic-section surfaces for the 2-D engine.
+"""Conic-section surfaces: ellipse, circle, parabola, hyperbola.
 
-Wraps the pure algebra in :mod:`raytracer.shapes.conic`
-(:func:`~raytracer.shapes.conic.quadratic_coeffs_from_ep`) and the solver in
-:mod:`raytracer.math.intersections` as a ``Surface``: this is the
-engineering layer that turns a shape into something a tracer can hit.
+A conic in focal (polar) form ``r(theta) = p / (1 + e cos theta)`` has the
+implicit description ``f_Sigma(x, y) = A x^2 + B xy + C y^2 + D x + E y + F``,
+which is quadratic — so the intersection solver reaches it in closed form,
+and the gradient of the same polynomial gives the normal.
 """
 
 from __future__ import annotations
@@ -13,12 +13,22 @@ from typing import Optional
 
 import numpy as np
 
-from ..math.intersections import intersect_quadratic, quadratic_normal
 from ..math.transforms import RigidTransform
-from ..math.vectors import normalize
-from ..shapes.conic import quadratic_coeffs_from_ep
-from .ray import Ray
-from .surface import Intersection, Surface
+from .surface import Surface
+
+
+def quadratic_coeffs_from_ep(e: float, p: float) -> tuple[float, float, float, float, float, float]:
+    """Return ``(A, B, C, D, E, F)`` for a conic in polar form (semi-latus
+    rectum *p*, eccentricity *e*)."""
+
+    A: float = 1.0 - e**2
+    B: float = 0.0
+    C: float = 1.0
+    D: float = 2.0 * e * p
+    E: float = 0.0
+    F: float = -(p**2)
+
+    return (A, B, C, D, E, F)
 
 
 @dataclass
@@ -44,7 +54,24 @@ class ConicSurface(Surface):
         self.focus = np.asarray(self.focus, dtype=float)
         self.angle = float(self.angle)
         self.frame = RigidTransform.from_angle_2d(origin=self.focus, angle=self.angle)
-        self.coeffs = quadratic_coeffs_from_ep(self.e, self.p)
+        self.quadratic_form = quadratic_coeffs_from_ep(self.e, self.p)
+
+    # -- implicit description ----------------------------------------------
+
+    def implicit(self, point: np.ndarray) -> float:
+        x, y = point
+        A, B, C, D, E, F = self.quadratic_form
+        return A * x * x + B * x * y + C * y * y + D * x + E * y + F
+
+    def implicit_gradient(self, point: np.ndarray) -> np.ndarray:
+        x, y = point
+        A, B, C, D, E, _ = self.quadratic_form
+        return np.array([2.0 * A * x + B * y + D, B * x + 2.0 * C * y + E], dtype=float)
+
+    def within_aperture(self, point: np.ndarray) -> bool:
+        return self.semidiameter is None or abs(point[1]) <= self.semidiameter
+
+    # -- drawing ------------------------------------------------------------
 
     def r(self, theta: float) -> Optional[float]:
         denom = 1.0 + self.e * np.cos(theta)
@@ -69,27 +96,6 @@ class ConicSurface(Surface):
 
     def polyline(self, samples: int = 512) -> np.ndarray:
         return self.as_points(samples=samples)
-
-    def hit(self, ray: Ray) -> Optional[Intersection]:
-        origin_local = self.frame.to_local(ray.origin)
-        direction_local = self.frame.direction_to_local(ray.direction)
-        result = intersect_quadratic(origin_local, direction_local, self.coeffs)
-        if result is None:
-            return None
-        point_local, lam = result
-        if self.semidiameter is not None and abs(point_local[1]) > self.semidiameter:
-            return None
-        point_world = self.frame.to_world(point_local)
-        normal_local = normalize(quadratic_normal(point_local, self.coeffs))
-        normal_world = normalize(self.frame.direction_to_world(normal_local))
-        return Intersection(
-            point=point_world,
-            normal=normal_world,
-            distance=float(lam),
-            surface_id=self.surface_id,
-            parameters=np.asarray(point_local, dtype=float),
-            surface=self,
-        )
 
 
 class EllipseSurface(ConicSurface):
@@ -211,6 +217,7 @@ class HyperbolaSurface(ConicSurface):
 
 
 __all__ = [
+    "quadratic_coeffs_from_ep",
     "ConicSurface",
     "EllipseSurface",
     "CircleSurface",

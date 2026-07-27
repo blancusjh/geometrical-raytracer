@@ -36,7 +36,7 @@ def _draw(viewer):
 class _Node:
     def __init__(self, origin, direction, hit_point):
         from raytracer.optics.ray import Ray
-        from raytracer.optics.surface import Intersection
+        from raytracer.surfaces.surface import Intersection
 
         self.ray = Ray(origin, direction)
         self.intersection = (
