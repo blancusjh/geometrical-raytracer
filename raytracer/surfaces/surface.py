@@ -1,17 +1,15 @@
 """The boundary between two media: how a surface describes itself.
 
-A ``Surface`` is a shape that a ray can meet. It describes itself in one of
-two ways — implicitly (``f_Sigma(x) = 0``) or parametrically (``x = P(t)``)
-— and that description is *all* it needs to be intersectable: the solving
-is done once, generically, by
-:func:`raytracer.math.intersections.intersect_ray_with_surface`. A surface
-therefore owns its shape, its placement (local frame), its clear aperture,
-and the media on either side; it does not own root-finding, and it does not
-decide what happens after a hit (that is the propagation algorithm's job).
+A surface owns its shape, its placement, its clear aperture, and the media
+on either side. Stating its description — implicit or parametric — is all
+it needs to be intersectable; the solving happens once, generically, in
+:func:`raytracer.math.intersections.intersect_ray_with_surface`.
 
 The implicit gradient does double duty: it is both the Newton derivative
-the solver needs and the surface normal, so a surface that can state
-``f_Sigma`` and ``grad f_Sigma`` gets intersection *and* normals for free.
+the solver needs and the surface normal, so stating ``f_Sigma`` and
+``grad f_Sigma`` buys intersection *and* normals at once — which is why
+:meth:`Surface.hit` below is one generic template rather than per-surface
+code.
 """
 
 from __future__ import annotations

@@ -1,13 +1,9 @@
-"""Optical-system engineering: the data model of a designed system.
+"""The data model of an engineered system: ``SurfaceRow`` and ``OpticalSystem``.
 
-``SurfaceRow``/``SurfaceKind`` and ``OpticalSystem`` describe *what* a
-system is (an ordered stack of surfaces along an axis) -- they hold no
-propagation logic themselves. Actually tracing a system, solving for its
-chief rays, or recovering its conjugate planes needs the propagation
-algorithms in :mod:`raytracer.propagation` (which is why those live there,
-not here, despite characterizing a design): a design must not depend on an
-engine to be a design. Reading/writing a design from a file is a different
-nature again -- see :mod:`raytracer.io`.
+Describes *what* a system is, holding no propagation logic -- tracing it or
+solving its chief rays needs :mod:`raytracer.propagation`, and a design must
+not depend on an engine to be a design. Reading it from a file is a
+different nature again: :mod:`raytracer.io`.
 """
 
 from .bridge import to_branching_surfaces

@@ -1,9 +1,6 @@
-"""Dimension-agnostic math utilities: vectors, rigid transforms, and the
-solvers that find where a ray meets a surface.
+"""Vectors, rigid transforms, and the ray/surface intersection solvers.
 
-This is the utility layer: it knows nothing about optics. Everything above
-it (:mod:`raytracer.surfaces`, :mod:`raytracer.optics`, the propagation
-algorithms) is built out of these primitives, never the other way around.
+A utility layer: it knows nothing about optics.
 """
 
 from .intersections import (

@@ -1,22 +1,12 @@
-"""Optics: light, the media it travels through, and the laws it obeys.
+"""Light, the media it travels through, and the laws it obeys.
 
-- :mod:`~raytracer.optics.ray` — ``Ray``, the light primitive. It extends
-  through space and nothing else: it deliberately cannot detect its own
-  intersections (that is the surface's description plus
-  :mod:`raytracer.math.intersections`) and cannot decide what happens when
-  it lands (that is :mod:`raytracer.propagation`).
-- :mod:`~raytracer.optics.laws` — reflection and refraction: which way the
-  light goes at an interface.
-- :mod:`~raytracer.optics.radiometry` — Fresnel coefficients: how much power
-  goes each way.
-- :mod:`~raytracer.optics.materials` — the refractive media themselves.
-- :mod:`~raytracer.optics.sources` — emitters, which produce the rays.
-- :mod:`~raytracer.optics.instruments` — surfaces that observe light rather
-  than redirect it (a detector is an instrument, which is a surface).
-- :mod:`~raytracer.optics.elements` — built ``Lens``/``Mirror`` assemblies.
+``ray`` (the light primitive -- it neither detects its own intersections
+nor decides what happens when it lands), ``laws`` (reflection, refraction),
+``radiometry`` (Fresnel power), ``materials``, ``sources`` (emitters),
+``instruments`` (a detector is an instrument, which is a surface), and
+``elements`` (built ``Lens``/``Mirror``).
 
-The shapes these act on live in :mod:`raytracer.surfaces`, which this
-package builds on and which knows nothing about any of the above.
+The shapes these act on live in :mod:`raytracer.surfaces`.
 """
 
 from .elements import Lens, Mirror

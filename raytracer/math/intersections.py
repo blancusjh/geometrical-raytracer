@@ -1,30 +1,18 @@
 """Where a ray meets a surface: one problem, two methods.
 
-A ray is the set of points ``A + lambda u`` (origin ``A``, unit direction
-``u``, ``lambda > 0``). A surface describes itself in exactly one of two
-ways, and each gives a way to intersect it:
+A ray is the set of points ``A + lambda u``. A surface describes itself in
+one of two ways, and each gives a way to intersect it::
 
-**Implicit** — the surface is ``{x : f_Sigma(x) = 0}``. Substituting the ray
-gives a scalar equation in one unknown::
+    implicit    f_Sigma(A + lambda u) = 0   ->  smallest lambda > 0
+    parametric  A + lambda u = P(t)         ->  smallest lambda > 0
 
-    f_Sigma(A + lambda u) = 0        ->  solve for the smallest lambda > 0
+:func:`intersect_ray_with_surface` is the single entry point: it asks the
+surface which description it offers and applies the matching method.
 
-**Parametric** — the surface is ``{P(t)}`` for a parameter ``t``. Equating
-the two descriptions of the same point gives one equation per dimension::
-
-    A + lambda u = P(t)              ->  solve for (lambda, t), smallest lambda > 0
-
-:func:`intersect_ray_with_surface` is the single entry point. It takes the
-ray and the surface, asks the surface which description it offers, and
-applies the corresponding method. Nothing here knows what a lens is, which
-medium is on which side, or what happens after the hit — that is the
-surface's and the propagation algorithm's business respectively.
-
-Within the implicit method the solver picks the cheapest exact route the
-surface allows: a closed-form root when ``f_Sigma`` is quadratic, Newton
-from a surface-supplied seed when ``f_Sigma`` and its gradient are smooth
-and a good initial guess exists, and a bracket-and-bisect scan otherwise.
-These are three ways of solving *the same equation*, not three methods.
+Within the implicit method the solver takes the cheapest exact route the
+surface allows — closed form when ``f_Sigma`` is quadratic, Newton from a
+surface-supplied seed, bracket-and-bisect otherwise. Those are three ways
+of solving *the same equation*, not three methods.
 """
 
 from __future__ import annotations

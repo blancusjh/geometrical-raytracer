@@ -1,15 +1,12 @@
-"""Surfaces: the shapes a ray can meet, and how each describes itself.
+"""The shapes a ray can meet, and how each describes itself.
 
-Every surface here states its own geometry — implicitly (``f_Sigma(x) = 0``)
-or parametrically (``x = P(t)``) — plus where it sits, how far it extends,
-and which media it separates. It never solves for an intersection itself:
-that is done once, generically, in
-:func:`raytracer.math.intersections.intersect_ray_with_surface`, which reads
-the description off the surface.
+Every surface declares its own geometry -- implicitly (``f_Sigma(x) = 0``)
+or parametrically (``x = P(t)``) -- plus its placement, extent, and the
+media it separates. None solves its own intersection: that is done once,
+generically, in :func:`raytracer.math.intersections.intersect_ray_with_surface`.
 
-This package depends on :mod:`raytracer.math` alone. It does not import
-:mod:`raytracer.optics` — a surface is a shape between two media, and knows
-nothing about the rays that hit it or the laws they obey when they do.
+Depends on :mod:`raytracer.math` alone; a surface knows nothing about the
+rays that hit it.
 """
 
 from .cartesian_oval import (

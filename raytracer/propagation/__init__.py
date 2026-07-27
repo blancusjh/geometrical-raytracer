@@ -1,21 +1,16 @@
-"""Propagation algorithms: emit rays, prolong them to a collision, decide
-the new ray(s), repeat.
+"""Emit rays, prolong them to a collision, decide the new ray, repeat.
 
-This is the *only* place that governs what a ray does after it hits a
-surface. Two independent strategies are provided:
+The only place that governs what a ray does after it hits a surface:
 
-- :mod:`raytracer.propagation.sequential` — every ray through every surface
-  of a :class:`~raytracer.design.system.OpticalSystem` in a fixed order,
-  one deterministic path each, vectorized over many rays. ``paraxial`` and
-  ``fields`` build on it (chief-ray/pupil solving, conjugate recovery) --
-  they are sequential-specific, which is why they live here rather than
-  alongside the system's data model in :mod:`raytracer.design`.
-- :mod:`raytracer.propagation.branching` — a breadth-first tree exploring
-  both the reflected and refracted child at every collision.
+- ``sequential`` -- every ray through every surface in fixed order, one
+  deterministic path each, vectorized. ``paraxial`` and ``fields``
+  (chief-ray/pupil solving, conjugate recovery) build on it, which is why
+  they live here rather than with the data model in :mod:`raytracer.design`.
+- ``branching`` -- a breadth-first tree taking both the reflected and the
+  refracted child at every collision.
 
-Both tracers call into :mod:`raytracer.math.intersections` for the actual
-root-finding and :mod:`raytracer.optics.laws` for the reflection/refraction/
-Fresnel laws; neither re-derives that math itself.
+Both call :mod:`raytracer.math.intersections` for the root-finding and
+:mod:`raytracer.optics.laws` for the physics; neither re-derives either.
 """
 
 from .branching import BranchingTracer, RayLabeler, RayNode, RayTree, TraceConfig
