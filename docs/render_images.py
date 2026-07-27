@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -27,7 +29,7 @@ MAX_WIDTH = 1400  # keep the repository light; still sharp on a README
 #: (module, extra CLI args, output name)
 EXAMPLES = [
     ("examples.lithography.duv_objective_2d", [], "duv_2d"),
-    ("examples.lithography.duv_objective_3d", ["--beam"], "duv_3d_beam"),
+    ("examples.lithography.duv_objective_3d", ["--spectrum"], "duv_3d_spectrum"),
     ("examples.stigmatic_surfaces.cartesian_oval_refractor_3d", ["--beam"], "cartesian_oval_3d"),
     ("examples.stigmatic_surfaces.ellipse_mirror", [], "ellipse_mirror"),
     ("examples.stigmatic_surfaces.cartesian_oval_refractor_2d", [], "cartesian_oval_2d"),
@@ -114,8 +116,87 @@ def render_analysis() -> None:
     shrink(OUT / "duv_spots.png")
 
 
+def render_stigmatic_spots() -> None:
+    """Sphere vs Cartesian oval: same conjugates, same vertex curvature.
+
+    The oval is not "a better sphere" -- it is exact, and the only way to show
+    that honestly is to plot both and let the axis scales speak.
+    """
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from raytracer.analysis import spot_data
+    from raytracer.design import OpticalSystem, SurfaceRow
+    from raytracer.optics.materials import AIR, ConstantIndex
+    from raytracer.propagation import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
+    from raytracer.surfaces.cartesian_oval import CartesianOvalProfile
+
+    print("stigmatic spot comparison:")
+    n0, z0, ni, zi, semi, na = 1.0, -30.0, 1.7, 10.0, 3.0, 0.1
+    glass = ConstantIndex("DENSE_GLASS", ni)
+    radius = CartesianOvalProfile(n0=n0, z0=z0, ni=ni, zi=zi).radius
+
+    def spot(row):
+        tracer = SequentialTracer(OpticalSystem([row], object_space=AIR, object_z=z0))
+        pupil = trace_pupil(
+            tracer, FieldPoint(y=0.0), na_object_sine=na,
+            sampling=PupilSampling(kind="rings", radial=14, azimuth=64), chief_slope=0.0,
+        )
+        return spot_data(pupil)
+
+    sphere = spot(SurfaceRow.refracting(radius=radius, thickness=zi, material=glass,
+                                        semidiameter=semi))
+    oval = spot(SurfaceRow.cartesian_oval(n0=n0, z0=z0, ni=ni, zi=zi, thickness=zi,
+                                          material=glass, semidiameter=semi))
+
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.6))
+    scale = 1.15 * np.abs(sphere.relative_um).max()
+
+    axes[0].scatter(sphere.relative_um[:, 0], sphere.relative_um[:, 1], s=5, alpha=0.5,
+                    color="#c1440e")
+    axes[0].set(xlim=(-scale, scale), ylim=(-scale, scale),
+                title=f"Sphere, R = {radius:.3f} mm\nRMS = {sphere.rms_radius_um:,.1f} µm")
+
+    axes[1].scatter(oval.relative_um[:, 0], oval.relative_um[:, 1], s=5, alpha=0.9,
+                    color="#2878b5")
+    axes[1].set(xlim=(-scale, scale), ylim=(-scale, scale),
+                title="Cartesian oval, same scale\n(every ray inside one pixel)")
+
+    # Panel 3 is not a small spot -- it is the double-precision floor. The
+    # scatter is round-off, so label it as such instead of dressing it up in a
+    # physical unit it does not deserve.
+    relative_to_conjugate = oval.rms_radius_um / (abs(z0) * 1e3)
+    axes[2].scatter(oval.relative_um[:, 0], oval.relative_um[:, 1], s=5, alpha=0.9,
+                    color="#2878b5")
+    axes[2].ticklabel_format(style="sci", scilimits=(0, 0))
+    axes[2].set(
+        title=f"Cartesian oval, own scale\nRMS = {oval.rms_radius_um:.1e} µm "
+              f"= {relative_to_conjugate:.0e} of the object distance"
+    )
+
+    for ax in axes:
+        ax.set_aspect("equal")
+        ax.grid(alpha=0.2)
+        ax.set_xlabel("Δx (µm)")
+    axes[0].set_ylabel("Δy (µm)")
+    fig.suptitle(
+        "Same conjugates, same vertex curvature, NA 0.1 — spherical aberration vs none "
+        "(the oval's residual is double-precision round-off, not a spot)",
+        fontsize=11,
+    )
+    fig.tight_layout()
+    fig.savefig(OUT / "stigmatic_spots.png", dpi=150, bbox_inches="tight", facecolor="white")
+    shrink(OUT / "stigmatic_spots.png")
+    print(f"    sphere {sphere.rms_radius_um:.4g} µm  vs  oval {oval.rms_radius_um:.4g} µm"
+          f"  ({sphere.rms_radius_um / oval.rms_radius_um:.2g}x)")
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     render_analysis()
+    render_stigmatic_spots()
     render_examples()
     render_newtonian()
