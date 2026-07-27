@@ -12,8 +12,12 @@ distance from the image point to each refracted ray's line
 (:func:`raytracer.analysis.point_line_distances`) is printed alongside the
 diagram — near zero confirms stigmatism.
 
-The surface's clear aperture (``semidiameter``) clips rays that would land
-outside it, exactly like a real lens edge (see ``raytracer.surfaces.conic``/``cartesian_oval`` aperture clipping).
+The source cone is matched to the surface's clear aperture, the way a real
+system's stop would be, so every emitted ray lands on the surface. That
+aperture has a hard geometric ceiling: the oval is a closed surface whose
+half-width peaks at ``max_usable_height`` (4.858 mm for this conjugate pair)
+and then turns back toward the axis, so rays wider than 7.69 deg from the
+object miss it entirely no matter how large a ``semidiameter`` is declared.
 
 Usage:
     python -m examples.stigmatic_surfaces.cartesian_oval_refractor_2d
@@ -36,10 +40,32 @@ from raytracer.analysis import point_line_distances, rays_by_generation
 
 AMBIENT_N = 1.0
 GLASS_N = 1.7
-APERTURE_DEG = 40.0
-SEMIDIAMETER = 5.0
 Z0 = -30.0  # object position, in air
 ZI = 10.0  # image position, inside the glass
+SEMIDIAMETER = 4.5  # clear aperture, inside the oval's 4.858 geometric ceiling
+
+
+def aperture_filling(oval, semidiameter: float, *, ceiling_deg: float = 45.0) -> float:
+    """Full cone angle (radians) whose marginal ray lands exactly on the rim.
+
+    Solved rather than tabulated: emitting any wider would only add rays that
+    never reach the surface, and the answer moves with the conjugates.
+    """
+
+    from raytracer.optics.ray import Ray
+
+    def height(theta: float) -> float:
+        hit = oval.hit(Ray(origin=[Z0, 0.0], direction=[np.cos(theta), np.sin(theta)]))
+        return abs(hit.point[1]) if hit is not None else np.inf
+
+    lo, hi = 0.0, np.deg2rad(ceiling_deg)
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if height(mid) <= semidiameter:
+            lo = mid
+        else:
+            hi = mid
+    return 2.0 * lo
 
 
 def build_scene(samples: int = 300):
@@ -50,7 +76,7 @@ def build_scene(samples: int = 300):
     source = PointSource(
         origin=np.array([Z0, 0.0]),
         axis_direction=np.array([1.0, 0.0]),
-        aperture=np.deg2rad(APERTURE_DEG),
+        aperture=aperture_filling(oval, SEMIDIAMETER),
         samples=samples,
     )
     tracer = BranchingTracer(
@@ -90,7 +116,16 @@ def main() -> None:
     def color_resolver(node):
         return (0.5, 0.9, 1.0, 0.85) if node.generation == 2 else (1.0, 1.0, 1.0, 0.45)
 
-    viewer.draw_rays(tree, color_resolver=color_resolver, marker_color="crimson", marker_size=6.0)
+    def leaf_extension(node):
+        """Stop the refracted rays a little past the focus, so the crossing is
+        visible without a long meaningless tail running off the view."""
+
+        return np.asarray(node.ray.origin) + np.asarray(node.ray.direction) * 26.0
+
+    viewer.draw_rays(
+        tree, color_resolver=color_resolver, marker_color="crimson", marker_size=6.0,
+        leaf_extension=leaf_extension,
+    )
 
     if "--save" in sys.argv:
         out = Path(sys.argv[sys.argv.index("--save") + 1])
