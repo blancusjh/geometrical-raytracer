@@ -45,7 +45,7 @@ def test_eikonal_opd_is_zero_for_stigmatic_conjugates():
 
 def test_cartesian_oval_3d_is_stigmatic():
     """The 3-D GOTS Cartesian oval (SurfaceRow.cartesian_oval) must give OPD ~ 0,
-    same as the 2-D implicit ovoid it shares its math with."""
+    same as the 2-D implicit oval it shares its math with."""
 
     n0, z0, ni, zi = 1.0, -30.0, 1.7, 10.0
     glass = ConstantIndex("TEST_GLASS", ni)

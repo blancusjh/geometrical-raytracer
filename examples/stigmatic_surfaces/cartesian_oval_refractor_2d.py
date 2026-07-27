@@ -43,7 +43,7 @@ ZI = 10.0  # image position, inside the glass
 
 
 def build_scene(samples: int = 300):
-    ovoid = CartesianOvalSurface(
+    oval = CartesianOvalSurface(
         z0=Z0, zi=ZI, n_exterior=AMBIENT_N, n_interior=GLASS_N,
         semidiameter=SEMIDIAMETER, surface_id="cartesian_oval",
     )
@@ -54,7 +54,7 @@ def build_scene(samples: int = 300):
         samples=samples,
     )
     tracer = BranchingTracer(
-        surfaces=[ovoid],
+        surfaces=[oval],
         config=TraceConfig(
             max_generations=2,  # 1 = incident (air), 2 = refracted (glass)
             allow_reflection=False,
@@ -63,11 +63,11 @@ def build_scene(samples: int = 300):
         ),
     )
     tree = tracer.trace([source])
-    return ovoid, tree, source
+    return oval, tree, source
 
 
 def main() -> None:
-    ovoid, tree, source = build_scene(samples=300)
+    oval, tree, source = build_scene(samples=300)
 
     origins, directions = rays_by_generation(tree, generation=2)
     image_point = np.array([ZI, 0.0])
@@ -84,7 +84,7 @@ def main() -> None:
         x_lims=(-32.0, 14.0), y_lims=(-8.0, 8.0), size=(1400, 700), bgcolor="black",
         render_config=render_config, title="Cartesian oval refractor (stigmatic) — raytracer",
     )
-    viewer.draw_surfaces([ovoid], color="white", width=2.5)
+    viewer.draw_surfaces([oval], color="white", width=2.5)
     viewer.draw_markers(image_point[None, :], color="gold", size=8.0)
 
     def color_resolver(node):

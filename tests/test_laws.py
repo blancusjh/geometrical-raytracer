@@ -27,7 +27,7 @@ def test_refraction_direction_is_unit_and_in_plane():
     out = refract(direction, normal, n1, n2)
     assert out is not None
     assert np.linalg.norm(out) == pytest.approx(1.0, abs=1e-12)
-    # Tangential component scales by n1/n2 (Snell in vector form).
+    # Tangential component scales by n1/n2 (the vector form of the refraction law).
     assert out[0] == pytest.approx(direction[0] * n1 / n2, abs=1e-12)
 
 

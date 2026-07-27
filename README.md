@@ -68,8 +68,7 @@ fig.savefig("layout.png", dpi=180)
 ```
 
 Los notebooks en `examples/notebooks/` reproducen dos objetivos de patente
-completos y sirven como referencia de la API (algunos todavía importan las
-rutas previas a esta reorganización — ver la nota en "Estructura").
+completos y sirven como referencia de la API.
 
 - `us7557996_objective.ipynb` — objetivo litográfico DUV catadióptrico de
   inmersión (NA 1.2, λ=193.368 nm): réplica dígito a dígito del análisis de
@@ -153,9 +152,8 @@ tests/           # verdades analíticas + regresiones de sistema completo
 
 Esta es una reorganización sin retrocompatibilidad: no quedan alias
 diferidos de la estructura anterior (`core`/`geometry`/`sequential`/`nonseq`/
-`physics`/`shapes`).
-Los notebooks en `examples/notebooks/` y `reference/` no se tocaron en este
-pase y pueden requerir actualización de sus imports.
+`physics`/`shapes`). Tests, ejemplos y notebooks están migrados a las rutas
+nuevas.
 
 ## Tests
 

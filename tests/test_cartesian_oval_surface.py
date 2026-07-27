@@ -20,7 +20,7 @@ def test_semidiameter_clips_rays_beyond_the_aperture():
 
 
 def test_drawn_curve_matches_the_traced_fermat_surface():
-    """Regression for the sigma_parametric() placeholder: as_points() must lie
+    """Regression for a previous placeholder curve: as_points() must lie
     on the same surface cartesian_oval_implicit()/hit() actually trace."""
 
     oval = CartesianOvalSurface(z0=Z0, zi=ZI, n_exterior=N0, n_interior=NI)
