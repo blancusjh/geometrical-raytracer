@@ -11,10 +11,10 @@ from typing import Iterable, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..sequential.fields import FieldPoint, chief_ray_slope, trace_from_object
-from ..sequential.surfaces import SurfaceKind
-from ..sequential.system import OpticalSystem
-from ..sequential.trace import SequentialTracer
+from ..propagation.fields import FieldPoint, chief_ray_slope, trace_from_object
+from ..design.rows import SurfaceKind
+from ..design.system import OpticalSystem
+from ..propagation.sequential import SequentialTracer
 from ..analysis.aberrations.chromatic import AxialColor, ChromaticSpots, LateralColor
 from ..analysis.aberrations.distortion import DistortionGrid
 from ..analysis.aberrations.fans import FanData
@@ -360,8 +360,8 @@ def dispersion_figure(
     """Refractive index vs. wavelength for each material.
 
     Each material only needs an ``index(wavelength_um)`` method, so a
-    measured :class:`~raytracer.core.materials.SellmeierMaterial` and an
-    approximate :class:`~raytracer.core.materials.AbbeMaterial` plot the
+    measured :class:`~raytracer.optics.materials.SellmeierMaterial` and an
+    approximate :class:`~raytracer.optics.materials.AbbeMaterial` plot the
     same way; the legend names the model actually behind each curve, since
     the difference matters when reading the chromatic results downstream.
     """

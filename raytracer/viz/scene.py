@@ -43,7 +43,7 @@ class ScreenItem:
     p1: np.ndarray
     color: tuple = (1.0, 0.85, 0.3, 1.0)
     width: float = 3.0
-    screen: object | None = None  # optional Screen2D for hit overlays
+    screen: object | None = None  # optional Screen for hit overlays
 
 
 @dataclass
@@ -126,13 +126,13 @@ class Scene:
     def add_elements(self, elements: Iterable) -> "Scene":
         """Add lenses (filled), mirrors, screens, or bare surfaces."""
 
-        from ..nonseq.detectors import Screen2D
-        from ..nonseq.elements import Lens2D, Mirror2D
+        from ..optics.instruments import Screen
+        from ..optics.elements import Lens, Mirror
 
         for element in elements:
-            if isinstance(element, Lens2D):
+            if isinstance(element, Lens):
                 self.add(LensBodyItem(polygon=element.body_polygon()))
-            elif isinstance(element, Mirror2D):
+            elif isinstance(element, Mirror):
                 self.add(
                     SurfaceItem(
                         polyline=element.face.polyline(),
@@ -140,7 +140,7 @@ class Scene:
                         width=3.0,
                     )
                 )
-            elif isinstance(element, Screen2D):
+            elif isinstance(element, Screen):
                 self.add(ScreenItem(p0=element.p0, p1=element.p1, screen=element))
             else:
                 polyline = element.polyline()

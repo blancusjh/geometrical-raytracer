@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer import EllipseConic, OpenGLViewer, PointSource2D, RayTracer2D, RenderConfig, TraceConfig
+from raytracer import BranchingTracer, EllipseSurface, OpenGLViewer, PointSource, RenderConfig, TraceConfig
 from raytracer.analysis import point_line_distances, rays_by_generation
 
 SEMI_MAJOR = 4.0
@@ -42,16 +42,16 @@ def build_scene(samples: int = 500):
     near_focus = np.array([0.0, 0.0])
     far_focus = np.array([-2.0 * c, 0.0])
 
-    ellipse = EllipseConic(
+    ellipse = EllipseSurface(
         semi_major=a, semi_minor=b, focus=near_focus, surface_id="ellipse_mirror",
     )
-    source = PointSource2D(
+    source = PointSource(
         origin=near_focus,
         axis_direction=np.array([-1.0, 0.0]),
         aperture=np.deg2rad(80.0),
         samples=samples,
     )
-    tracer = RayTracer2D(
+    tracer = BranchingTracer(
         surfaces=[ellipse],
         config=TraceConfig(max_generations=2, allow_reflection=True, allow_refraction=False),
     )

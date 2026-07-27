@@ -21,7 +21,6 @@ Usage:
 from __future__ import annotations
 
 import sys
-from importlib import resources
 from pathlib import Path
 
 import numpy as np
@@ -33,10 +32,10 @@ if str(ROOT) not in sys.path:
 from vispy.color import Color
 
 from raytracer import OpenGLViewer, RenderConfig
-from raytracer.sequential import (
-    FieldPoint, OpticalSystem, SequentialTracer, chief_ray_slope, solve_object_plane,
+from raytracer.design import OpticalSystem
+from raytracer.propagation import (
+    FieldPoint, SequentialTracer, chief_ray_slope, solve_object_plane, trace_from_object,
 )
-from raytracer.sequential.fields import trace_from_object
 from raytracer.viz.plots import DEFAULT_MATERIAL_COLORS
 from raytracer.viz.sag_drawing import (
     lens_fill_mesh,
@@ -68,7 +67,7 @@ def material_rgba(material, alpha=GLASS_ALPHA):
 
 def build_viewer():
     print("[duv_objective_2d] Loading the prescription and tracing 363 exact rays...", flush=True)
-    csv = resources.files("raytracer") / "data" / "US7557996_Fig3_Table3_prescription.csv"
+    csv = ROOT / "data" / "US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
     tracer = SequentialTracer(system)
     solve_object_plane(tracer)

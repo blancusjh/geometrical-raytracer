@@ -20,17 +20,18 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer.nonseq import Lens2D, PointSource2D, Screen2D, TraceConfig
+from raytracer.optics import Lens, PointSource, Screen
+from raytracer.propagation import TraceConfig
 from raytracer.viz.interactive import InteractiveSession
 
 
 def main() -> None:
-    lens = Lens2D.from_radii(
+    lens = Lens.from_radii(
         r1=60.0, r2=-60.0, thickness=9.0, semidiameter=16.0, n=1.5168,
         vertex=(0.0, 0.0), name="lens",
     )
-    screen = Screen2D([171.4, -15.0], [171.4, 15.0])
-    source = PointSource2D(
+    screen = Screen([171.4, -15.0], [171.4, 15.0])
+    source = PointSource(
         origin=np.array([-90.0, 0.0]),
         axis_direction=np.array([1.0, 0.0]),
         aperture=np.deg2rad(18.0),

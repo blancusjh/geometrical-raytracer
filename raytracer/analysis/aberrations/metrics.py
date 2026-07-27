@@ -18,8 +18,8 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from ...sequential.fields import FieldPoint, PupilSampling, trace_pupil
-from ...sequential.trace import SequentialTracer
+from ...propagation.fields import FieldPoint, PupilSampling, trace_pupil
+from ...propagation.sequential import SequentialTracer
 from ..imaging.spots import weighted_mean, weighted_quantile
 
 

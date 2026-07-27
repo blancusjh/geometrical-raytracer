@@ -16,7 +16,7 @@ centroid-based figure alongside the full aberration summary.
   off a curve.
 
 Both use the general 2-D chief-ray solver
-(:func:`raytracer.sequential.fields.chief_ray_slopes`), not the
+(:func:`raytracer.propagation.fields.chief_ray_slopes`), not the
 rotationally-symmetric 1-D shortcut, so they are correct for a genuinely
 off-axis (x, y) field point in any system this tracer can trace.
 """
@@ -27,8 +27,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...sequential.fields import FieldPoint, chief_ray_slopes, trace_from_object
-from ...sequential.trace import SequentialTracer
+from ...propagation.fields import FieldPoint, chief_ray_slopes, trace_from_object
+from ...propagation.sequential import SequentialTracer
 
 
 def _solve_chief_ray(

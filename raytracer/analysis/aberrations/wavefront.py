@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...sequential.fields import PupilTrace
+from ...propagation.fields import PupilTrace
 
 
 @dataclass
@@ -68,7 +68,7 @@ def exit_pupil_wavefront(
 
     Pupil coordinates are arrival directions relative to the chief ray,
     normalized by the image-space NA. Requires OPL tracking, which
-    :class:`~raytracer.sequential.trace.SequentialTracer` always performs.
+    :class:`~raytracer.propagation.sequential.SequentialTracer` always performs.
     """
 
     chief = pupil.chief

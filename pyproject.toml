@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "raytracer"
-version = "0.2.0"
-description = "Optical ray-tracing toolkit: sequential 3-D engine with prescription import and analysis, plus a non-sequential 2-D engine with OpenGL/matplotlib visualization"
+version = "0.3.0"
+description = "Optical ray-tracing toolkit: vectorized sequential 3-D propagation with prescription import and analysis, plus a branching 2-D propagation with OpenGL/matplotlib visualization"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,9 +22,6 @@ dev = ["pytest>=8", "vispy>=0.14", "pyside6>=6.5"]
 
 [tool.setuptools.packages.find]
 include = ["raytracer*"]
-
-[tool.setuptools.package-data]
-raytracer = ["data/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

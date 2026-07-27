@@ -25,29 +25,24 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from raytracer.analysis import spot_data_from_points
-from raytracer.nonseq import (
-    Lens2D,
-    PointSource2D,
-    RayTracer2D,
-    Screen2D,
-    TraceConfig,
-)
+from raytracer.optics import Lens, PointSource, Screen
+from raytracer.propagation import BranchingTracer, TraceConfig
 from raytracer.viz import Scene, show
 
 
 def build_scene(samples: int):
-    lens = Lens2D.from_radii(
+    lens = Lens.from_radii(
         r1=60.0, r2=-60.0, thickness=9.0, semidiameter=16.0, n=1.5168,
         vertex=(0.0, 0.0), name="doublet",
     )
-    screen = Screen2D([171.4, -12.0], [171.4, 12.0])  # conjugate of the source
-    source = PointSource2D(
+    screen = Screen([171.4, -12.0], [171.4, 12.0])  # conjugate of the source
+    source = PointSource(
         origin=np.array([-90.0, 0.0]),
         axis_direction=np.array([1.0, 0.0]),
         aperture=np.deg2rad(18.0),
         samples=samples,
     )
-    tracer = RayTracer2D(
+    tracer = BranchingTracer(
         [*lens.surfaces(), screen],
         TraceConfig(max_generations=4, fresnel_split=False),
     )

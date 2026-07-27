@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.sequential import (
+from raytracer.design import OpticalSystem
+from raytracer.propagation import (
     FieldPoint,
-    OpticalSystem,
     ParaxialModel,
     SequentialTracer,
     chief_ray_slope,
@@ -22,7 +22,7 @@ from raytracer.sequential import (
     trace_from_object,
 )
 
-CSV = Path(__file__).resolve().parents[1] / "raytracer" / "data" / "double_gauss_prescription.csv"
+CSV = Path(__file__).resolve().parents[1] / "data" / "double_gauss_prescription.csv"
 
 
 @pytest.fixture(scope="module")
@@ -83,9 +83,9 @@ def test_less_relative_distortion_than_triplet_at_matching_field(tracer):
     """The symmetric stop position should give markedly less distortion
     than the Cooke triplet's asymmetric one, at the same field angle."""
 
-    from raytracer.sequential import OpticalSystem as _OpticalSystem
+    from raytracer.design import OpticalSystem as _OpticalSystem
 
-    triplet_csv = Path(__file__).resolve().parents[1] / "raytracer" / "data" / "cooke_triplet_prescription.csv"
+    triplet_csv = Path(__file__).resolve().parents[1] / "data" / "cooke_triplet_prescription.csv"
     triplet_system = _OpticalSystem.from_prescription(triplet_csv)
     triplet_tracer = SequentialTracer(triplet_system)
     triplet_conjugate = solve_object_plane(triplet_tracer)

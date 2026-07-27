@@ -1,91 +1,52 @@
-"""Optical ray-tracing toolkit.
+"""Optical ray-tracing toolkit, layered by the nature of each piece:
 
-Two engines share the same primitives:
+- ``math`` — vectors, rigid transforms, and the ray/surface intersection
+  solvers. Knows nothing about optics.
+- ``surfaces`` — the shapes a ray can meet. Each declares its own geometry,
+  implicitly (``f_Sigma(x) = 0``) or parametrically (``x = P(t)``); none
+  solves its own intersection.
+- ``optics`` — light and the laws it obeys: ``Ray``, ``laws`` (reflection,
+  refraction), ``radiometry`` (Fresnel), materials, sources, instruments,
+  elements.
+- ``propagation`` — the algorithms that emit rays, prolong them to a
+  collision, and decide what happens next: ``sequential`` and ``branching``.
+- ``design`` — the data model of a system, independent of any engine.
+- ``io`` — reading/writing a design. ``analysis`` — aberrations and image
+  quality. ``viz`` — matplotlib and OpenGL presentation.
 
-- ``raytracer.sequential`` — sequential 3-D tracer for prescription-defined
-  systems (aspheres, mirrors, stops) with professional analysis.
-- ``raytracer.nonseq`` — non-sequential 2-D tracer producing full
-  reflection/refraction trees (caustics, exploration).
-
-Visualization lives in ``raytracer.viz`` with interchangeable matplotlib
-and OpenGL backends.
+Every public name from ``surfaces``, ``optics``, ``propagation``, ``design``
+and ``io`` is re-exported here for convenience, derived from those packages'
+own ``__all__`` so the lists cannot drift apart.
 """
 
-from .core.frames import LocalFrame
-from .core.materials import AIR, VACUUM, ConstantIndex, MaterialLibrary, default_materials
-from .core.physics import (
-    FresnelCoefficients,
-    SnellResult,
-    fresnel_coefficients,
-    reflect,
-    refract,
-    snell,
-)
-from .core.vectors import direction_from_angle, normalize
-from .geometry.conics2d import (
-    CircleConic,
-    ConicInterface2D,
-    EllipseConic,
-    HyperbolaConic,
-    ParabolaConic,
-)
-from .geometry.ovoid2d import CartesianOvoid2D
-from .nonseq.rays import Intersection2D, Ray2D, RayLabeler, RayNode, RayTree, ray_from_angle
-from .nonseq.sources import ParallelSource2D, PointSource2D, RaySeed, Source2D
-from .nonseq.surfaces import Surface2D
-from .nonseq.tracer import RayTracer2D, TraceConfig
+from . import design, io, optics, propagation, surfaces
+from .design import *  # noqa: F401,F403
+from .io import *  # noqa: F401,F403
+from .math.transforms import RigidTransform
+from .math.vectors import direction_from_angle, normalize
+from .optics import *  # noqa: F401,F403
+from .propagation import *  # noqa: F401,F403
+from .surfaces import *  # noqa: F401,F403
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
-    # core
-    "LocalFrame",
+    "RigidTransform",
     "normalize",
     "direction_from_angle",
-    "SnellResult",
-    "FresnelCoefficients",
-    "snell",
-    "reflect",
-    "refract",
-    "fresnel_coefficients",
-    "ConstantIndex",
-    "MaterialLibrary",
-    "default_materials",
-    "AIR",
-    "VACUUM",
-    # geometry
-    "ConicInterface2D",
-    "EllipseConic",
-    "CircleConic",
-    "ParabolaConic",
-    "HyperbolaConic",
-    "CartesianOvoid2D",
-    # non-sequential engine
-    "Ray2D",
-    "Intersection2D",
-    "RayNode",
-    "RayTree",
-    "RayLabeler",
-    "ray_from_angle",
-    "RaySeed",
-    "Source2D",
-    "PointSource2D",
-    "ParallelSource2D",
-    "Surface2D",
-    "RayTracer2D",
-    "TraceConfig",
+    *surfaces.__all__,
+    *optics.__all__,
+    *propagation.__all__,
+    *design.__all__,
+    *io.__all__,
 ]
 
 
 def __getattr__(name: str):
-    # Lazy imports: the OpenGL viewer pulls in vispy, which should not be a
-    # hard requirement for headless/analysis use.
+    # Lazy: the OpenGL viewer pulls in vispy, which should not be a hard
+    # requirement for headless/analysis use.
     if name in ("OpenGLViewer", "RenderConfig"):
         from .viz.gl.viewer import OpenGLViewer, RenderConfig
 
         return {"OpenGLViewer": OpenGLViewer, "RenderConfig": RenderConfig}[name]
-    if name == "ConicalDioptrique":
-        from .compat import ConicalDioptrique
-
-        return ConicalDioptrique
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

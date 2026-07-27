@@ -20,14 +20,14 @@ Usage:
 from __future__ import annotations
 
 import sys
-from importlib import resources
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer.sequential import OpticalSystem, SequentialTracer, solve_object_plane
+from raytracer.design import OpticalSystem
+from raytracer.propagation import SequentialTracer, solve_object_plane
 from raytracer.viz.gl3d import Viewer3D
 
 FIELDS = [56.0, 62.0, 67.0]
@@ -58,7 +58,7 @@ def _bundle(viewer, tracer, label, sampling, **kw):
 
 def main() -> None:
     print("[duv_objective_3d] Loading the US7557996 prescription (48 surfaces)...", flush=True)
-    csv = resources.files("raytracer") / "data" / "US7557996_Fig3_Table3_prescription.csv"
+    csv = ROOT / "data" / "US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
     tracer = SequentialTracer(system)
     solve_object_plane(tracer)

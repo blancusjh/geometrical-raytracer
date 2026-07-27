@@ -17,13 +17,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.sequential import OpticalSystem, SequentialTracer, solve_object_plane
+from raytracer.design import OpticalSystem
+from raytracer.propagation import SequentialTracer, solve_object_plane
 from raytracer.analysis import seidel_coefficients
 
-US7557996_CSV = Path(__file__).resolve().parents[1] / "raytracer" / "data" / (
+US7557996_CSV = Path(__file__).resolve().parents[1] / "data" / (
     "US7557996_Fig3_Table3_prescription.csv"
 )
-TRIPLET_CSV = Path(__file__).resolve().parents[1] / "raytracer" / "data" / (
+TRIPLET_CSV = Path(__file__).resolve().parents[1] / "data" / (
     "cooke_triplet_prescription.csv"
 )
 

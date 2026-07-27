@@ -2,7 +2,7 @@
 
 An afocal (telescope) system has an effective focal length of infinity —
 equivalently, the ``C`` element of its first-vertex-to-image ABCD matrix
-(:class:`raytracer.sequential.ParaxialModel`) is exactly zero. Rather than
+(:class:`raytracer.propagation.ParaxialModel`) is exactly zero. Rather than
 trust the thin-lens approximation for the objective/eyepiece separation,
 this solves for the gap numerically so the afocal condition holds for the
 *actual* finite-thickness system.
@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from raytracer.sequential import OpticalSystem, ParaxialModel
+from raytracer.design import OpticalSystem
+from raytracer.propagation import ParaxialModel
 
 
 def solve_afocal_gap(

@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.sequential import (
+from raytracer.design import OpticalSystem
+from raytracer.propagation import (
     FieldPoint,
-    OpticalSystem,
     ParaxialModel,
     PupilSampling,
     SequentialTracer,
@@ -16,7 +16,7 @@ from raytracer.sequential import (
     trace_pupil,
 )
 
-CSV = Path(__file__).resolve().parents[1] / "raytracer" / "data" / (
+CSV = Path(__file__).resolve().parents[1] / "data" / (
     "US7557996_Fig3_Table3_prescription.csv"
 )
 
@@ -61,7 +61,7 @@ def test_paraxial_matrix_agrees_with_differential(system, tracer):
 
 def test_field_traces_match_reference_image_heights(tracer):
     # Reference: object y=56 -> image y=14.000000; y=62 -> 15.499997; y=67 -> 16.749999
-    from raytracer.sequential import chief_ray_slope, trace_from_object
+    from raytracer.propagation import chief_ray_slope, trace_from_object
 
     expected = {56.0: 14.000000, 62.0: 15.499997, 67.0: 16.749999}
     for y_obj, y_img in expected.items():

@@ -35,13 +35,14 @@ def _draw(viewer):
 
 class _Node:
     def __init__(self, origin, direction, hit_point):
-        from raytracer.nonseq.rays import Intersection2D, Ray2D
+        from raytracer.optics.ray import Ray
+        from raytracer.surfaces.surface import Intersection
 
-        self.ray = Ray2D(origin, direction)
+        self.ray = Ray(origin, direction)
         self.intersection = (
             None
             if hit_point is None
-            else Intersection2D(
+            else Intersection(
                 point=hit_point, normal=[0.0, 1.0], distance=1.0, surface_id="s"
             )
         )

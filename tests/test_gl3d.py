@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from raytracer.geometry.sag import AsphereProfile
+from raytracer.surfaces.profile import AsphereProfile
 from raytracer.viz.gl3d import lathe
 
 
@@ -37,7 +37,7 @@ def test_lathe_faces_are_valid_and_closed():
 @pytest.mark.gpu
 def test_viewer3d_snapshot_renders_content():
     pytest.importorskip("vispy")
-    from raytracer.sequential import OpticalSystem, SurfaceRow
+    from raytracer.design import OpticalSystem, SurfaceRow
     from raytracer.viz.gl3d import Viewer3D
 
     rows = [SurfaceRow.mirror(radius=-2000.0, thickness=-1000.0, conic=-1.0)]

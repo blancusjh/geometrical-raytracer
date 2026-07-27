@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...sequential.fields import PupilTrace
+from ...propagation.fields import PupilTrace
 
 
 def weighted_mean(values: np.ndarray, weights: np.ndarray) -> float:
@@ -66,7 +66,7 @@ def spot_data_from_points(
 ) -> SpotData:
     """Spot statistics from raw ``(N, 2)`` image-plane points (mm), equal-weighted
     by default. For engines with no :class:`PupilTrace` — e.g. the 2-D
-    non-sequential engine's ``Screen2D.coordinates()`` — this is the same
+    branching propagation's ``Screen.coordinates()`` — this is the same
     convergence metric (RMS radius from the centroid, in um) without needing a
     sequential pupil trace.
     """

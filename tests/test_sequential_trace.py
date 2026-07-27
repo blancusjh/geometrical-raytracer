@@ -3,13 +3,9 @@
 import numpy as np
 import pytest
 
-from raytracer.core.materials import ConstantIndex
-from raytracer.sequential import (
-    OpticalSystem,
-    SequentialTracer,
-    SurfaceRow,
-    TraceStatus,
-)
+from raytracer.design import OpticalSystem, SurfaceRow
+from raytracer.optics.materials import ConstantIndex
+from raytracer.propagation import SequentialTracer, TraceStatus
 
 
 def test_parabola_focuses_collimated_beam_to_machine_precision():

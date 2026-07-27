@@ -1,7 +1,7 @@
 """Image formation through an optical system, two complementary ways.
 
 1. **Geometric (2-D engine):** a bar-pattern object emits weighted ray fans
-   (`ImageSource2D`); a doublet relays it onto a screen whose irradiance
+   (`ImageSource`); a doublet relays it onto a screen whose irradiance
    histogram reveals the magnified, inverted image. The RMS spot radius of
    the on-axis point of that object is also reported, quantifying the
    doublet's (nonzero) aberration.
@@ -27,13 +27,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from raytracer.analysis import BinaryMask, abbe_image, pupil_function, spot_data_from_points
-from raytracer.nonseq import (
-    ImageSource2D,
-    Lens2D,
-    RayTracer2D,
-    Screen2D,
-    TraceConfig,
-)
+from raytracer.optics import ImageSource, Lens, Screen
+from raytracer.propagation import BranchingTracer, TraceConfig
 
 
 def geometric_relay():
@@ -45,11 +40,11 @@ def geometric_relay():
         profile[start : start + 30] = 1.0
     profile[105:135] *= 0.55  # middle bar dimmer: gray levels survive imaging
 
-    lens = Lens2D.from_radii(
+    lens = Lens.from_radii(
         r1=60.0, r2=-60.0, thickness=9.0, semidiameter=16.0, n=1.5168,
         vertex=(0.0, 0.0), name="relay",
     )
-    source = ImageSource2D(
+    source = ImageSource(
         profile=profile,
         p0=np.array([-90.0, -6.0]),
         p1=np.array([-90.0, 6.0]),
@@ -57,9 +52,9 @@ def geometric_relay():
         aperture=np.deg2rad(10.0),
         rays_per_point=31,
     )
-    screen = Screen2D([171.4, -18.0], [171.4, 18.0])
+    screen = Screen([171.4, -18.0], [171.4, 18.0])
 
-    tracer = RayTracer2D([*lens.surfaces(), screen], TraceConfig(max_generations=4))
+    tracer = BranchingTracer([*lens.surfaces(), screen], TraceConfig(max_generations=4))
     tracer.trace([source])
     edges, values = screen.irradiance(bins=180)
     centers = 0.5 * (edges[:-1] + edges[1:]) - screen.length / 2.0

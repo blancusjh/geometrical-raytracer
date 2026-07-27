@@ -1,16 +1,16 @@
-"""Shared GOTS Cartesian-oval math (raytracer.geometry.cartesian_oval)."""
+"""Shared GOTS Cartesian-oval math (raytracer.surfaces.cartesian_oval)."""
 
 import numpy as np
 import pytest
 
-from raytracer.geometry.cartesian_oval import (
+from raytracer.surfaces.cartesian_oval import (
     CartesianOvalProfile,
+    cartesian_oval_implicit,
     cartesian_oval_parametric_curve,
     cartesian_oval_sag_and_slope,
     gots_params,
     max_usable_height,
 )
-from raytracer.geometry.ovoid2d import fermat_ovoid_F
 
 N0, Z0, NI, ZI = 1.0, -30.0, 1.7, 10.0
 
@@ -21,7 +21,7 @@ def test_parametric_curve_satisfies_fermat_condition():
     G, O, T, S = gots_params(N0, Z0, NI, ZI)
     rho = np.linspace(0.01, 5.0, 25)
     z, r = cartesian_oval_parametric_curve(rho, G, O, T, S)
-    residual = [fermat_ovoid_F(zz, rr, Z0, ZI, N0, NI) for zz, rr in zip(z, r)]
+    residual = [cartesian_oval_implicit(zz, rr, Z0, ZI, N0, NI) for zz, rr in zip(z, r)]
     assert np.max(np.abs(residual)) < 1e-8
 
 
@@ -43,7 +43,7 @@ def test_sag_at_height_satisfies_fermat_condition():
     G, O, T, S = gots_params(N0, Z0, NI, ZI)
     h = np.linspace(0.0, 4.0, 15)
     z, _ = cartesian_oval_sag_and_slope(h, G, O, T, S)
-    residual = [fermat_ovoid_F(zz, hh, Z0, ZI, N0, NI) for zz, hh in zip(z, h)]
+    residual = [cartesian_oval_implicit(zz, hh, Z0, ZI, N0, NI) for zz, hh in zip(z, h)]
     assert np.max(np.abs(residual)) < 1e-8
 
 
