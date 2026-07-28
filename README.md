@@ -498,8 +498,8 @@ medida leída de `data/materials/formlabs_resins.csv` y su color axial declarado
 ## Tests
 
 ```bash
-pytest                                    # 228 tests
-xvfb-run -a pytest                        # 232, incluidos los de contexto OpenGL
+pytest                                    # 229 tests
+xvfb-run -a pytest                        # 233, incluidos los de contexto OpenGL
 ```
 
 Las verdades de referencia son analíticas donde existen: conjugados de

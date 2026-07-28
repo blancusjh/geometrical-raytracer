@@ -56,9 +56,26 @@ def differential_conjugates(
 
 
 def solve_object_plane(tracer: SequentialTracer, *, assign: bool = True) -> ConjugateSolution:
-    """Convenience wrapper that stores the recovered plane on the system."""
+    """Recover the object plane and store it on the system.
+
+    For all-refractive systems focused near infinity the B = 0 condition
+    is degenerate: the sign of the recovered ``object_z`` hinges on
+    whether the tabulated image plane sits a fraction of a millimetre
+    before or after the back focal plane. This wrapper enforces the
+    physical convention — object in front, ``object_z < 0`` — whenever
+    the raw solution places a virtual object far behind the system.
+    """
 
     solution = differential_conjugates(tracer)
+    system = tracer.system
+    system_length = system.image_z - float(system.vertices[0])
+    if (not system.mirror_indices
+            and abs(solution.object_z) > 50 * max(system_length, 1.0)
+            and solution.object_z > system.image_z):
+        solution = ConjugateSolution(
+            object_z=-abs(solution.object_z),
+            magnification=-abs(solution.magnification),
+        )
     if assign:
         tracer.system.object_z = solution.object_z
     return solution
