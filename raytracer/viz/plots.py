@@ -11,7 +11,7 @@ from typing import Iterable, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..propagation.fields import FieldPoint, chief_ray_slope, trace_from_object
+from ..propagation.fields import FieldPoint, chief_ray_slopes, trace_from_object
 from ..design.rows import SurfaceKind
 from ..design.system import OpticalSystem
 from ..propagation.sequential import SequentialTracer
@@ -113,7 +113,7 @@ def layout_figure(
 
     if fields:
         for field_y, color in zip(fields, FIELD_COLORS):
-            sy0 = chief_ray_slope(tracer, FieldPoint(y=field_y))
+            _, sy0 = chief_ray_slopes(tracer, FieldPoint(y=field_y))
             for delta in np.linspace(-fan_half_slope, fan_half_slope, fan_count):
                 result = trace_from_object(
                     tracer, (0.0, field_y), (0.0, sy0 + delta), keep_path=True
@@ -149,12 +149,15 @@ def spots_figure(
     airy_radius_um: float | None = None,
     figsize_per_panel: float = 4.0,
     colors: Sequence | None = None,
+    titles: Sequence[str] | None = None,
 ) -> plt.Figure:
     """Spot diagrams recentred on the weighted centroid, one panel per field.
 
     Pass ``colors=FIELD_COLORS`` (one entry per field, same order as *spots*)
     so each panel keeps the color its field's rays carry in
     :func:`layout_figure` — the default leaves matplotlib's single color.
+    ``titles`` names each panel (the RMS line is always appended); the
+    default titles panels by object height.
     """
 
     spots = list(spots)
@@ -165,16 +168,15 @@ def spots_figure(
     )
     if len(spots) == 1:
         axes = [axes]
-    for spot, ax, color in zip(spots, axes, colors):
+    for k, (spot, ax, color) in enumerate(zip(spots, axes, colors)):
         ax.scatter(spot.relative_um[:, 0], spot.relative_um[:, 1], s=4, alpha=0.55, color=color)
         if airy_radius_um is not None:
             circle = plt.Circle(
                 (0, 0), airy_radius_um, fill=False, color="#d62728", ls="--", lw=1.0
             )
             ax.add_patch(circle)
-        ax.set_title(
-            f"Object y={spot.field_y:.0f} mm\narea-weighted RMS={spot.rms_radius_um:.3f} µm"
-        )
+        head = titles[k] if titles is not None else f"Object y={spot.field_y:.0f} mm"
+        ax.set_title(f"{head}\narea-weighted RMS={spot.rms_radius_um:.4g} µm")
         ax.set_aspect("equal")
         ax.grid(alpha=0.2)
         ax.set_xlabel("Δx (µm)")
