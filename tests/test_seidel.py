@@ -22,10 +22,10 @@ from raytracer.propagation import SequentialTracer, solve_object_plane
 from raytracer.analysis import seidel_coefficients
 
 US7557996_CSV = Path(__file__).resolve().parents[1] / "data" / (
-    "US7557996_Fig3_Table3_prescription.csv"
+    "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
 )
 TRIPLET_CSV = Path(__file__).resolve().parents[1] / "data" / (
-    "cooke_triplet_prescription.csv"
+    "optical_systems/photographic/cooke_triplet_prescription.csv"
 )
 
 

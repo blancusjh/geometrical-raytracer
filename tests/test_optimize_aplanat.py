@@ -17,7 +17,7 @@ from raytracer.optimize import aplanatism_residuals, optimize_aplanat
 INF = float("inf")
 
 CEMENTED = dict(
-    indices=(1.0, 1.517122, 1.670591, 1.851280, 1.0),
+    media=(1.0, 1.517122, 1.670591, 1.851280, 1.0),
     vertices=(0.0, 15.0, 25.0, 35.0),
     semidiameter=10.0,
 )
@@ -43,7 +43,7 @@ def test_cemented_triplet_reaches_the_isoplanatic_regime():
 
 def test_all_infinite_intermediates_leave_nothing_to_vary():
     train = StigmaticTrain(
-        indices=(1.0, 1.5, 1.0),
+        media=(1.0, 1.5, 1.0),
         vertices=(0.0, 8.0),
         conjugates=(-60.0, INF, 70.0),
     )

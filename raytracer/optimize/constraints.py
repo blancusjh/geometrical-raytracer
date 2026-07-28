@@ -194,10 +194,10 @@ class TargetMagnification(Constraint):
 class AxialColor(Constraint):
     """Zero axial color: other wavelengths must focus on the design plane.
 
-    Needs a train built with :meth:`StigmaticTrain.from_materials` — the
-    residuals are the axial focus shifts (mm) of a marginal ray retraced at
-    each probe wavelength through the *real* dispersive materials, relative
-    to the design image plane. The optimizer can genuinely null them: the
+    Needs a train with at least one dispersive medium — the residuals are
+    the axial focus shifts (mm) of a marginal ray retraced at each probe
+    wavelength through the *real* dispersive media, relative to the design
+    image plane. The optimizer can genuinely null them: the
     intermediate conjugates set the power distribution over the glasses,
     which is exactly the freedom a classic achromat spends. The surface
     shapes stay rigorously stigmatic at the design wavelength only.
@@ -225,11 +225,10 @@ class AxialColor(Constraint):
         from ..propagation.sequential import SequentialTracer
 
         train = context.train
-        if train.materials is None:
+        if not train.is_dispersive:
             raise TypeError(
-                "AxialColor needs a train built from real materials "
-                "(StigmaticTrain.from_materials); a constant-index train "
-                "has no dispersion to constrain"
+                "AxialColor needs at least one dispersive medium; a train of "
+                "constant-index media has no chromatic aberration to constrain"
             )
         sine = self.marginal_fraction * context.na_object_sine
         slope = sine / np.sqrt(1.0 - sine * sine)
@@ -237,7 +236,7 @@ class AxialColor(Constraint):
         for i, wavelength in enumerate(self.wavelengths):
             system = OpticalSystem(
                 train.rows(),
-                object_space=train.materials[0],
+                object_space=train.media[0],
                 object_z=train.conjugates[0],
                 wavelength_um=wavelength,
             )

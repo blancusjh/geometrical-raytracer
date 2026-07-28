@@ -11,16 +11,16 @@ from raytracer.propagation import SequentialTracer, solve_object_plane
 from raytracer.analysis import axial_color, lateral_color
 
 TRIPLET_CSV = Path(__file__).resolve().parents[1] / "data" / (
-    "cooke_triplet_prescription.csv"
+    "optical_systems/photographic/cooke_triplet_prescription.csv"
 )
 US7557996_CSV = Path(__file__).resolve().parents[1] / "data" / (
-    "US7557996_Fig3_Table3_prescription.csv"
+    "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
 )
 
 F_LINE, D_LINE, C_LINE = 0.48613, 0.58756, 0.65627
 
 SINGLET_CSV = Path(__file__).resolve().parents[1] / "data" / (
-    "sf11_singlet_prescription.csv"
+    "optical_systems/elements/sf11_singlet_prescription.csv"
 )
 SINGLET_OBJECT_Z = -1.0e5   # the far object both example lenses were solved for
 SINGLET_NA = 6.25 / abs(SINGLET_OBJECT_Z)

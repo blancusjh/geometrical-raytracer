@@ -5,7 +5,7 @@ la ecuación de cada superficie, sin aproximación paraxial— a través de
 sistemas ópticos reales, y mide lo que sale: aberraciones, distorsión,
 frente de onda, PSF, formación de imagen.
 
-**11.500 líneas · 9 paquetes en cadena estricta · 208 tests contra verdades
+**12.000 líneas · 9 paquetes en cadena estricta · 224 tests contra verdades
 analíticas · dos objetivos de patente replicados dígito a dígito · lentes
 estigmáticas y aplanáticas por superficies de Descartes, con optimizador de
 restricciones enchufables y materiales reales**
@@ -71,7 +71,7 @@ from raytracer.propagation import (
 from raytracer.analysis import spot_data
 
 system = OpticalSystem.from_prescription(
-    Path("data/US7557996_Fig3_Table3_prescription.csv")
+    Path("data/optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv")
 )
 tracer = SequentialTracer(system)
 solve_object_plane(tracer)          # recupera el plano objeto imponiendo B = 0
@@ -117,7 +117,7 @@ from raytracer.propagation import SequentialTracer, solve_object_plane
 from raytracer.viz import plots
 
 tracer = SequentialTracer(
-    OpticalSystem.from_prescription(Path("data/cooke_triplet_prescription.csv"))
+    OpticalSystem.from_prescription(Path("data/optical_systems/photographic/cooke_triplet_prescription.csv"))
 )
 conjugate = solve_object_plane(tracer)
 half = abs(conjugate.object_z) * np.tan(np.deg2rad(10.0))   # ±10° de semicampo
@@ -224,7 +224,7 @@ from raytracer.optimize import optimize_aplanat
 # La familia: tres vidrios cementados, 4 superficies de Descartes,
 # conjugados -100 -> +90. Estigmática para cualquier (d1, d2, d3).
 train = StigmaticTrain(
-    indices=(1.0, 1.517122, 1.670591, 1.851280, 1.0),
+    media=(1.0, 1.517122, 1.670591, 1.851280, 1.0),   # aire y tres vidrios
     vertices=(0.0, 15.0, 25.0, 35.0),
     conjugates=(-100.0, -150.0, -600.0, 450.0, 90.0),
     semidiameter=10.0,
@@ -301,12 +301,12 @@ Esas son las aristas reales del grafo, leídas del AST de cada módulo:
 | **`math`** | — | 463 |
 | **`surfaces`** | `math` | 1157 |
 | **`optics`** | `math`, `surfaces` | 973 |
-| **`design`** | `surfaces`, `optics` | 739 |
+| **`design`** | `surfaces`, `optics` | 727 |
 | **`propagation`** | `math`, `surfaces`, `optics`, `design` | 1094 |
-| **`io`** | `surfaces`, `optics`, `design` | 306 |
+| **`io`** | `surfaces`, `optics`, `design` | 424 |
 | **`analysis`** | `design`, `propagation` | 2302 |
-| **`optimize`** | `design`, `analysis` | 564 |
-| **`viz`** | `surfaces`, `optics`, `design`, `propagation`, `analysis` | 3863 |
+| **`optimize`** | `design`, `analysis` | 563 |
+| **`viz`** | `surfaces`, `optics`, `design`, `propagation`, `analysis` | 4123 |
 
 `tests/test_architecture.py` recorre el AST de cada módulo y lo comprueba, de
 modo que la cadena es una afirmación verificada en cada `pytest`.
@@ -339,8 +339,15 @@ cónica, coeficientes asféricos, tipo de superficie. `OpticalSystem` es la
 secuencia completa, con los vértices acumulados, los índices a cada lado de
 cada superficie, el índice del diafragma y los planos objeto e imagen.
 `StigmaticTrain` es la familia paramétrica de lentes ovoides estigmáticas
-(ver abajo). Describe **qué es** un sistema y contiene cero lógica de
-propagación: un diseño existe antes de que exista un motor que lo trace.
+(ver abajo), declarada como lo que ontológicamente es: **medios que llenan
+el espacio, superficies que los delimitan** — `media=(aire, vidrio, aire)`,
+donde cada medio es un `Material` a la fidelidad que haga falta: el medio
+de índice constante (`ConstantIndex`; un float basta) o una ley de
+dispersión real, con las formas construidas del índice principal en la
+longitud de onda de diseño. Los espejos son superficies puras (no
+delimitan medio nuevo). Describe **qué es** un sistema y contiene cero
+lógica de propagación: un diseño existe antes de que exista un motor que
+lo trace.
 
 **`propagation` — los algoritmos.** El único lugar que gobierna qué hace un
 rayo después de chocar. `sequential` vectoriza N rayos por M superficies en
@@ -355,7 +362,7 @@ objeto imponiendo B = 0 en la matriz del sistema) y `differential_conjugates`;
 formatos en un registro (`FORMAT_READERS`, `FORMAT_WRITERS`), y catálogos de
 materiales como archivos de datos (`read_materials`: modelos constant /
 abbe / cauchy / sellmeier por fila de CSV — así entra la resina de
-impresión de `data/formlabs_resins.csv`). El formato de archivo es una
+impresión de `data/materials/formlabs_resins.csv`). El formato de archivo es una
 naturaleza distinta de lo que un sistema es.
 
 **`analysis` — lo que se mide sobre un sistema ya trazado.** Partido en dos
@@ -376,10 +383,16 @@ que produce su bloque de residuales sobre trazas compartidas en caché, y
 cualquier lista de ellas forma el objetivo de `optimize_train`. Una
 restricción nueva es una subclase de `Constraint` con `size` y `residuals`.
 
-**`viz` — presentación.** `plots` para las figuras matplotlib, `scene` para
-la escena neutral de ítems, `gl/` para el visor OpenGL (cámara, shaders,
-renderers, ventana) e `interactive` para arrastrar fuente, lente y pantalla
-en vivo. Es el paquete más grande y el único del que nada depende.
+**`viz` — presentación.** `plots` para las figuras matplotlib, `bodies`
+para los cuerpos de lente deducidos de la secuencia de medios — qué par de
+superficies encierra qué medio se *deduce* de la descripción estándar
+(aire → Σ1 → vidrio → Σ2 → aire), el contorno se cierra en la intersección
+de las caras cuando se cruzan bajo la apertura (la unión Ω del generador de
+STL del autor) y cada cuerpo se colorea por densidad óptica: a mayor
+índice, azul más oscuro, automáticamente —, `scene` para la escena neutral
+de ítems, `gl/` para el visor OpenGL (cámara, shaders, renderers, ventana)
+e `interactive` para arrastrar fuente, lente y pantalla en vivo. Es el
+paquete más grande y el único del que nada depende.
 
 ### Tres decisiones que explican el resto
 
@@ -471,14 +484,14 @@ y proyector de 4 lentes — cada uno optimizado con las restricciones
 enchufables (`Aplanatism`, `Distortion`, `FlatImageSurface`,
 `TargetMagnification`, `AxialColor`), y cierra con el microscopio
 imprimible: tres lentes de resina Formlabs Clear V4, con su dispersión
-medida leída de `data/formlabs_resins.csv` y su color axial declarado
+medida leída de `data/materials/formlabs_resins.csv` y su color axial declarado
 (la búsqueda multiarranque vive en `docs/design_systems.py`).
 
 ## Tests
 
 ```bash
-pytest                                    # 204 tests
-xvfb-run -a pytest                        # 208, incluidos los de contexto OpenGL
+pytest                                    # 220 tests
+xvfb-run -a pytest                        # 224, incluidos los de contexto OpenGL
 ```
 
 Las verdades de referencia son analíticas donde existen: conjugados de
@@ -498,9 +511,13 @@ de dependencias entre paquetes se comprueba leyendo el AST de cada módulo.
 
 ```
 raytracer/     el paquete
-data/          prescripciones y catálogos de materiales en CSV -- datos puros
+data/          datos puros, organizados por naturaleza:
+  materials/         catálogos de materiales (formlabs_resins.csv)
+  optical_systems/   prescripciones y diseños por clase de sistema:
+    lithography/ photographic/ elements/          (prescripciones CSV)
+    telescopes/ microscopes/ projectors/ ultrawide/  (trenes JSON)
 examples/      demos ejecutables por categoría + notebooks de réplica de patentes
-docs/          imágenes del README y el script que las regenera
+docs/          imágenes del README, el script que las regenera y las búsquedas de diseño
 reference/     notebooks y módulo de referencia originales
 tests/         verdades analíticas + regresiones de sistema completo
 ```

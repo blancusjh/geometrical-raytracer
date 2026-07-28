@@ -1,0 +1,50 @@
+{
+ "kind": "stigmatic_train",
+ "comment": "The printable microscope: three lenses of Formlabs Clear V4 (data/materials/formlabs_resins.csv), 10x NA 0.15. Distortion 0.4/0.5 %, blur 18.6 um vs 24 um Airy; single-material axial color F/C -12.7/+9.2 mm - use a narrowband LED near the d line.",
+ "wavelength_um": 0.58756,
+ "media": [
+  "AIR",
+  "FORMLABS_CLEAR_V4",
+  "AIR",
+  "FORMLABS_CLEAR_V4",
+  "AIR",
+  "FORMLABS_CLEAR_V4",
+  "AIR"
+ ],
+ "constant_media": [
+  true,
+  false,
+  true,
+  false,
+  true,
+  false,
+  true
+ ],
+ "indices_at_design": [
+  1.0,
+  1.5083997601871386,
+  1.0,
+  1.5083997601871386,
+  1.0,
+  1.5083997601871386,
+  1.0
+ ],
+ "vertices": [
+  0.0,
+  5.0,
+  9.0,
+  14.0,
+  18.0,
+  24.0
+ ],
+ "conjugates": [
+  -8.0,
+  -13.2626,
+  3499.8,
+  3499.99,
+  -2074.5,
+  -8.08239,
+  160.0
+ ],
+ "semidiameter": 7.0
+}

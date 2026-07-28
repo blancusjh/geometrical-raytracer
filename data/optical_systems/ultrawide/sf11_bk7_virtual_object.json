@@ -1,0 +1,40 @@
+{
+ "kind": "stigmatic_train",
+ "comment": "Ultrawide with a VIRTUAL object (d0 = +8): every ray aimed at the virtual point focuses exactly, verified to 55 deg; sine condition held to 1.7 % RMS. Conjugates at full precision: the 55 deg marginal ray sits at the usable-branch edge.",
+ "wavelength_um": 0.58756,
+ "media": [
+  "AIR",
+  "N-SF11",
+  "AIR",
+  "N-BK7",
+  "AIR"
+ ],
+ "constant_media": [
+  true,
+  false,
+  true,
+  false,
+  true
+ ],
+ "indices_at_design": [
+  1.0,
+  1.7847202174912626,
+  1.0,
+  1.5168001097398938,
+  1.0
+ ],
+ "vertices": [
+  0.0,
+  7.0,
+  11.0,
+  18.0
+ ],
+ "conjugates": [
+  8.0,
+  27.051444733688673,
+  -15.69092416994306,
+  -12.441143567693857,
+  70.0
+ ],
+ "semidiameter": 22.0
+}

@@ -23,7 +23,7 @@ from raytracer.propagation import (
     trace_from_object,
 )
 
-CSV = Path(__file__).resolve().parents[1] / "data" / "cooke_triplet_prescription.csv"
+CSV = Path(__file__).resolve().parents[1] / "data" / "optical_systems/photographic/cooke_triplet_prescription.csv"
 
 
 @pytest.fixture(scope="module")

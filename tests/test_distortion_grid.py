@@ -9,7 +9,7 @@ from raytracer.design import OpticalSystem
 from raytracer.propagation import SequentialTracer, solve_object_plane
 from raytracer.analysis import distortion_grid
 
-CSV = Path(__file__).resolve().parents[1] / "data" / "cooke_triplet_prescription.csv"
+CSV = Path(__file__).resolve().parents[1] / "data" / "optical_systems/photographic/cooke_triplet_prescription.csv"
 
 
 @pytest.fixture(scope="module")

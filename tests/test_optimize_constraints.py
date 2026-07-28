@@ -16,7 +16,7 @@ from raytracer.optimize import (
 )
 
 CEMENTED = dict(
-    indices=(1.0, 1.517122, 1.670591, 1.851280, 1.0),
+    media=(1.0, 1.517122, 1.670591, 1.851280, 1.0),
     vertices=(0.0, 15.0, 25.0, 35.0),
     semidiameter=10.0,
 )

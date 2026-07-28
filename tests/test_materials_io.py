@@ -1,5 +1,5 @@
 """Material catalogs from data files (``raytracer.io.materials_csv``) and
-real-material stigmatic trains (``StigmaticTrain.from_materials``)."""
+stigmatic trains whose media are real dispersive materials."""
 
 from pathlib import Path
 
@@ -18,7 +18,7 @@ from raytracer.optics.materials import (
 from raytracer.propagation import SequentialTracer, trace_from_object
 
 DATA = Path(__file__).resolve().parents[1] / "data"
-FORMLABS = DATA / "formlabs_resins.csv"
+FORMLABS = DATA / "materials/formlabs_resins.csv"
 
 #: The manufacturer's measured table the shipped Cauchy fit was built from
 #: ("Optical properties of selected Formlabs SLA resins", Clear Resin V4).
@@ -74,8 +74,8 @@ def test_comment_lines_are_ignored(tmp_path):
 
 @pytest.fixture(scope="module")
 def bk7_train() -> StigmaticTrain:
-    return StigmaticTrain.from_materials(
-        (AIR, sellmeier_glass("N-BK7"), AIR),
+    return StigmaticTrain(
+        media=(AIR, sellmeier_glass("N-BK7"), AIR),
         vertices=(0.0, 8.0),
         conjugates=(-60.0, 300.0, 60.0),
         wavelength_um=0.58756,
@@ -92,10 +92,11 @@ def _axial_focus_z(train: StigmaticTrain, wavelength_um: float) -> float:
     return float(result.image_point[2] - result.image_point[1] * d[2] / d[1])
 
 
-def test_from_materials_derives_indices_at_the_design_wavelength(bk7_train):
+def test_indices_are_derived_at_the_design_wavelength(bk7_train):
     assert bk7_train.indices[1] == pytest.approx(
         sellmeier_glass("N-BK7").index(0.58756)
     )
+    assert bk7_train.is_dispersive
     assert bk7_train.to_system().wavelength_um == 0.58756
 
 
@@ -105,29 +106,33 @@ def test_material_train_is_exact_at_design_wavelength_and_chromatic_off_it(bk7_t
     assert shift_fc > 0.5  # a BK7 singlet's real axial color, in mm
 
 
-def test_with_conjugates_preserves_the_materials(bk7_train):
+def test_with_conjugates_preserves_the_media(bk7_train):
     moved = bk7_train.with_conjugates([250.0])
-    assert moved.materials == bk7_train.materials
+    assert moved.media == bk7_train.media
     assert moved.wavelength_um == bk7_train.wavelength_um
     assert moved.indices == bk7_train.indices
 
 
-def test_mismatched_material_index_is_rejected():
-    with pytest.raises(ValueError, match="from_materials"):
-        StigmaticTrain(
-            indices=(1.0, 1.9, 1.0),
-            vertices=(0.0, 8.0),
-            conjugates=(-60.0, 300.0, 60.0),
-            materials=(AIR, sellmeier_glass("N-BK7"), AIR),
-            wavelength_um=0.58756,
-        )
+def test_float_media_normalize_to_constant_index():
+    from raytracer.optics.materials import ConstantIndex
+
+    train = StigmaticTrain(
+        media=(1.0, 1.5, 1.0), vertices=(0.0, 8.0), conjugates=(-60.0, 300.0, 60.0)
+    )
+    assert all(isinstance(m, ConstantIndex) for m in train.media)
+    assert train.media[0] is AIR
+    assert not train.is_dispersive
+    assert train.indices == (1.0, 1.5, 1.0)
 
 
-def test_materials_without_wavelength_are_rejected():
-    with pytest.raises(ValueError, match="wavelength_um"):
+def test_equal_index_media_at_design_wavelength_are_rejected():
+    """N-BK7 against a constant-index medium tuned to its d-line index: the
+    surface would separate nothing at the design wavelength."""
+
+    n_bk7_d = sellmeier_glass("N-BK7").index(0.58756)
+    with pytest.raises(ValueError, match="index step"):
         StigmaticTrain(
-            indices=(1.0, 1.5168, 1.0),
+            media=(sellmeier_glass("N-BK7"), n_bk7_d, 1.0),
             vertices=(0.0, 8.0),
             conjugates=(-60.0, 300.0, 60.0),
-            materials=(AIR, sellmeier_glass("N-BK7"), AIR),
         )

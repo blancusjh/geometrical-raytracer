@@ -22,7 +22,7 @@ from raytracer.propagation import (
     trace_from_object,
 )
 
-CSV = Path(__file__).resolve().parents[1] / "data" / "double_gauss_prescription.csv"
+CSV = Path(__file__).resolve().parents[1] / "data" / "optical_systems/photographic/double_gauss_prescription.csv"
 
 
 @pytest.fixture(scope="module")
@@ -85,7 +85,7 @@ def test_less_relative_distortion_than_triplet_at_matching_field(tracer):
 
     from raytracer.design import OpticalSystem as _OpticalSystem
 
-    triplet_csv = Path(__file__).resolve().parents[1] / "data" / "cooke_triplet_prescription.csv"
+    triplet_csv = Path(__file__).resolve().parents[1] / "data" / "optical_systems/photographic/cooke_triplet_prescription.csv"
     triplet_system = _OpticalSystem.from_prescription(triplet_csv)
     triplet_tracer = SequentialTracer(triplet_system)
     triplet_conjugate = solve_object_plane(triplet_tracer)

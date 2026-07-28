@@ -64,8 +64,7 @@ def telescope():
     t0 = time.time()
 
     def build(d):
-        return StigmaticTrain.from_materials(
-            (AIR, BK7, AIR, F2, AIR), vertices=(0.0, 9.0, 13.0, 19.0),
+        return StigmaticTrain(media=(AIR, BK7, AIR, F2, AIR), vertices=(0.0, 9.0, 13.0, 19.0),
             conjugates=(-1.0e6, *d, 400.0), wavelength_um=WL, semidiameter=26.0)
 
     na = 2.6e-5
@@ -100,8 +99,7 @@ def microscope():
     t0 = time.time()
 
     def build(d):
-        return StigmaticTrain.from_materials(
-            (AIR, LAK21, AIR, SF11, AIR, BK7, AIR),
+        return StigmaticTrain(media=(AIR, LAK21, AIR, SF11, AIR, BK7, AIR),
             vertices=(0.0, 4.5, 8.0, 12.0, 16.0, 22.0),
             conjugates=(-6.0, *d, 170.0), wavelength_um=WL, semidiameter=7.0)
 
@@ -140,8 +138,7 @@ def projector():
     t0 = time.time()
 
     def build(d):
-        return StigmaticTrain.from_materials(
-            (AIR, SK16, AIR, F2, AIR, BK7, AIR, SK4, AIR),
+        return StigmaticTrain(media=(AIR, SK16, AIR, F2, AIR, BK7, AIR, SK4, AIR),
             vertices=(0.0, 6.0, 10.0, 14.0, 18.0, 24.0, 28.0, 34.0),
             conjugates=(-40.0, *d, 2000.0), wavelength_um=WL, semidiameter=16.0)
 
@@ -221,8 +218,7 @@ def ultrawide():
     t0 = time.time()
 
     def build(d):
-        return StigmaticTrain.from_materials(
-            (AIR, SF11, AIR, BK7, AIR), vertices=(0.0, 7.0, 11.0, 18.0),
+        return StigmaticTrain(media=(AIR, SF11, AIR, BK7, AIR), vertices=(0.0, 7.0, 11.0, 18.0),
             conjugates=(8.0, *d, 70.0), wavelength_um=WL, semidiameter=22.0)
 
     sines = np.sin(np.deg2rad(np.linspace(5.0, 55.0, 11)))

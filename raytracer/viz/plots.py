@@ -21,6 +21,7 @@ from ..analysis.aberrations.fans import FanData
 from ..analysis.aberrations.wavefront import WavefrontSamples
 from ..analysis.aberrations.zernike import ZernikeExpansion
 from ..analysis.imaging.spots import SpotData
+from .bodies import dense_gaps, element_outline, index_color
 from .sag_drawing import sample_profile_curve
 
 DEFAULT_MATERIAL_COLORS = {
@@ -29,11 +30,6 @@ DEFAULT_MATERIAL_COLORS = {
     "HIINDEX1": ("#ffe29a", "#c47f00"),
     "HIINDEX2": ("#ffb3a1", "#c1440e"),
 }
-_FALLBACK_COLORS = [
-    ("#f2c6de", "#a4508b"),
-    ("#d8e2dc", "#5f7470"),
-    ("#ffd7ba", "#bc6c25"),
-]
 FIELD_COLORS = ["#d62728", "#2ca02c", "#1f77b4", "#9467bd", "#8c564b"]
 
 
@@ -48,7 +44,14 @@ def layout_figure(
     figsize: tuple[float, float] = (14, 7),
     title: str | None = None,
 ) -> plt.Figure:
-    """Closed lens layout with filled bodies, mirrors, and meridional rays."""
+    """Closed lens layout with filled bodies, mirrors, and meridional rays.
+
+    Bodies are deduced from the media sequence (every inter-surface gap
+    with index above 1) and colored by optical density via
+    :func:`raytracer.viz.bodies.index_color` — denser media draw darker,
+    automatically. ``material_colors`` overrides individual media by name
+    (``DEFAULT_MATERIAL_COLORS`` keeps the README's DUV palette).
+    """
 
     system = tracer.system
     colors = dict(DEFAULT_MATERIAL_COLORS)
@@ -56,28 +59,21 @@ def layout_figure(
         colors.update(material_colors)
     fig, ax = plt.subplots(figsize=figsize)
 
-    fallback = iter(_FALLBACK_COLORS * 10)
     solid_signatures: set[tuple[float, float]] = set()
-    for i, j, material in system.solid_elements():
+    for i, j, n, material in dense_gaps(system):
         for k in (i, j):
             solid_signatures.add(
                 (round(float(system.vertices[k]), 6), round(system.rows[k].radius, 6))
             )
-        first, second = system.rows[i], system.rows[j]
-        semi = min(
-            s for s in (first.semidiameter, second.semidiameter) if s is not None
-        ) if (first.semidiameter or second.semidiameter) else 50.0
-        z1, h = sample_profile_curve(system, i, semidiameter=semi)
-        z2, _ = sample_profile_curve(system, j, semidiameter=semi)
-        face, edge = colors.get(material) or next(fallback)
-        colors.setdefault(material, (face, edge))
+        outline, _, _ = element_outline(system, i, j)
+        face, edge = colors.get(material.upper()) or index_color(n)
         ax.fill(
-            np.r_[z1, z2[::-1]],
-            np.r_[h, h[::-1]],
+            outline[:, 0],
+            outline[:, 1],
             facecolor=face,
             edgecolor=edge,
             lw=1.0,
-            alpha=0.58,
+            alpha=0.66,
             zorder=1,
         )
 

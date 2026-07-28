@@ -96,7 +96,7 @@ def render_analysis() -> None:
 
     print("matplotlib analysis figures:")
     system = OpticalSystem.from_prescription(
-        ROOT / "data" / "US7557996_Fig3_Table3_prescription.csv"
+        ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
     )
     tracer = SequentialTracer(system)
     solve_object_plane(tracer)
@@ -135,8 +135,8 @@ def render_distortion_grids() -> None:
     print("distortion grids:")
     #: (prescription, panel title, object half-field in degrees, exaggeration)
     SYSTEMS = [
-        ("cooke_triplet_prescription.csv", "Cooke triplet, EFL 50 mm", 10.0, 25.0),
-        ("double_gauss_prescription.csv", "Double Gauss, EFL 99 mm", 20.6, 15.0),
+        ("optical_systems/photographic/cooke_triplet_prescription.csv", "Cooke triplet, EFL 50 mm", 10.0, 25.0),
+        ("optical_systems/photographic/double_gauss_prescription.csv", "Double Gauss, EFL 99 mm", 20.6, 15.0),
     ]
 
     grids, titles, exaggerations = [], [], []
@@ -158,7 +158,7 @@ def render_distortion_grids() -> None:
     # mm, past the ~68 mm usable field radius: those are the vignetted points.
     tracer = SequentialTracer(
         OpticalSystem.from_prescription(
-            ROOT / "data" / "US7557996_Fig3_Table3_prescription.csv"
+            ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
         )
     )
     solve_object_plane(tracer)

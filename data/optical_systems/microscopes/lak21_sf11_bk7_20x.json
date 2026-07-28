@@ -1,0 +1,50 @@
+{
+ "kind": "stigmatic_train",
+ "comment": "20x NA 0.25 microscope objective, working distance 6 mm, tube 170 mm. Multistart winner (Aplanatism + TargetMagnification -20 + Distortion + FlatImageSurface); gt -20.0000, distortion 0.01/0.13 %, sagitta 0.2 um, blur 5.2 um vs 28.7 um Airy.",
+ "wavelength_um": 0.58756,
+ "media": [
+  "AIR",
+  "N-LAK21",
+  "AIR",
+  "N-SF11",
+  "AIR",
+  "N-BK7",
+  "AIR"
+ ],
+ "constant_media": [
+  true,
+  false,
+  true,
+  false,
+  true,
+  false,
+  true
+ ],
+ "indices_at_design": [
+  1.0,
+  1.6404948740572705,
+  1.0,
+  1.7847202174912626,
+  1.0,
+  1.5168001097398938,
+  1.0
+ ],
+ "vertices": [
+  0.0,
+  4.5,
+  8.0,
+  12.0,
+  16.0,
+  22.0
+ ],
+ "conjugates": [
+  -6.0,
+  -11.4672,
+  5000.0,
+  -11.233,
+  82.6065,
+  43.0061,
+  170.0
+ ],
+ "semidiameter": 7.0
+}

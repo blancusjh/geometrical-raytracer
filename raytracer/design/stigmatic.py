@@ -8,19 +8,39 @@ anywhere. Silva-Lora & Torres call this a *stigmatic ovoid lens* (SOL), and
 the two-surface case a *stigmatic ovoid singlet lens* (SOSL); this module is
 the constructor for both.
 
-The parametrization is the paper's: refractive indices ``n_0..n_N``, vertex
-positions ``ζ_0..ζ_{N-1}``, and the conjugate chain ``d_0..d_N`` — all
-*global* axial coordinates. Surface k images ``(n_k, d_k)`` onto
-``(n_{k+1}, d_{k+1})`` and its shape is the Cartesian oval with GOTS
-parameters built from the vertex-relative distances ``d_k - ζ_k`` and
-``d_{k+1} - ζ_k``. For fixed end conjugates ``d_0, d_N`` the intermediate
-conjugates are free: every choice is stigmatic, and that freedom is what the
-aplanatism optimization spends (see :mod:`raytracer.optimize.aplanat`).
+The ontology is the industry-standard one: **media fill the regions of
+space; surfaces delimit two media**. A train is therefore described as
+``medium_0 → Σ_0 → medium_1 → Σ_1 → ... → medium_N`` — the same alternation
+a prescription row table encodes — plus the vertex positions
+``ζ_0..ζ_{N-1}`` and the conjugate chain ``d_0..d_N`` (global axial
+coordinates; surface k images ``(medium_k, d_k)`` onto
+``(medium_{k+1}, d_{k+1})``). A medium is anything satisfying the
+:class:`~raytracer.optics.materials.Material` protocol, at whatever
+fidelity the application needs:
 
-An intermediate conjugate may be ``±inf`` — a collimated space. A surface
-whose *both* neighbouring conjugates are infinite degenerates to a plane
-(the only shape that maps a plane wave to a plane wave exactly), which is
-how a flat, manufacturable face enters an exactly stigmatic train.
+- the **constant-index medium** (*medio de índice constante*,
+  :class:`~raytracer.optics.materials.ConstantIndex`) — the simplest
+  model, a single refractive index, sufficient for monochromatic work;
+  bare floats passed as media are normalized to it;
+- a dispersive law (:class:`~raytracer.optics.materials.SellmeierMaterial`,
+  :class:`~raytracer.optics.materials.CauchyMaterial`,
+  :class:`~raytracer.optics.materials.AbbeMaterial`) for real glasses and
+  resins. The Cartesian shapes are built from each medium's **principal
+  index at the design wavelength** — rigorous stigmatism holds exactly
+  there — while the traced system carries the full dispersion, so
+  chromatic analysis away from the design line is honest.
+
+Mirrors are pure surfaces (they delimit no new medium; the tracer keeps the
+current one). Modeling mirror *materials* — coatings, metals — is future
+work.
+
+For fixed end conjugates ``d_0, d_N`` the intermediate conjugates are free:
+every choice is stigmatic, and that freedom is what the constraint
+optimization spends (see :mod:`raytracer.optimize`). An intermediate
+conjugate may be ``±inf`` — a collimated space. A surface whose *both*
+neighbouring conjugates are infinite degenerates to a plane (the only shape
+that maps a plane wave to a plane wave exactly), which is how a flat,
+manufacturable face enters an exactly stigmatic train.
 
 The name ``Omega`` for the two-surface lens follows the author's
 ``cartesian-surfaces-stl-generator`` (``OmegaLens``: two Σ curves joined
@@ -46,21 +66,31 @@ from ..surfaces.cartesian_oval import CartesianOvalProfile
 from .rows import SurfaceRow
 from .system import OpticalSystem
 
+#: The d line: default design wavelength for index evaluation.
+DESIGN_WAVELENGTH_UM = 0.58756
 
-def _medium(n: float) -> Material:
-    return AIR if n == 1.0 else ConstantIndex(f"N{n:.6g}", n)
+
+def _as_medium(value) -> Material:
+    """Normalize a media entry: numbers become constant-index media."""
+
+    if isinstance(value, (int, float)):
+        n = float(value)
+        return AIR if n == 1.0 else ConstantIndex(f"N{n:.6g}", n)
+    return value
 
 
 @dataclass(frozen=True)
 class StigmaticTrain:
-    """N Cartesian surfaces chained through a shared conjugate sequence.
+    """N Cartesian surfaces delimiting a chain of N+1 media.
 
-    ``indices`` are ``(n_0, ..., n_N)``; ``vertices`` are ``(ζ_0, ..., ζ_{N-1})``,
-    strictly increasing; ``conjugates`` are ``(d_0, ..., d_N)`` with ``d_0``
-    the object and ``d_N`` the image, both finite — intermediates may be
-    ``±inf`` for collimated spaces. All coordinates share one global axis
-    with ``ζ_0 = 0`` by convention (the tracer places the first vertex at
-    the origin regardless).
+    ``media`` are the space-filling media ``(medium_0, ..., medium_N)`` —
+    :class:`~raytracer.optics.materials.Material` objects, or bare floats
+    normalized to constant-index media; ``vertices`` are
+    ``(ζ_0, ..., ζ_{N-1})``, strictly increasing from ζ_0 = 0;
+    ``conjugates`` are ``(d_0, ..., d_N)`` with ``d_0`` the object and
+    ``d_N`` the image, both finite — intermediates may be ``±inf`` for
+    collimated spaces. ``wavelength_um`` is the design wavelength at which
+    the media's principal indices define the (exact) Cartesian shapes.
 
     The train is stigmatic for ``(d_0, d_N)`` by construction, for every
     choice of the intermediate conjugates. It is *aplanatic* only when the
@@ -68,25 +98,21 @@ class StigmaticTrain:
     is 1 for every ray.
     """
 
-    indices: tuple[float, ...]
+    media: tuple
     vertices: tuple[float, ...]
     conjugates: tuple[float, ...]
     semidiameter: float | None = None
-    #: Real dispersive materials per medium (same length as ``indices``),
-    #: with ``wavelength_um`` the design wavelength at which ``indices``
-    #: were evaluated. The Cartesian shapes are exact at that wavelength
-    #: only; ``to_system()`` carries the real materials so chromatic
-    #: analysis away from it is honest. ``None`` keeps the plain
-    #: constant-index behavior. Build with :meth:`from_materials`.
-    materials: tuple | None = None
-    wavelength_um: float | None = None
+    wavelength_um: float = DESIGN_WAVELENGTH_UM
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "media", tuple(_as_medium(m) for m in self.media)
+        )
         n_surfaces = len(self.vertices)
-        if len(self.indices) != n_surfaces + 1:
+        if len(self.media) != n_surfaces + 1:
             raise ValueError(
-                f"{n_surfaces} vertices need {n_surfaces + 1} indices, "
-                f"got {len(self.indices)}"
+                f"{n_surfaces} surfaces delimit {n_surfaces + 1} media, "
+                f"got {len(self.media)}"
             )
         if len(self.conjugates) != n_surfaces + 1:
             raise ValueError(
@@ -106,11 +132,13 @@ class StigmaticTrain:
                 "the end conjugates d_0 and d_N must be finite (use a large "
                 "finite stand-in for an object or image at infinity)"
             )
-        for k, (na, nb) in enumerate(zip(self.indices, self.indices[1:])):
+        indices = self.indices
+        for k, (na, nb) in enumerate(zip(indices, indices[1:])):
             if na == nb:
                 raise ValueError(
-                    f"surface {k} separates equal indices n={na}; a Cartesian "
-                    "surface needs a refractive-index step"
+                    f"surface {k} separates media of equal index n={na} at the "
+                    f"design wavelength {self.wavelength_um} um; a Cartesian "
+                    "surface needs an index step"
                 )
         for k in range(len(self.vertices)):
             for d in (self.conjugates[k], self.conjugates[k + 1]):
@@ -119,27 +147,14 @@ class StigmaticTrain:
                         f"conjugate d={d} coincides with vertex ζ_{k}; the "
                         "GOTS parameters are singular there"
                     )
-        if self.materials is not None:
-            if self.wavelength_um is None:
-                raise ValueError(
-                    "materials need a design wavelength_um: the surface shapes "
-                    "are exact for the indices at that wavelength"
-                )
-            if len(self.materials) != len(self.indices):
-                raise ValueError(
-                    f"{len(self.indices)} media need {len(self.indices)} "
-                    f"materials, got {len(self.materials)}"
-                )
-            for n, material in zip(self.indices, self.materials):
-                actual = material.index(self.wavelength_um)
-                if abs(actual - n) > 1e-9:
-                    raise ValueError(
-                        f"material {material.name} has n = {actual:.6f} at "
-                        f"{self.wavelength_um} um but the train stores "
-                        f"{n:.6f}; build with StigmaticTrain.from_materials"
-                    )
 
     # -- derived geometry --------------------------------------------------
+
+    @property
+    def indices(self) -> tuple[float, ...]:
+        """Principal refractive indices at the design wavelength, per medium."""
+
+        return tuple(float(m.index(self.wavelength_um)) for m in self.media)
 
     @property
     def n_surfaces(self) -> int:
@@ -149,20 +164,16 @@ class StigmaticTrain:
     def profiles(self) -> tuple[CartesianOvalProfile, ...]:
         """The per-surface Cartesian profiles, in vertex-relative coordinates."""
 
+        indices = self.indices
         return tuple(
             CartesianOvalProfile(
-                n0=self.indices[k],
+                n0=indices[k],
                 z0=self.conjugates[k] - self.vertices[k],
-                ni=self.indices[k + 1],
+                ni=indices[k + 1],
                 zi=self.conjugates[k + 1] - self.vertices[k],
             )
             for k in range(self.n_surfaces)
         )
-
-    def _medium_after(self, k: int) -> Material:
-        if self.materials is not None:
-            return self.materials[k + 1]
-        return _medium(self.indices[k + 1])
 
     def rows(self) -> list[SurfaceRow]:
         rows = []
@@ -175,7 +186,7 @@ class StigmaticTrain:
                 SurfaceRow(
                     profile=profile,
                     thickness=thickness,
-                    material_after=self._medium_after(k),
+                    material_after=self.media[k + 1],
                     semidiameter=self.semidiameter,
                 )
             )
@@ -184,18 +195,15 @@ class StigmaticTrain:
     def to_system(self) -> OpticalSystem:
         """The traceable system: object plane at ``d_0``, image plane at ``d_N``.
 
-        A train built :meth:`from_materials` carries its real materials and
-        design wavelength into the system, so tracing at another wavelength
-        sees the true dispersion (and the true chromatic aberration of
-        shapes that are only exact at the design wavelength).
+        The system carries the media and the design wavelength, so tracing
+        at another wavelength sees the true dispersion (and the true
+        chromatic aberration of shapes that are only exact at the design
+        wavelength).
         """
 
-        object_space = (
-            self.materials[0] if self.materials is not None else _medium(self.indices[0])
-        )
         return OpticalSystem(
             self.rows(),
-            object_space=object_space,
+            object_space=self.media[0],
             object_z=self.conjugates[0],
             wavelength_um=self.wavelength_um,
         )
@@ -206,6 +214,12 @@ class StigmaticTrain:
         single-valued branch), before any vignetting consideration."""
 
         return min(p.max_usable_height for p in self.profiles)
+
+    @property
+    def is_dispersive(self) -> bool:
+        """True when any medium's index varies with wavelength."""
+
+        return any(not isinstance(m, ConstantIndex) for m in self.media)
 
     # -- the paper's magnification (Eqs. 29-30) ----------------------------
 
@@ -218,8 +232,9 @@ class StigmaticTrain:
         exactly instead of multiplying ``inf * 0``.
         """
 
+        indices = self.indices
         return tuple(
-            -(self.indices[k] / self.indices[k + 1])
+            -(indices[k] / indices[k + 1])
             * (self.conjugates[k + 1] - self.vertices[k])
             / (self.conjugates[k] - self.vertices[k])
             for k in range(self.n_surfaces)
@@ -235,9 +250,10 @@ class StigmaticTrain:
         than evaluated.
         """
 
+        indices = self.indices
         value = 1.0
         for k in range(self.n_surfaces):
-            value *= -(self.indices[k] / self.indices[k + 1])
+            value *= -(indices[k] / indices[k + 1])
             num = self.conjugates[k + 1] - self.vertices[k]
             den = self.conjugates[k] - self.vertices[k]
             if not np.isinf(num):
@@ -247,36 +263,6 @@ class StigmaticTrain:
         return value
 
     # -- constructors and variation ----------------------------------------
-
-    @classmethod
-    def from_materials(
-        cls,
-        materials,
-        *,
-        vertices,
-        conjugates,
-        wavelength_um: float,
-        semidiameter: float | None = None,
-    ) -> "StigmaticTrain":
-        """A train of real materials, designed at ``wavelength_um``.
-
-        ``materials`` lists one :class:`~raytracer.optics.materials.Material`
-        per medium — ``(AIR, glass_1, AIR, glass_2, ..., AIR)`` for a
-        lenses-in-air system. The Cartesian shapes are built from each
-        material's index *at the design wavelength*; they stay rigorously
-        stigmatic there and pick up real chromatic aberration away from it,
-        which the traced system reports honestly.
-        """
-
-        indices = tuple(float(m.index(wavelength_um)) for m in materials)
-        return cls(
-            indices=indices,
-            vertices=tuple(vertices),
-            conjugates=tuple(conjugates),
-            semidiameter=semidiameter,
-            materials=tuple(materials),
-            wavelength_um=float(wavelength_um),
-        )
 
     @classmethod
     def singlet(
@@ -292,13 +278,15 @@ class StigmaticTrain:
     ) -> "StigmaticTrain":
         """The Omega lens: two Cartesian surfaces sharing the conjugate ``d1``.
 
-        Front vertex at 0, back vertex at ``thickness``. Stigmatic between
-        ``d0`` and ``d2`` for *any* ``d1`` — the intermediate conjugate and
-        the thickness are the singlet's degrees of freedom.
+        Front vertex at 0, back vertex at ``thickness``; the lens medium is
+        the constant-index medium ``n`` in an ``n_outside`` surround.
+        Stigmatic between ``d0`` and ``d2`` for *any* ``d1`` — the
+        intermediate conjugate and the thickness are the singlet's degrees
+        of freedom.
         """
 
         return cls(
-            indices=(n_outside, n, n_outside),
+            media=(n_outside, n, n_outside),
             vertices=(0.0, thickness),
             conjugates=(d0, d1, d2),
             semidiameter=semidiameter,
@@ -330,7 +318,7 @@ class StigmaticTrain:
         if d0 >= 0:
             raise ValueError("symmetric singlet expects a real object, d0 < 0")
         return cls(
-            indices=(n_outside, n, n_outside),
+            media=(n_outside, n, n_outside),
             vertices=(0.0, thickness),
             conjugates=(d0, thickness / 2.0, thickness - d0),
             semidiameter=semidiameter,
@@ -341,7 +329,7 @@ class StigmaticTrain:
 
         The end conjugates stay fixed — they are the specification, the
         intermediates are the degrees of freedom (this is the variation the
-        aplanatism optimizer performs).
+        constraint optimizer performs).
         """
 
         intermediates = tuple(float(v) for v in intermediates)
@@ -356,4 +344,4 @@ class StigmaticTrain:
         )
 
 
-__all__ = ["StigmaticTrain"]
+__all__ = ["DESIGN_WAVELENGTH_UM", "StigmaticTrain"]

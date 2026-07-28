@@ -1,0 +1,60 @@
+{
+ "kind": "stigmatic_train",
+ "comment": "Slide projector to a 2 m screen, ~-32x (the -45x ask saturates conjugate-only freedom at fixed vertices). Distortion ~1 % with the mid-barrel reference pupil (aim_z = 17); axial color declared.",
+ "wavelength_um": 0.58756,
+ "media": [
+  "AIR",
+  "N-SK16",
+  "AIR",
+  "N-F2",
+  "AIR",
+  "N-BK7",
+  "AIR",
+  "N-SK4",
+  "AIR"
+ ],
+ "constant_media": [
+  true,
+  false,
+  true,
+  false,
+  true,
+  false,
+  true,
+  false,
+  true
+ ],
+ "indices_at_design": [
+  1.0,
+  1.6204100608393477,
+  1.0,
+  1.6200532924653839,
+  1.0,
+  1.5168001097398938,
+  1.0,
+  1.6127177097234682,
+  1.0
+ ],
+ "vertices": [
+  0.0,
+  6.0,
+  10.0,
+  14.0,
+  18.0,
+  24.0,
+  28.0,
+  34.0
+ ],
+ "conjugates": [
+  -40.0,
+  1860.05,
+  102.605,
+  -50.4781,
+  -4.56586,
+  -34.924,
+  -58.5454,
+  -52.965,
+  2000.0
+ ],
+ "semidiameter": 16.0
+}

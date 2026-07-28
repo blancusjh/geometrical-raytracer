@@ -58,7 +58,7 @@ def _bundle(viewer, tracer, label, sampling, **kw):
 
 def main() -> None:
     print("[duv_objective_3d] Loading the US7557996 prescription (48 surfaces)...", flush=True)
-    csv = ROOT / "data" / "US7557996_Fig3_Table3_prescription.csv"
+    csv = ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
     tracer = SequentialTracer(system)
     solve_object_plane(tracer)

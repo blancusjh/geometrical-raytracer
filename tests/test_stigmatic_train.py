@@ -92,20 +92,20 @@ def test_mirrored_conjugates_negate_the_sag():
 
 
 def test_rejects_mismatched_lengths_and_bad_vertices():
-    with pytest.raises(ValueError, match="indices"):
-        StigmaticTrain(indices=(1.0, 1.5), vertices=(0.0, 5.0), conjugates=(-10.0, 3.0, 20.0))
+    with pytest.raises(ValueError, match="media"):
+        StigmaticTrain(media=(1.0, 1.5), vertices=(0.0, 5.0), conjugates=(-10.0, 3.0, 20.0))
     with pytest.raises(ValueError, match="conjugates"):
-        StigmaticTrain(indices=(1.0, 1.5, 1.0), vertices=(0.0, 5.0), conjugates=(-10.0, 20.0))
+        StigmaticTrain(media=(1.0, 1.5, 1.0), vertices=(0.0, 5.0), conjugates=(-10.0, 20.0))
     with pytest.raises(ValueError, match="increasing"):
-        StigmaticTrain(indices=(1.0, 1.5, 1.0), vertices=(0.0, -5.0), conjugates=(-10.0, 3.0, 20.0))
+        StigmaticTrain(media=(1.0, 1.5, 1.0), vertices=(0.0, -5.0), conjugates=(-10.0, 3.0, 20.0))
     with pytest.raises(ValueError, match="ζ_0 = 0"):
-        StigmaticTrain(indices=(1.0, 1.5, 1.0), vertices=(1.0, 5.0), conjugates=(-10.0, 3.0, 20.0))
+        StigmaticTrain(media=(1.0, 1.5, 1.0), vertices=(1.0, 5.0), conjugates=(-10.0, 3.0, 20.0))
     with pytest.raises(ValueError, match="finite"):
-        StigmaticTrain(indices=(1.0, 1.5, 1.0), vertices=(0.0, 5.0), conjugates=(-INF, 3.0, 20.0))
+        StigmaticTrain(media=(1.0, 1.5, 1.0), vertices=(0.0, 5.0), conjugates=(-INF, 3.0, 20.0))
     with pytest.raises(ValueError, match="index step"):
-        StigmaticTrain(indices=(1.0, 1.0, 1.5), vertices=(0.0, 5.0), conjugates=(-10.0, 3.0, 20.0))
+        StigmaticTrain(media=(1.0, 1.0, 1.5), vertices=(0.0, 5.0), conjugates=(-10.0, 3.0, 20.0))
     with pytest.raises(ValueError, match="singular"):
-        StigmaticTrain(indices=(1.0, 1.5, 1.0), vertices=(0.0, 5.0), conjugates=(-10.0, 5.0, 20.0))
+        StigmaticTrain(media=(1.0, 1.5, 1.0), vertices=(0.0, 5.0), conjugates=(-10.0, 5.0, 20.0))
 
 
 # -- magnification -----------------------------------------------------------
@@ -123,10 +123,10 @@ def test_gt_with_a_collimated_interior_pairs_the_infinities():
     huge finite stand-in."""
 
     train = StigmaticTrain(
-        indices=(1.0, 1.5, 1.0), vertices=(0.0, 8.0), conjugates=(-60.0, INF, 70.0)
+        media=(1.0, 1.5, 1.0), vertices=(0.0, 8.0), conjugates=(-60.0, INF, 70.0)
     )
     nearly = StigmaticTrain(
-        indices=(1.0, 1.5, 1.0), vertices=(0.0, 8.0), conjugates=(-60.0, 1e12, 70.0)
+        media=(1.0, 1.5, 1.0), vertices=(0.0, 8.0), conjugates=(-60.0, 1e12, 70.0)
     )
     assert np.isfinite(train.gt)
     assert train.gt == pytest.approx(nearly.gt, rel=1e-9)
@@ -176,7 +176,7 @@ def test_flat_interior_surface_train_is_stigmatic():
     the train still images d0 to d3 stigmatically."""
 
     train = StigmaticTrain(
-        indices=(1.0, 1.5, 1.7, 1.0),
+        media=(1.0, 1.5, 1.7, 1.0),
         vertices=(0.0, 8.0, 12.0),
         conjugates=(-60.0, INF, INF, 70.0),
         semidiameter=6.0,

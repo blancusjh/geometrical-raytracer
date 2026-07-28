@@ -17,7 +17,7 @@ from raytracer.propagation import (
 )
 
 CSV = Path(__file__).resolve().parents[1] / "data" / (
-    "US7557996_Fig3_Table3_prescription.csv"
+    "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
 )
 
 NA_IMAGE = 1.2

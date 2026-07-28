@@ -67,7 +67,7 @@ def material_rgba(material, alpha=GLASS_ALPHA):
 
 def build_viewer():
     print("[duv_objective_2d] Loading the prescription and tracing 363 exact rays...", flush=True)
-    csv = ROOT / "data" / "US7557996_Fig3_Table3_prescription.csv"
+    csv = ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
     tracer = SequentialTracer(system)
     solve_object_plane(tracer)
