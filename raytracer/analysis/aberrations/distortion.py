@@ -151,6 +151,39 @@ class DistortionGrid:
     def valid_fraction(self) -> float:
         return float(self.valid.mean())
 
+    @property
+    def deviation_mm(self) -> np.ndarray:
+        """``(n, n, 2)`` displacement of each traced point from its ideal one.
+
+        ``NaN`` at vignetted points, inherited from ``actual_points``.
+        """
+
+        return self.actual_points - self.ideal_points
+
+    @property
+    def max_distortion_um(self) -> float:
+        """Largest departure from the ideal map, over the valid points."""
+
+        radius = np.linalg.norm(self.deviation_mm[self.valid], axis=-1)
+        return float(radius.max() * 1e3) if radius.size else float("nan")
+
+    @property
+    def max_relative_distortion_percent(self) -> float:
+        """The same departure as a fraction of the ideal image height.
+
+        The reference height is measured from the axis, where the ideal map
+        sends the axial object point, so an off-axis (ring-field) grid is
+        referred to the same origin as an on-axis one. The axial point
+        itself has zero ideal height and is excluded.
+        """
+
+        ideal_height = np.linalg.norm(self.ideal_points, axis=-1)
+        usable = self.valid & (ideal_height > 0.0)
+        if not usable.any():
+            return float("nan")
+        radius = np.linalg.norm(self.deviation_mm[usable], axis=-1)
+        return float((radius / ideal_height[usable]).max() * 100.0)
+
 
 def distortion_grid(
     tracer: SequentialTracer,

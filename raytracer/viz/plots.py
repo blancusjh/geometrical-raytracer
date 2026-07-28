@@ -292,6 +292,38 @@ def aberrations_figure(metrics: Sequence[dict], *, suptitle: str | None = None) 
     return fig
 
 
+def _draw_distortion_grid(
+    ax, grid: DistortionGrid, *, exaggeration: float, color: str = "#1f77b4"
+) -> None:
+    """Draw one grid on *ax*: ideal dashed underneath, traced solid over it."""
+
+    ideal = grid.ideal_points
+    n = ideal.shape[0]
+    # Vignetted points are already NaN in actual_points, and NaN survives the
+    # scaling, so the broken lines fall out for free.
+    displayed = ideal + exaggeration * (grid.actual_points - ideal)
+
+    for i in range(n):
+        ax.plot(ideal[i, :, 0], ideal[i, :, 1], color="#999999", ls="--", lw=0.7, zorder=1)
+        ax.plot(displayed[i, :, 0], displayed[i, :, 1], color=color, lw=1.4, zorder=2)
+    for j in range(n):
+        ax.plot(ideal[:, j, 0], ideal[:, j, 1], color="#999999", ls="--", lw=0.7, zorder=1)
+        ax.plot(displayed[:, j, 0], displayed[:, j, 1], color=color, lw=1.4, zorder=2)
+
+    if not grid.valid.all():
+        dropped = ideal[~grid.valid]
+        n_dropped = int((~grid.valid).sum())
+        ax.scatter(
+            dropped[:, 0], dropped[:, 1], marker="x", color="#d62728", s=24,
+            zorder=3, label=f"vignetted ({n_dropped}/{grid.valid.size})",
+        )
+        ax.legend(loc="best", fontsize=8)
+
+    ax.set_aspect("equal")
+    ax.set_xlabel("image x (mm)")
+    ax.grid(alpha=0.15)
+
+
 def distortion_grid_figure(
     grid: DistortionGrid,
     *,
@@ -312,35 +344,56 @@ def distortion_grid_figure(
     are marked with an ``x`` so missing coverage is visible, not silent.
     """
 
-    ideal = grid.ideal_points
-    n = ideal.shape[0]
-    # Vignetted points are already NaN in actual_points, and NaN survives the
-    # scaling, so the broken lines fall out for free.
-    displayed = ideal + exaggeration * (grid.actual_points - ideal)
-
     fig, ax = plt.subplots(figsize=figsize)
-    for i in range(n):
-        ax.plot(ideal[i, :, 0], ideal[i, :, 1], color="#999999", ls="--", lw=0.7, zorder=1)
-        ax.plot(displayed[i, :, 0], displayed[i, :, 1], color="#1f77b4", lw=1.4, zorder=2)
-    for j in range(n):
-        ax.plot(ideal[:, j, 0], ideal[:, j, 1], color="#999999", ls="--", lw=0.7, zorder=1)
-        ax.plot(displayed[:, j, 0], displayed[:, j, 1], color="#1f77b4", lw=1.4, zorder=2)
-
-    if not grid.valid.all():
-        dropped = ideal[~grid.valid]
-        n_dropped = int((~grid.valid).sum())
-        ax.scatter(
-            dropped[:, 0], dropped[:, 1], marker="x", color="#d62728", s=24,
-            zorder=3, label=f"vignetted ({n_dropped}/{grid.valid.size})",
-        )
-        ax.legend(loc="best", fontsize=8)
-
-    ax.set_aspect("equal")
-    ax.set_xlabel("image x (mm)")
+    _draw_distortion_grid(ax, grid, exaggeration=exaggeration)
     ax.set_ylabel("image y (mm)")
     subtitle = f" (distortion ×{exaggeration:g})" if exaggeration != 1.0 else ""
     ax.set_title((title or "Distortion grid") + subtitle)
-    ax.grid(alpha=0.15)
+    fig.tight_layout()
+    return fig
+
+
+def distortion_grids_figure(
+    grids: Iterable[DistortionGrid],
+    *,
+    titles: Sequence[str] | None = None,
+    exaggerations: Sequence[float] | float = 1.0,
+    figsize_per_panel: float = 4.4,
+    suptitle: str | None = None,
+) -> plt.Figure:
+    """Several distortion grids side by side, one panel each.
+
+    ``exaggerations`` is a single dial applied to every panel, or one per
+    grid: systems worth comparing span orders of magnitude in distortion,
+    and a shared multiplier that makes one panel readable flattens or
+    explodes the others. Each panel title carries the true, unexaggerated
+    magnitude — the largest departure from the ideal map, in µm and as a
+    fraction of image height — so the amplified shape is read next to the
+    number it was amplified from.
+    """
+
+    grids = list(grids)
+    if titles is None:
+        titles = [""] * len(grids)
+    if isinstance(exaggerations, (int, float)):
+        exaggerations = [float(exaggerations)] * len(grids)
+
+    fig, axes = plt.subplots(
+        1, len(grids), figsize=(figsize_per_panel * len(grids), figsize_per_panel + 0.6)
+    )
+    if len(grids) == 1:
+        axes = [axes]
+    for grid, ax, title, exaggeration in zip(grids, axes, titles, exaggerations):
+        _draw_distortion_grid(ax, grid, exaggeration=exaggeration)
+        ax.set_title(
+            f"{title}\nmax {grid.max_distortion_um:.3g} µm "
+            f"= {grid.max_relative_distortion_percent:.3g} % of height"
+            f"   —   drawn ×{exaggeration:g}",
+            fontsize=10,
+        )
+    axes[0].set_ylabel("image y (mm)")
+    if suptitle:
+        fig.suptitle(suptitle)
     fig.tight_layout()
     return fig
 
@@ -604,6 +657,7 @@ __all__ = [
     "fans_figure",
     "aberrations_figure",
     "distortion_grid_figure",
+    "distortion_grids_figure",
     "dispersion_figure",
     "chromatic_figure",
     "chromatic_spots_figure",

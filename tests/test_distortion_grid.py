@@ -40,6 +40,31 @@ def test_fully_valid_within_the_working_field(grid):
     assert grid.valid_fraction == 1.0
 
 
+def test_deviation_is_actual_minus_ideal(grid):
+    np.testing.assert_allclose(grid.deviation_mm, grid.actual_points - grid.ideal_points)
+
+
+def test_max_distortion_matches_the_worst_grid_point(grid):
+    radius_um = np.linalg.norm(grid.deviation_mm, axis=-1) * 1e3
+    assert grid.max_distortion_um == pytest.approx(np.nanmax(radius_um))
+    assert grid.max_distortion_um > 0.0
+
+
+def test_relative_distortion_excludes_the_axial_point(grid):
+    """The axial point has zero ideal height, so dividing by it would make
+    the relative figure infinite for every system."""
+
+    ideal_height = np.linalg.norm(grid.ideal_points, axis=-1)
+    center = grid.object_points.shape[0] // 2
+    assert ideal_height[center, center] == 0.0
+    assert np.isfinite(grid.max_relative_distortion_percent)
+
+    radius = np.linalg.norm(grid.deviation_mm, axis=-1)
+    off_axis = ideal_height > 0.0
+    expected = (radius[off_axis] / ideal_height[off_axis]).max() * 100.0
+    assert grid.max_relative_distortion_percent == pytest.approx(expected)
+
+
 def test_center_point_is_undistorted(grid):
     center = grid.object_points.shape[0] // 2
     np.testing.assert_allclose(grid.actual_points[center, center], [0.0, 0.0], atol=1e-9)

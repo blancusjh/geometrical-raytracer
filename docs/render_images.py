@@ -116,6 +116,69 @@ def render_analysis() -> None:
     shrink(OUT / "duv_spots.png")
 
 
+def render_distortion_grids() -> None:
+    """Three systems' object-to-image maps, spanning a 4700x range.
+
+    Each panel is drawn at its own exaggeration and titled with the true
+    magnitude: the dial that makes the DUV objective's 44 nm residual
+    visible would push the Double Gauss's 206 um clean off the page.
+    """
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from raytracer.analysis import distortion_grid
+    from raytracer.design import OpticalSystem
+    from raytracer.propagation import SequentialTracer, solve_object_plane
+    from raytracer.viz import plots
+
+    print("distortion grids:")
+    #: (prescription, panel title, object half-field in degrees, exaggeration)
+    SYSTEMS = [
+        ("cooke_triplet_prescription.csv", "Cooke triplet, EFL 50 mm", 10.0, 25.0),
+        ("double_gauss_prescription.csv", "Double Gauss, EFL 99 mm", 20.6, 15.0),
+    ]
+
+    grids, titles, exaggerations = [], [], []
+    for csv, title, half_deg, exaggeration in SYSTEMS:
+        tracer = SequentialTracer(OpticalSystem.from_prescription(ROOT / "data" / csv))
+        conjugate = solve_object_plane(tracer)
+        half = abs(conjugate.object_z) * np.tan(np.deg2rad(half_deg))
+        grids.append(
+            distortion_grid(
+                tracer, magnification=conjugate.magnification, half_field=half, n=11
+            )
+        )
+        titles.append(f"{title}\n±{half_deg:g}° object half-field")
+        exaggerations.append(exaggeration)
+
+    # The DUV objective is referred to the patent's own 4x reduction, so the
+    # ideal map here is the design intent rather than the recovered paraxial
+    # value. A 50 mm half-field square puts its corners at 50*sqrt(2) = 70.7
+    # mm, past the ~68 mm usable field radius: those are the vignetted points.
+    tracer = SequentialTracer(
+        OpticalSystem.from_prescription(
+            ROOT / "data" / "US7557996_Fig3_Table3_prescription.csv"
+        )
+    )
+    solve_object_plane(tracer)
+    grids.append(distortion_grid(tracer, magnification=0.25, half_field=50.0, n=11))
+    titles.append("US7557996 DUV objective\n±50 mm object half-field")
+    exaggerations.append(2000.0)
+
+    fig = plots.distortion_grids_figure(
+        grids, titles=titles, exaggerations=exaggerations,
+        suptitle="Chief-ray distortion grids — dashed: the ideal linear map; "
+                 "solid: where the traced chief rays actually land",
+    )
+    fig.savefig(OUT / "distortion_grids.png", dpi=150, bbox_inches="tight", facecolor="white")
+    shrink(OUT / "distortion_grids.png")
+    for title, grid in zip(titles, grids):
+        print(f"    {title.splitlines()[0]}: max {grid.max_distortion_um:.4g} µm "
+              f"({grid.max_relative_distortion_percent:.3g} %), "
+              f"coverage {grid.valid_fraction:.1%}")
+
+
 def render_stigmatic_spots() -> None:
     """Sphere vs Cartesian oval: same conjugates, same vertex curvature.
 
@@ -197,6 +260,7 @@ def render_stigmatic_spots() -> None:
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     render_analysis()
+    render_distortion_grids()
     render_stigmatic_spots()
     render_examples()
     render_newtonian()
