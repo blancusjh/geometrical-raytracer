@@ -5,9 +5,10 @@ la ecuación de cada superficie, sin aproximación paraxial— a través de
 sistemas ópticos reales, y mide lo que sale: aberraciones, distorsión,
 frente de onda, PSF, formación de imagen.
 
-**11.000 líneas · 9 paquetes en cadena estricta · 192 tests contra verdades
+**11.500 líneas · 9 paquetes en cadena estricta · 208 tests contra verdades
 analíticas · dos objetivos de patente replicados dígito a dígito · lentes
-estigmáticas y aplanáticas por superficies de Descartes**
+estigmáticas y aplanáticas por superficies de Descartes, con optimizador de
+restricciones enchufables y materiales reales**
 
 ![Objetivo DUV US7557996, tres longitudes de onda](docs/img/duv_3d_spectrum.png)
 
@@ -299,12 +300,12 @@ Esas son las aristas reales del grafo, leídas del AST de cada módulo:
 |---|---|---|
 | **`math`** | — | 463 |
 | **`surfaces`** | `math` | 1157 |
-| **`optics`** | `math`, `surfaces` | 947 |
-| **`design`** | `surfaces`, `optics` | 667 |
+| **`optics`** | `math`, `surfaces` | 973 |
+| **`design`** | `surfaces`, `optics` | 739 |
 | **`propagation`** | `math`, `surfaces`, `optics`, `design` | 1094 |
-| **`io`** | `surfaces`, `optics`, `design` | 201 |
-| **`analysis`** | `design`, `propagation` | 2274 |
-| **`optimize`** | `design`, `analysis` | 207 |
+| **`io`** | `surfaces`, `optics`, `design` | 306 |
+| **`analysis`** | `design`, `propagation` | 2302 |
+| **`optimize`** | `design`, `analysis` | 564 |
 | **`viz`** | `surfaces`, `optics`, `design`, `propagation`, `analysis` | 3863 |
 
 `tests/test_architecture.py` recorre el AST de cada módulo y lo comprueba, de
@@ -351,8 +352,11 @@ objeto imponiendo B = 0 en la matriz del sistema) y `differential_conjugates`;
 últimas viven aquí porque resolver un rayo principal es trazar.
 
 **`io` — serialización.** Lectura y escritura de prescripciones, con los
-formatos en un registro (`FORMAT_READERS`, `FORMAT_WRITERS`). El formato de
-archivo es una naturaleza distinta de lo que un sistema es.
+formatos en un registro (`FORMAT_READERS`, `FORMAT_WRITERS`), y catálogos de
+materiales como archivos de datos (`read_materials`: modelos constant /
+abbe / cauchy / sellmeier por fila de CSV — así entra la resina de
+impresión de `data/formlabs_resins.csv`). El formato de archivo es una
+naturaleza distinta de lo que un sistema es.
 
 **`analysis` — lo que se mide sobre un sistema ya trazado.** Partido en dos
 por el objeto de la medida: `imaging` mira la imagen (spots, PSF escalar,
@@ -365,7 +369,12 @@ Zernike, ray fans, estigmatismo, aplanatismo). Los dos re-exportan desde
 este varía. Su rasgo distintivo es *qué* varía: no coeficientes de una
 superficie ajustándose a una forma, sino las conjugadas libres de familias
 cuyos miembros ya son todos exactos en un sentido (estigmáticos), gastando
-esa libertad en comprar una segunda propiedad: aplanatismo, campo plano.
+esa libertad en comprar más propiedades. Las propiedades son **restricciones
+enchufables** (`constraints.py`): `Aplanatism`, `Distortion`,
+`FlatImageSurface`, `TargetMagnification`, `AxialColor` — cada una un objeto
+que produce su bloque de residuales sobre trazas compartidas en caché, y
+cualquier lista de ellas forma el objetivo de `optimize_train`. Una
+restricción nueva es una subclase de `Constraint` con `size` y `residuals`.
 
 **`viz` — presentación.** `plots` para las figuras matplotlib, `scene` para
 la escena neutral de ítems, `gl/` para el visor OpenGL (cámara, shaders,
@@ -453,13 +462,23 @@ la sección de aplanatismo: los tres singletes, el mapa `M`, la superficie
 imagen aplanática, la optimización del triplete cementado, las mallas de
 distorsión de los tres SOL (7,2 % → 0,085 % → 0,002 %), abanicos de rayos,
 métricas de campo y la tabla de Seidel que separa esfera, estigmático y
-aplanático.
+aplanático. `building_optical_systems.ipynb` construye cuatro sistemas
+potentes de solo lentes y aire con vidrios reales del catálogo Sellmeier —
+objetivo de telescopio acromático de 2 lentes (blur 1,5 µm contra 5,5 µm de
+Airy), microscopio 20×/NA 0.25 de 3 lentes con campo plano y 0,1 % de
+distorsión, ultra-gran-angular de objeto virtual (estigmático exacto a ±55°)
+y proyector de 4 lentes — cada uno optimizado con las restricciones
+enchufables (`Aplanatism`, `Distortion`, `FlatImageSurface`,
+`TargetMagnification`, `AxialColor`), y cierra con el microscopio
+imprimible: tres lentes de resina Formlabs Clear V4, con su dispersión
+medida leída de `data/formlabs_resins.csv` y su color axial declarado
+(la búsqueda multiarranque vive en `docs/design_systems.py`).
 
 ## Tests
 
 ```bash
-pytest                                    # 188 tests
-xvfb-run -a pytest                        # 192, incluidos los de contexto OpenGL
+pytest                                    # 204 tests
+xvfb-run -a pytest                        # 208, incluidos los de contexto OpenGL
 ```
 
 Las verdades de referencia son analíticas donde existen: conjugados de
@@ -479,7 +498,7 @@ de dependencias entre paquetes se comprueba leyendo el AST de cada módulo.
 
 ```
 raytracer/     el paquete
-data/          prescripciones de ejemplo en CSV -- datos puros
+data/          prescripciones y catálogos de materiales en CSV -- datos puros
 examples/      demos ejecutables por categoría + notebooks de réplica de patentes
 docs/          imágenes del README y el script que las regenera
 reference/     notebooks y módulo de referencia originales

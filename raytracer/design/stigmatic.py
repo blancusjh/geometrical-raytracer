@@ -72,6 +72,14 @@ class StigmaticTrain:
     vertices: tuple[float, ...]
     conjugates: tuple[float, ...]
     semidiameter: float | None = None
+    #: Real dispersive materials per medium (same length as ``indices``),
+    #: with ``wavelength_um`` the design wavelength at which ``indices``
+    #: were evaluated. The Cartesian shapes are exact at that wavelength
+    #: only; ``to_system()`` carries the real materials so chromatic
+    #: analysis away from it is honest. ``None`` keeps the plain
+    #: constant-index behavior. Build with :meth:`from_materials`.
+    materials: tuple | None = None
+    wavelength_um: float | None = None
 
     def __post_init__(self) -> None:
         n_surfaces = len(self.vertices)
@@ -111,6 +119,25 @@ class StigmaticTrain:
                         f"conjugate d={d} coincides with vertex ζ_{k}; the "
                         "GOTS parameters are singular there"
                     )
+        if self.materials is not None:
+            if self.wavelength_um is None:
+                raise ValueError(
+                    "materials need a design wavelength_um: the surface shapes "
+                    "are exact for the indices at that wavelength"
+                )
+            if len(self.materials) != len(self.indices):
+                raise ValueError(
+                    f"{len(self.indices)} media need {len(self.indices)} "
+                    f"materials, got {len(self.materials)}"
+                )
+            for n, material in zip(self.indices, self.materials):
+                actual = material.index(self.wavelength_um)
+                if abs(actual - n) > 1e-9:
+                    raise ValueError(
+                        f"material {material.name} has n = {actual:.6f} at "
+                        f"{self.wavelength_um} um but the train stores "
+                        f"{n:.6f}; build with StigmaticTrain.from_materials"
+                    )
 
     # -- derived geometry --------------------------------------------------
 
@@ -132,6 +159,11 @@ class StigmaticTrain:
             for k in range(self.n_surfaces)
         )
 
+    def _medium_after(self, k: int) -> Material:
+        if self.materials is not None:
+            return self.materials[k + 1]
+        return _medium(self.indices[k + 1])
+
     def rows(self) -> list[SurfaceRow]:
         rows = []
         for k, profile in enumerate(self.profiles):
@@ -143,19 +175,29 @@ class StigmaticTrain:
                 SurfaceRow(
                     profile=profile,
                     thickness=thickness,
-                    material_after=_medium(self.indices[k + 1]),
+                    material_after=self._medium_after(k),
                     semidiameter=self.semidiameter,
                 )
             )
         return rows
 
     def to_system(self) -> OpticalSystem:
-        """The traceable system: object plane at ``d_0``, image plane at ``d_N``."""
+        """The traceable system: object plane at ``d_0``, image plane at ``d_N``.
 
+        A train built :meth:`from_materials` carries its real materials and
+        design wavelength into the system, so tracing at another wavelength
+        sees the true dispersion (and the true chromatic aberration of
+        shapes that are only exact at the design wavelength).
+        """
+
+        object_space = (
+            self.materials[0] if self.materials is not None else _medium(self.indices[0])
+        )
         return OpticalSystem(
             self.rows(),
-            object_space=_medium(self.indices[0]),
+            object_space=object_space,
             object_z=self.conjugates[0],
+            wavelength_um=self.wavelength_um,
         )
 
     @property
@@ -205,6 +247,36 @@ class StigmaticTrain:
         return value
 
     # -- constructors and variation ----------------------------------------
+
+    @classmethod
+    def from_materials(
+        cls,
+        materials,
+        *,
+        vertices,
+        conjugates,
+        wavelength_um: float,
+        semidiameter: float | None = None,
+    ) -> "StigmaticTrain":
+        """A train of real materials, designed at ``wavelength_um``.
+
+        ``materials`` lists one :class:`~raytracer.optics.materials.Material`
+        per medium — ``(AIR, glass_1, AIR, glass_2, ..., AIR)`` for a
+        lenses-in-air system. The Cartesian shapes are built from each
+        material's index *at the design wavelength*; they stay rigorously
+        stigmatic there and pick up real chromatic aberration away from it,
+        which the traced system reports honestly.
+        """
+
+        indices = tuple(float(m.index(wavelength_um)) for m in materials)
+        return cls(
+            indices=indices,
+            vertices=tuple(vertices),
+            conjugates=tuple(conjugates),
+            semidiameter=semidiameter,
+            materials=tuple(materials),
+            wavelength_um=float(wavelength_um),
+        )
 
     @classmethod
     def singlet(

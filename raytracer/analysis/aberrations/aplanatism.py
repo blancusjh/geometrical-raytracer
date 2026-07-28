@@ -69,19 +69,31 @@ def normal_axis_crossing(profile, rho):
         return 1.0 / inverse
 
 
-def _inverse_vc_geometric(profile, h):
-    """``1/V_k C_k`` from the sag and slope at radial height *h*.
+def _vc_geometric(profile, h):
+    """``V_k C_k`` from the sag and slope at radial height *h*.
 
-    The normal at ``(z(h), h)`` crosses the axis at ``z + h/z'``, so
-    ``1/VC = z' / (z z' + h)`` — a form that stays finite for planes
-    (``z' = 0``) and needs no shape-parameter conditioning. At ``h = 0``
-    the limit is the vertex curvature ``O``.
+    The normal at ``(z(h), h)`` crosses the axis at ``z + h/z'``. Infinite
+    at a locally flat point (``z' = 0``), zero when the normal passes
+    through the vertex — both are geometry, not failures, and the caller's
+    ``(b*VC - 1)/(a*VC - 1)`` form is finite in either case. At ``h = 0``
+    the limit is the vertex radius ``1/O``.
     """
 
     h = np.asarray(h, dtype=float)
     z, dz = profile.sag_and_slope(h)
     tiny = 1e-12
-    return np.where(h < tiny, profile.curvature, dz / (z * dz + np.where(h < tiny, 1.0, h)))
+    with np.errstate(divide="ignore"):
+        vertex_radius = (
+            np.inf if profile.curvature == 0.0 else 1.0 / profile.curvature
+        )
+        return np.where(h < tiny, vertex_radius, z + np.where(h < tiny, 1.0, h) / dz)
+
+
+def _inverse_vc_geometric(profile, h):
+    """``1/V_k C_k`` — kept for the Eq. (24) cross-validation tests."""
+
+    with np.errstate(divide="ignore"):
+        return 1.0 / _vc_geometric(profile, h)
 
 
 def aplanatism_map(train: StigmaticTrain, rho_or_heights, *, from_heights: bool = False):
@@ -106,11 +118,20 @@ def aplanatism_map(train: StigmaticTrain, rho_or_heights, *, from_heights: bool 
     for k, profile in enumerate(train.profiles):
         if profile.is_plane:
             continue
+        za = train.conjugates[k] - train.vertices[k]
+        zb = train.conjugates[k + 1] - train.vertices[k]
+        if np.isfinite(za) and np.isfinite(zb) and abs(za - zb) <= 1e-9 * abs(za):
+            raise ValueError(
+                f"surface {k} has coincident conjugates (d = {train.conjugates[k]}): "
+                "a concentric surface deviates no ray aimed at its center and "
+                "the sine-ratio factorization degenerates there (VkCk equals "
+                "the conjugate distance identically); move the conjugates apart"
+            )
         if from_heights:
             h = values[:, k]
         else:
             # Invert rho -> h on the vertex branch: h = r(rho), and the
-            # geometric 1/VC wants the height. rho and h agree to O(rho^3),
+            # geometric VC wants the height. rho and h agree to O(rho^3),
             # but exactness matters here, so recover h = sqrt(rho^2 - z^2)
             # iterating the sag once (z depends on h only weakly).
             rho = values[:, k]
@@ -118,16 +139,16 @@ def aplanatism_map(train: StigmaticTrain, rho_or_heights, *, from_heights: bool 
             for _ in range(3):
                 z, _ = profile.sag_and_slope(h)
                 h = np.sqrt(np.maximum(rho * rho - z * z, 0.0))
-        inverse_vc = _inverse_vc_geometric(profile, h)
-        za = train.conjugates[k] - train.vertices[k]
-        zb = train.conjugates[k + 1] - train.vertices[k]
+        vc = _vc_geometric(profile, h)
         a = 0.0 if np.isinf(za) else 1.0 / za
         b = 0.0 if np.isinf(zb) else 1.0 / zb
-        result *= (
-            (train.indices[k + 1] / train.indices[k])
-            * (b - inverse_vc)
-            / (a - inverse_vc)
-        )
+        # (b - 1/VC)/(a - 1/VC) written as (b*VC - 1)/(a*VC - 1): finite at
+        # VC = 0 (normal through the vertex) and, via the explicit limit,
+        # at VC = inf (locally flat point).
+        with np.errstate(invalid="ignore", divide="ignore"):
+            factor = (b * vc - 1.0) / (a * vc - 1.0)
+            factor = np.where(np.isinf(vc), np.divide(b, a) if a != 0.0 else np.inf, factor)
+        result *= (train.indices[k + 1] / train.indices[k]) * factor
     return result
 
 
@@ -285,14 +306,21 @@ def aplanatic_image_surface(
     na_object_sine: float,
     sampling: PupilSampling | None = None,
     tracer: SequentialTracer | None = None,
+    aim_z: float = 0.0,
 ) -> ImageSurface:
     """The surface where the images of displaced object points form.
 
-    For each object height a pupil-filling cone (aimed at the front vertex,
-    since a bare train has no stop) is traced and the emergent rays reduced
-    to their least-squares convergence point. This is the dashed locus of
-    the paper's figures; include ``0.0`` as the first height so
-    :attr:`ImageSurface.sagitta` is measured against the axial image.
+    For each object height a pupil-filling cone is traced and the emergent
+    rays reduced to their least-squares convergence point. This is the
+    dashed locus of the paper's figures; include ``0.0`` as the first
+    height so :attr:`ImageSurface.sagitta` is measured against the axial
+    image.
+
+    A bare train has no stop, so the cones are aimed at the axial point
+    ``z = aim_z`` — the front vertex by default. Systems whose natural
+    pupil sits elsewhere (a projector's, well inside the lens barrel)
+    should aim there instead; the locus, and everything measured on it,
+    is relative to that reference-ray convention.
     """
 
     tracer = tracer or SequentialTracer(train.to_system())
@@ -303,7 +331,7 @@ def aplanatic_image_surface(
     blur = np.full(heights.size, np.nan)
     valid = np.zeros(heights.size, dtype=bool)
     for i, h in enumerate(heights):
-        chief_slope = (0.0 - h) / (0.0 - train.conjugates[0])
+        chief_slope = (0.0 - h) / (aim_z - train.conjugates[0])
         pupil = trace_pupil(
             tracer,
             FieldPoint(y=float(h)),

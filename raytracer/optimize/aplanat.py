@@ -37,8 +37,9 @@ from ..analysis.aberrations.aplanatism import (
     aplanatism_report,
 )
 from ..design.stigmatic import StigmaticTrain
+from .constraints import PENALTY, Aplanatism, Constraint, EvaluationContext, FlatImageSurface
 
-_PENALTY = 1e3
+_PENALTY = PENALTY
 
 
 def _free_indices(train: StigmaticTrain) -> list[int]:
@@ -55,6 +56,38 @@ def _with_free_values(train: StigmaticTrain, free: list[int], x: np.ndarray) -> 
     return train.with_conjugates(intermediates)
 
 
+def _constraints_for(field_heights, flat_field_weight: float) -> list[Constraint]:
+    constraints: list[Constraint] = [Aplanatism()]
+    if field_heights is not None:
+        constraints.append(
+            FlatImageSurface(heights=tuple(field_heights), weight=flat_field_weight)
+        )
+    return constraints
+
+
+def constraint_residuals(
+    train: StigmaticTrain,
+    constraints,
+    *,
+    na_object_sine: float,
+    samples: int = 15,
+) -> np.ndarray:
+    """Concatenated residual blocks of *constraints* on one candidate train.
+
+    Fixed length regardless of how many rays survive (failed slots carry
+    :data:`~raytracer.optimize.constraints.PENALTY`) — the shape stability
+    ``least_squares`` requires. One shared :class:`EvaluationContext` keeps
+    every constraint reading the same cached traces.
+    """
+
+    context = EvaluationContext(train, na_object_sine=na_object_sine, samples=samples)
+    total = sum(c.size(context) for c in constraints)
+    try:
+        return np.concatenate([c.residuals(context) for c in constraints])
+    except (ValueError, ZeroDivisionError, FloatingPointError, np.linalg.LinAlgError):
+        return np.full(total, _PENALTY)
+
+
 def aplanatism_residuals(
     train: StigmaticTrain,
     *,
@@ -65,32 +98,16 @@ def aplanatism_residuals(
 ) -> np.ndarray:
     """Residual vector: per-ray ``M - 1``, plus weighted image-surface sagitta.
 
-    Fixed length ``samples + len(field_heights)`` regardless of how many
-    rays survive, with penalties in the failed slots — the shape stability
-    ``least_squares`` requires.
+    The original fixed pairing, now expressed through the constraint
+    system: ``[Aplanatism(), FlatImageSurface(field_heights, weight)]``.
     """
 
-    n_fields = 0 if field_heights is None else len(field_heights)
-    try:
-        report = aplanatism_report(
-            train, na_object_sine=na_object_sine, samples=samples
-        )
-    except (ValueError, ZeroDivisionError, FloatingPointError):
-        return np.full(samples + n_fields, _PENALTY)
-
-    residuals = np.where(report.valid, report.map_values - 1.0, _PENALTY)
-
-    if n_fields:
-        try:
-            surface = aplanatic_image_surface(
-                train, field_heights, na_object_sine=na_object_sine
-            )
-            sagitta = np.where(surface.valid, surface.sagitta, _PENALTY)
-        except (ValueError, ZeroDivisionError, np.linalg.LinAlgError):
-            sagitta = np.full(n_fields, _PENALTY)
-        residuals = np.concatenate([residuals, flat_field_weight * sagitta])
-
-    return residuals
+    return constraint_residuals(
+        train,
+        _constraints_for(field_heights, flat_field_weight),
+        na_object_sine=na_object_sine,
+        samples=samples,
+    )
 
 
 @dataclass
@@ -122,28 +139,32 @@ class AplanatFit:
         return "\n".join(lines)
 
 
-def optimize_aplanat(
+def optimize_train(
     train: StigmaticTrain,
+    constraints,
     *,
     na_object_sine: float,
     samples: int = 15,
-    field_heights=None,
-    flat_field_weight: float = 0.0,
     bounds: tuple | None = None,
     **least_squares_kwargs,
 ) -> AplanatFit:
-    """Vary the finite intermediate conjugates until the train is aplanatic.
+    """Vary the finite intermediate conjugates to satisfy *constraints*.
 
-    ``train`` supplies the fixed structure (indices, vertices, end
-    conjugates) and the starting intermediates. ``field_heights`` +
-    ``flat_field_weight`` add the flat-field term; weight 0 reproduces the
-    paper's plain aplanatism search. ``bounds`` and any extra keyword
-    arguments go to ``scipy.optimize.least_squares`` untouched.
+    ``constraints`` is any list of
+    :class:`~raytracer.optimize.constraints.Constraint` objects — plug in
+    :class:`~raytracer.optimize.constraints.Aplanatism`,
+    :class:`~raytracer.optimize.constraints.Distortion`,
+    :class:`~raytracer.optimize.constraints.FlatImageSurface`,
+    :class:`~raytracer.optimize.constraints.TargetMagnification`, or your
+    own subclass, in any combination; their residual blocks form one
+    least-squares objective. ``train`` supplies the fixed structure and the
+    starting intermediates; ``bounds`` and extra keyword arguments go to
+    ``scipy.optimize.least_squares`` untouched.
 
     Returns an :class:`AplanatFit`; nothing raises on a poor fit — read
-    ``fit.after.map_rms`` (and ``fit.image_surface.max_sagitta``) and judge
-    against the tolerance your application needs, the way the paper accepts
-    systems only below 1e-10.
+    ``fit.after.map_rms`` (and ``fit.image_surface``) and judge against the
+    tolerance your application needs. The fit's ``image_surface`` covers
+    the union of every field height any constraint asked about.
     """
 
     free = _free_indices(train)
@@ -152,22 +173,20 @@ def optimize_aplanat(
             "train has no finite intermediate conjugates to vary "
             "(collimated-space conjugates are structural)"
         )
+    constraints = list(constraints)
+    if not constraints:
+        raise ValueError("pass at least one constraint")
     x0 = np.array([train.conjugates[1:-1][i] for i in free], dtype=float)
+    probe = EvaluationContext(train, na_object_sine=na_object_sine, samples=samples)
+    total = sum(c.size(probe) for c in constraints)
 
     def objective(x: np.ndarray) -> np.ndarray:
         try:
             candidate = _with_free_values(train, free, x)
         except ValueError:
-            return np.full(
-                samples + (0 if field_heights is None else len(field_heights)),
-                _PENALTY,
-            )
-        return aplanatism_residuals(
-            candidate,
-            na_object_sine=na_object_sine,
-            samples=samples,
-            field_heights=field_heights,
-            flat_field_weight=flat_field_weight,
+            return np.full(total, _PENALTY)
+        return constraint_residuals(
+            candidate, constraints, na_object_sine=na_object_sine, samples=samples
         )
 
     kwargs = {"x_scale": np.maximum(np.abs(x0), 1.0), **least_squares_kwargs}
@@ -184,11 +203,55 @@ def optimize_aplanat(
             optimized, na_object_sine=na_object_sine, samples=samples
         ),
     )
-    if field_heights is not None:
+    heights = sorted(
+        {0.0}
+        | {
+            float(h)
+            for c in constraints
+            for h in getattr(c, "heights", ())
+        }
+    )
+    aims = {float(getattr(c, "aim_z", 0.0)) for c in constraints if getattr(c, "heights", ())}
+    if len(heights) > 1:
         fit.image_surface = aplanatic_image_surface(
-            optimized, field_heights, na_object_sine=na_object_sine
+            optimized, heights, na_object_sine=na_object_sine,
+            aim_z=aims.pop() if len(aims) == 1 else 0.0,
         )
     return fit
 
 
-__all__ = ["AplanatFit", "aplanatism_residuals", "optimize_aplanat"]
+def optimize_aplanat(
+    train: StigmaticTrain,
+    *,
+    na_object_sine: float,
+    samples: int = 15,
+    field_heights=None,
+    flat_field_weight: float = 0.0,
+    bounds: tuple | None = None,
+    **least_squares_kwargs,
+) -> AplanatFit:
+    """The original single-purpose entry point: aplanatism, optionally flat.
+
+    Equivalent to :func:`optimize_train` with ``[Aplanatism()]`` plus a
+    :class:`~raytracer.optimize.constraints.FlatImageSurface` when
+    ``field_heights`` is given — kept because "make this train aplanatic"
+    is the common case and reads better without constraint plumbing.
+    """
+
+    return optimize_train(
+        train,
+        _constraints_for(field_heights, flat_field_weight),
+        na_object_sine=na_object_sine,
+        samples=samples,
+        bounds=bounds,
+        **least_squares_kwargs,
+    )
+
+
+__all__ = [
+    "AplanatFit",
+    "aplanatism_residuals",
+    "constraint_residuals",
+    "optimize_aplanat",
+    "optimize_train",
+]

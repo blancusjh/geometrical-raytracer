@@ -1,0 +1,19 @@
+# Formlabs SLA printing resins, cured — optical data for printable lenses.
+#
+# FORMLABS_CLEAR_V4: three-term Cauchy fit (n = c1 + c2/lambda^2 + c3/lambda^4,
+# lambda in um) to the manufacturer's measured refractive indices for cured
+# Clear Resin V4: n = 1.514 @ 486 nm, 1.511 @ 546 nm, 1.508 @ 589 nm,
+# 1.505 @ 656 nm ("Optical properties of selected Formlabs SLA resins",
+# formlabs.com/support). The fit reproduces every measured point within
+# 3.3e-4 (the table itself is rounded to 1e-3) and gives n_d = 1.5084,
+# V_d = 55.5. Valid over the measured 486-656 nm range; treat values
+# outside it as extrapolation. Independent measurements (Optica OME 11,
+# 3392 (2021)) report 1.505-1.533 over 405-670 nm and an Abbe number of
+# ~57, consistent with this fit.
+#
+# FORMLABS_CLEAR_V5: manufacturer-stated broadband average only, no
+# dispersion table published — usable for a first monochromatic layout,
+# not for chromatic analysis.
+name,model,c1,c2,c3,c4,c5,c6,source
+FORMLABS_CLEAR_V4,cauchy,1.484022873,0.011281974,-0.000989565,,,,"Cauchy fit to Formlabs measured table 486-656 nm (formlabs.com/support, Clear Resin V4)"
+FORMLABS_CLEAR_V5,constant,1.6177,,,,,,"Formlabs broadband average for Clear Resin V5 (formlabs.com/support); no dispersion data"

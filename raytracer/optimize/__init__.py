@@ -8,6 +8,34 @@ optimizer buys a second property (aplanatism, a flat image surface) with
 the remaining freedom.
 """
 
-from .aplanat import AplanatFit, aplanatism_residuals, optimize_aplanat
+from .aplanat import (
+    AplanatFit,
+    aplanatism_residuals,
+    constraint_residuals,
+    optimize_aplanat,
+    optimize_train,
+)
+from .constraints import (
+    Aplanatism,
+    AxialColor,
+    Constraint,
+    Distortion,
+    EvaluationContext,
+    FlatImageSurface,
+    TargetMagnification,
+)
 
-__all__ = ["AplanatFit", "aplanatism_residuals", "optimize_aplanat"]
+__all__ = [
+    "AplanatFit",
+    "aplanatism_residuals",
+    "constraint_residuals",
+    "optimize_aplanat",
+    "optimize_train",
+    "Constraint",
+    "EvaluationContext",
+    "Aplanatism",
+    "FlatImageSurface",
+    "Distortion",
+    "TargetMagnification",
+    "AxialColor",
+]

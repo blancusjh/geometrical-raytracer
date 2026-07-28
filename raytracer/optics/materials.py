@@ -88,6 +88,29 @@ class AbbeMaterial:
 
 
 @dataclass(frozen=True)
+class CauchyMaterial:
+    """Refractive index from an explicit Cauchy series.
+
+    ``n(lambda) = c_0 + c_1 / lambda**2 + c_2 / lambda**4 + ...`` with
+    ``lambda`` in micrometres — the classic empirical dispersion form for
+    weakly absorbing materials in the visible. Where :class:`AbbeMaterial`
+    *derives* a two-term Cauchy curve from a catalog nd/Vd pair, this class
+    takes the coefficients directly, for materials characterized by a
+    measured fit rather than a catalog entry (3-D printing resins,
+    immersion liquids, plastics).
+    """
+
+    name: str
+    coefficients: tuple[float, ...]
+
+    def index(self, wavelength_um: float) -> float:
+        _check_wavelength(wavelength_um, f"CauchyMaterial {self.name!r}")
+        return sum(
+            c / wavelength_um ** (2 * k) for k, c in enumerate(self.coefficients)
+        )
+
+
+@dataclass(frozen=True)
 class SellmeierMaterial:
     """Refractive index from a measured 3-term Sellmeier dispersion curve.
 
@@ -225,6 +248,7 @@ __all__ = [
     "Material",
     "ConstantIndex",
     "AbbeMaterial",
+    "CauchyMaterial",
     "SellmeierMaterial",
     "sellmeier_glass",
     "MaterialLibrary",
