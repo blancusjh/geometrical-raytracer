@@ -18,12 +18,13 @@ drawing:
   otherwise the outline closes with a rim between the two face edges.
 - :func:`body_outlines` assembles every body of a system and **cuts
   neighbouring bodies apart** where one lens's back face crosses the next
-  lens's front face: both parts are trimmed to the crossing height, so
-  bodies never interpenetrate — each part is a well-defined solid, ready
-  for future per-lens export. :func:`body_overlaps` reports where such
-  cuts were needed; an overlap between *different* media is a genuine
-  ambiguity of the system description, worth a design review, not only a
-  drawing fix.
+  lens's front face. The space between the crossed faces is claimed by
+  both mathematical solids — a genuine ambiguity of the description for
+  two different media — so it is assigned to *neither* drawn part: both
+  bodies end at the cut height and the ambiguous annulus stays hollow.
+  Each part is a well-defined solid covering only unambiguous glass,
+  ready for future per-lens export. :func:`body_overlaps` reports where
+  cuts were needed — worth a design review, not only a drawing fix.
 - :func:`index_color` maps refractive index to fill colors on the
   celestial-blue ramp of the package's palette: nothing for n = 1, then
   sky blue deepening with density — denser media draw darker,
@@ -32,11 +33,12 @@ drawing:
   axes: bodies, bare surfaces, mirrors (drawn over the sub-aperture the
   rays actually use, via :func:`~raytracer.viz.sag_drawing.mirror_arcs_from_paths`,
   when rays are traced), meridional ray fans, and the image plane — the
-  shared meridional renderer for figures and notebooks. A face trimmed by
-  an inter-lens cut that still refracts traced rays beyond the cut is
-  continued as a dashed curve over the heights the rays reach: the
-  sequential model keeps the whole mathematical surface, and the drawing
-  says so without pretending the solid extends there.
+  shared meridional renderer for figures and notebooks. Any refracting
+  face whose traced rays hit beyond its drawn extent — past an inter-lens
+  cut, or past a clear aperture — is continued as a dashed curve over the
+  heights the rays reach: the sequential model keeps the whole
+  mathematical surface, every drawn refraction happens on a drawn curve,
+  and no kink ever sits inside a filled body.
 """
 
 from __future__ import annotations
@@ -205,27 +207,74 @@ def body_overlaps(system: OpticalSystem) -> list[tuple[int, int, float]]:
     return overlaps
 
 
+def _rim_stays_clear(
+    system: OpticalSystem, i: int, e_i: float, j: int, p: int, h_cut: float
+) -> bool:
+    """True when the straight rim of the upstream body avoids the ambiguity.
+
+    The rim runs from the cut point on the crossed interface up to the
+    front face's edge ``(z_i(e_i), e_i)``. The ambiguous region is bounded
+    in front by the downstream lens's front face *p* and exists only while
+    both crossed faces exist — up to the shorter of *j*'s and *p*'s usable
+    extents; the rim is clear while it stays in front of *p* there.
+    """
+
+    if e_i <= h_cut:
+        return True
+    z_cut = float(_face(system, p)(np.asarray([h_cut]))[0])
+    z_top = float(_face(system, i)(np.asarray([e_i]))[0])
+    upper = min(
+        e_i,
+        _usable_semidiameter(system, j, 50.0),
+        _usable_semidiameter(system, p, 50.0),
+    )
+    if upper <= h_cut:
+        return True
+    h = np.linspace(h_cut, upper, 120)
+    rim_z = z_cut + (z_top - z_cut) * (h - h_cut) / (e_i - h_cut)
+    return bool((rim_z <= _face(system, p)(h) + 1e-9).all())
+
+
 def body_outlines(system: OpticalSystem):
     """Every body's outline, with neighbouring parts cut apart.
 
-    Yields ``(i, j, n, name, polygon)`` per body. Where
+    Yields ``(i, j, n, name, polygon, (e_front, e_back))`` per body. Where
     :func:`body_overlaps` finds body A's back face crossing body B's front
-    face, both faces are trimmed to the crossing height, so the returned
-    parts never interpenetrate.
+    face, the space between the crossed faces above the cut is ambiguous —
+    both mathematical solids claim it — so it is assigned to *neither*
+    part: A's back face is trimmed to the cut, B is capped **entirely**
+    (both faces) at the cut height, because any rim from B's trimmed front
+    edge to a longer back edge would sweep across the ambiguous region and
+    claim it for B. A keeps its full front face only while its own rim
+    stays in front of the region (checked; otherwise A is capped too).
+    The returned parts never interpenetrate, and no part covers space the
+    description leaves ambiguous.
     """
 
+    gaps = dense_gaps(system)
     caps: dict[int, float] = {}
+
+    def cap(face: int, height: float) -> None:
+        caps[face] = min(caps.get(face, np.inf), height)
+
     for back_face, front_face, h_cut in body_overlaps(system):
-        caps[back_face] = min(caps.get(back_face, np.inf), h_cut)
-        caps[front_face] = min(caps.get(front_face, np.inf), h_cut)
+        cap(back_face, h_cut)
+        cap(front_face, h_cut)
+        for i, j, _, _ in gaps:
+            if i == front_face:  # downstream body: cap it entirely
+                cap(j, h_cut)
+            if j == back_face:  # upstream body: keep the front face only
+                e_i = _usable_semidiameter(system, i, 50.0)
+                if not _rim_stays_clear(system, i, e_i, j, front_face, h_cut):
+                    cap(i, h_cut)
 
     outlines = []
-    for i, j, n, name in dense_gaps(system):
-        polygon, _, _ = element_outline(
+    for i, j, n, name in gaps:
+        polygon, extents, _ = element_outline(
             system, i, j,
             front_extent=caps.get(i), back_extent=caps.get(j),
         )
-        outlines.append((i, j, n, name, polygon))
+        outlines.append((i, j, n, name, polygon, extents))
     return outlines
 
 
@@ -324,8 +373,9 @@ def draw_system(
 
     # -- bodies, cut apart, colored by density -----------------------------
     drawn_faces: set[int] = set()
+    drawn_extent: dict[int, float] = {}
     face_edge_color: dict[int, str] = {}
-    for i, j, n, name, polygon in body_outlines(system):
+    for i, j, n, name, polygon, (e_front, e_back) in body_outlines(system):
         colors = (material_colors or {}).get(name.upper()) or index_color(n)
         if colors is None:
             continue
@@ -333,31 +383,9 @@ def draw_system(
         ax.fill(polygon[:, 0], polygon[:, 1], facecolor=face, edgecolor=edge,
                 lw=1.1, alpha=0.8, zorder=1)
         drawn_faces.update((i, j))
+        drawn_extent[i] = max(drawn_extent.get(i, 0.0), e_front)
+        drawn_extent[j] = max(drawn_extent.get(j, 0.0), e_back)
         face_edge_color[i] = face_edge_color[j] = edge
-
-    # Faces trimmed by an inter-lens cut may still be *refracting* rays
-    # beyond the cut — the sequential model keeps the whole mathematical
-    # surface even where the solid part was trimmed. Continue such a face
-    # as a dashed curve over the heights the traced rays actually reach,
-    # so every drawn refraction happens on a drawn surface and the cut
-    # region is visibly not part of either solid.
-    if traced:
-        paths_arr = np.stack([path for path, _ in traced])
-        hit_tops = np.abs(paths_arr[:, 1:-1, 1]).max(axis=0)
-        for back_face, front_face, h_cut in body_overlaps(system):
-            for k in (back_face, front_face):
-                top = min(
-                    _usable_semidiameter(system, k, 50.0),
-                    1.02 * float(hit_tops[k]),
-                )
-                if top <= h_cut:
-                    continue
-                h = np.linspace(h_cut, top, 60)
-                z = system.vertices[k] + system.rows[k].profile.sag(h)
-                color = face_edge_color.get(k, "#3a6ea5")
-                for sign in (1.0, -1.0):
-                    ax.plot(z, sign * h, color=color, lw=1.0, alpha=0.9,
-                            ls=(0, (2.6, 2.2)), zorder=2)
 
     # -- mirrors and unpaired refracting faces -----------------------------
     if system.mirror_indices and traced:
@@ -378,6 +406,34 @@ def draw_system(
             h = np.linspace(-semi, semi, 200)
             z = system.vertices[i] + row.profile.sag(np.abs(h))
             ax.plot(z, h, color="#3a6ea5", lw=1.6, zorder=2)
+            drawn_extent[i] = semi
+
+    # The sequential model keeps every face's whole mathematical surface,
+    # while a solid part may end earlier — at an inter-lens cut, or at a
+    # clear aperture smaller than what steep rays reach. Any refracting
+    # face whose traced hits land beyond its drawn extent is continued as
+    # a dashed curve over the heights the rays actually reach: every drawn
+    # refraction happens on a drawn curve, and the region beyond the solid
+    # is visibly not glass.
+    if traced:
+        paths_arr = np.stack([path for path, _ in traced])
+        hit_tops = np.abs(paths_arr[:, 1:-1, 1]).max(axis=0)
+        for k, row in enumerate(system.rows):
+            if row.kind is not SurfaceKind.REFRACT or k not in drawn_extent:
+                continue
+            shown = drawn_extent[k]
+            top = min(
+                _usable_semidiameter(system, k, 50.0),
+                1.02 * float(hit_tops[k]),
+            )
+            if top <= shown * 1.001:
+                continue
+            h = np.linspace(shown, top, 60)
+            z = system.vertices[k] + row.profile.sag(h)
+            color = face_edge_color.get(k, "#3a6ea5")
+            for sign in (1.0, -1.0):
+                ax.plot(z, sign * h, color=color, lw=1.0, alpha=0.9,
+                        ls=(0, (2.6, 2.2)), zorder=2)
 
     for path, color in traced:
         finite = path[np.isfinite(path[:, 2])]

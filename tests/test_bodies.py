@@ -138,53 +138,98 @@ def test_neighbouring_bodies_of_different_media_are_cut_apart():
     raw = [element_outline(system, i, j)[0] for i, j in ((0, 1), (2, 3))]
     assert interior_collisions(*raw) > 0  # the uncut solids interpenetrate
 
-    cut = {(i, j): poly for i, j, _, _, poly in body_outlines(system)}
+    cut = {(i, j): poly for i, j, _, _, poly, _ in body_outlines(system)}
     assert interior_collisions(cut[(0, 1)], cut[(2, 3)]) == 0
 
 
-def test_cut_respects_the_within_body_join():
-    """Capping the BK7 front face at the cut must not unhook the Ω join of
-    its own body: the lens still closes where its two faces meet, not at
-    the usable-branch clamp of the back face."""
+def test_no_part_claims_the_ambiguous_region():
+    """The space between the crossed faces above the cut belongs to both
+    mathematical solids, so the drawn parts must leave it hollow: the
+    downstream BK7 body caps entirely at the cut (a longer back face would
+    drag its rim across the region), while the SF11 body keeps its full
+    front face because its rim stays clear in front of the region."""
 
     system = ultrawide_system()
-    cut = {(i, j): poly for i, j, _, _, poly in body_outlines(system)}
-    assert np.abs(cut[(2, 3)][:, 1]).max() == pytest.approx(11.266, abs=5e-3)
+    h_cut = body_overlaps(system)[0][2]
+    cut = {(i, j): poly for i, j, _, _, poly, _ in body_outlines(system)}
+    assert np.abs(cut[(2, 3)][:, 1]).max() == pytest.approx(h_cut, abs=1e-9)
     assert np.abs(cut[(0, 1)][:, 1]).max() == pytest.approx(22.0, abs=1e-9)
 
+    # the ambiguous annulus — between the crossed faces, above the cut —
+    # is covered by neither part
+    from matplotlib.path import Path as PolygonPath
 
-def test_steep_rays_refract_on_drawn_surfaces():
-    """A 55°-aim ray hits the ultrawide front face at h ≈ 14.2 mm — inside
-    the drawn face — and hits the two cut faces beyond the cut, where
-    draw_system must continue them as dashed curves up to the hit heights."""
+    back1, front2 = system.rows[1].profile, system.rows[2].profile
+    h = np.linspace(h_cut * 1.01, 0.98 * back1.max_usable_height, 40)
+    z_lo = system.vertices[2] + front2.sag(h)
+    z_hi = system.vertices[1] + back1.sag(h)
+    probe = np.column_stack([0.5 * (z_lo + z_hi), h])  # zone midline
+    for polygon in cut.values():
+        assert not PolygonPath(polygon).contains_points(probe).any()
+
+
+def test_steep_rays_refract_on_drawn_curves_never_inside_a_body():
+    """A 55°-aim ray refracts at h ≈ 14.2 on the drawn front face and, past
+    the cut, on dashed continuations of faces 1, 2 and 3 — every kink must
+    lie on a drawn curve and no kink may sit inside a filled body."""
 
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.path import Path as PolygonPath
 
     train = read_train(
         DATA / "optical_systems/ultrawide/sf11_bk7_virtual_object.json",
         materials=default_materials(),
     )
+    system = train.to_system()
     fig, ax = plt.subplots()
     try:
-        draw_system(ax, train, fields=(np.sin(np.radians(55.0)),),
-                    rays=3, launch=-30.0)
-        cut = {(i, j): poly
-               for i, j, _, _, poly in body_outlines(train.to_system())}
-        assert np.abs(cut[(0, 1)][:, 1]).max() > 14.2  # covers the steep hit
+        paths = draw_system(ax, train, fields=(np.sin(np.radians(55.0)),),
+                            rays=3, launch=-30.0)
+        assert paths is not None
+        kinks = paths[:, 1:-1, :]  # surface hits of every traced ray
 
+        outlines = {(i, j): poly
+                    for i, j, _, _, poly, _ in body_outlines(system)}
+        assert np.abs(outlines[(0, 1)][:, 1]).max() > 14.2  # steep hit covered
+
+        # no refraction point sits strictly inside any filled body
+        points = kinks[:, :, [2, 1]].reshape(-1, 2)
+        for polygon in outlines.values():
+            inside = PolygonPath(polygon).contains_points(points, radius=-1e-6)
+            assert not inside.any()
+
+        # dashed continuations start at each face's drawn extent and cover
+        # the hits — the outermost is the BK7 back face's (h ≈ 8.0)
         dashed = [line for line in ax.lines
                   if line.get_linestyle() not in ("-", "None", ":")
                   and len(line.get_xdata()) > 2]
-        assert dashed, "cut faces hit beyond the cut must draw extensions"
-        tops = [np.abs(line.get_ydata()).max() for line in dashed]
-        h_cut = body_overlaps(train.to_system())[0][2]
+        assert dashed, "faces hit beyond their drawn extent must continue dashed"
+        h_cut = body_overlaps(system)[0][2]
         assert min(np.abs(line.get_ydata()).min() for line in dashed) == (
             pytest.approx(h_cut, abs=1e-6)
         )
-        assert max(tops) == pytest.approx(7.33, abs=0.15)  # SF11 back-face hits
+        hit3 = np.abs(kinks[:, 3, 1]).max()
+        assert max(np.abs(line.get_ydata()).max() for line in dashed) == (
+            pytest.approx(1.02 * hit3, rel=1e-6)
+        )
+
+        # every kink lies on a drawn curve: within its face's solid extent
+        # (the 14.2 mm hit on the front face), or on a dashed continuation
+        extents = {}
+        for i, j, _, _, _, (e_front, e_back) in body_outlines(system):
+            extents[i], extents[j] = e_front, e_back
+        for k in range(kinks.shape[1]):
+            for z, y in kinks[:, k, :][:, [2, 1]]:
+                if abs(y) <= extents[k] + 1e-9:
+                    continue  # refracts on the drawn solid face
+                distances = [
+                    np.hypot(line.get_xdata() - z, line.get_ydata() - y).min()
+                    for line in dashed
+                ]
+                assert min(distances) < 0.12
     finally:
         plt.close(fig)
 

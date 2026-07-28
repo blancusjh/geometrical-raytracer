@@ -389,7 +389,10 @@ superficies encierra qué medio se *deduce* de la descripción estándar
 (aire → Σ1 → vidrio → Σ2 → aire), el contorno se cierra en la intersección
 de las caras cuando se cruzan bajo la apertura (la unión Ω del generador de
 STL del autor), los cuerpos vecinos que se interpenetran se cortan a la
-altura del cruce — piezas separadas y bien definidas, listas para
+altura del cruce — la región que ambos sólidos reclaman no pertenece a
+ninguna pieza; los rayos que el modelo secuencial refracta más allá del
+corte lo hacen sobre la continuación discontinua de la cara matemática,
+nunca dentro de un cuerpo — piezas separadas y bien definidas, listas para
 exportarse lente a lente — y cada cuerpo se colorea por densidad óptica
 sobre una rampa de azul celeste: a mayor índice, más profundo el azul,
 automáticamente —, `scene` para la escena neutral

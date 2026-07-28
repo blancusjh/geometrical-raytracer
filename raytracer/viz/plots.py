@@ -60,7 +60,7 @@ def layout_figure(
     fig, ax = plt.subplots(figsize=figsize)
 
     solid_signatures: set[tuple[float, float]] = set()
-    for i, j, n, material, outline in body_outlines(system):
+    for i, j, n, material, outline, _extents in body_outlines(system):
         for k in (i, j):
             solid_signatures.add(
                 (round(float(system.vertices[k]), 6), round(system.rows[k].radius, 6))
