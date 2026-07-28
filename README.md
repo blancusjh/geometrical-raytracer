@@ -448,7 +448,12 @@ dígito del análisis de referencia) y `euv_six_mirror.ipynb` (objetivo EUV de
 seis espejos, US 7,151,592, NA 0.22, λ=13.4 nm — con refit de asféricas por
 mínimos cuadrados, frente de onda por eikonal e imagen de Abbe). Los dos
 incluyen su malla de distorsión, la del EUV centrada en su campo anular de
-trabajo, a 120 mm del eje.
+trabajo, a 120 mm del eje. `stigmatism_and_aplanatism.ipynb` recorre completa
+la sección de aplanatismo: los tres singletes, el mapa `M`, la superficie
+imagen aplanática, la optimización del triplete cementado, las mallas de
+distorsión de los tres SOL (7,2 % → 0,085 % → 0,002 %), abanicos de rayos,
+métricas de campo y la tabla de Seidel que separa esfera, estigmático y
+aplanático.
 
 ## Tests
 
