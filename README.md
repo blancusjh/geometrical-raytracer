@@ -5,8 +5,9 @@ la ecuación de cada superficie, sin aproximación paraxial— a través de
 sistemas ópticos reales, y mide lo que sale: aberraciones, distorsión,
 frente de onda, PSF, formación de imagen.
 
-**10.000 líneas · 8 paquetes en cadena estricta · 163 tests contra verdades
-analíticas · dos objetivos de patente replicados dígito a dígito**
+**11.000 líneas · 9 paquetes en cadena estricta · 192 tests contra verdades
+analíticas · dos objetivos de patente replicados dígito a dígito · lentes
+estigmáticas y aplanáticas por superficies de Descartes**
 
 ![Objetivo DUV US7557996, tres longitudes de onda](docs/img/duv_3d_spectrum.png)
 
@@ -194,6 +195,94 @@ En 3-D, el mismo óvalo revuelto y recorrido por un haz denso:
 
 ![Óvalo de Descartes en 3-D](docs/img/cartesian_oval_3d.png)
 
+## Lentes estigmáticas y aplanatismo
+
+Un óvalo de Descartes es estigmático para *un* par de conjugados. Encadenar
+N de ellos, de modo que la imagen de cada superficie sea el objeto de la
+siguiente, produce una **lente ovoide estigmática** (SOL, *stigmatic ovoid
+lens*): libre de aberración esférica a cualquier apertura, sin aproximación
+paraxial en ninguna parte. Para conjugados extremos fijos, las conjugadas
+intermedias quedan libres — toda elección es estigmática, y esa libertad es
+la moneda con que se compra la segunda propiedad: el **aplanatismo**, la
+condición del seno de Abbe, que elimina también el coma.
+
+La teoría es la de Silva-Lora & Torres: por cada superficie, la normal en el
+punto de impacto cruza el eje a una distancia `V_k C_k` del vértice, con
+forma cerrada en los parámetros GOTS (su Ec. 24); el cociente de senos
+factoriza sobre las superficies como `sin u₀ / sin u_N = (n_N/n₀) · g_t · M`,
+y el sistema es aplanático exactamente cuando el mapa `M ≡ 1` para todo rayo
+(Ec. 25). El paquete implementa las dos rutas — la forma cerrada evaluada en
+los puntos de impacto trazados, y el cociente de senos medido sobre los
+rayos exactos — y los tests exigen que coincidan a 1e-9 por rayo.
+
+```python
+from raytracer.design import StigmaticTrain
+from raytracer.analysis import aplanatism_report, aplanatic_image_surface
+from raytracer.optimize import optimize_aplanat
+
+# La familia: tres vidrios cementados, 4 superficies de Descartes,
+# conjugados -100 -> +90. Estigmática para cualquier (d1, d2, d3).
+train = StigmaticTrain(
+    indices=(1.0, 1.517122, 1.670591, 1.851280, 1.0),
+    vertices=(0.0, 15.0, 25.0, 35.0),
+    conjugates=(-100.0, -150.0, -600.0, 450.0, 90.0),
+    semidiameter=10.0,
+)
+print(aplanatism_report(train, na_object_sine=0.195).map_rms)   # 3.2e-03
+
+fit = optimize_aplanat(train, na_object_sine=0.195, samples=21,
+                       bounds=(-3000, 3000), diff_step=1e-4,
+                       xtol=1e-14, ftol=1e-14, gtol=1e-14)
+print(fit.after.map_rms)                                        # 3.1e-06
+```
+
+Hay un aplanático **exacto** con solo dos superficies: el singlete Omega
+simétrico (`StigmaticTrain.symmetric_singlet`), con la conjugada intermedia
+en el centro de la lente. Por simetría especular cada rayo sale con el seno
+con que entró, y `M = 1` queda en 2e-16 — precisión de máquina, verificado
+por trazado. Su firma se ve en el desenfoque fuera de eje: el blur del
+singlete estigmático crece *lineal* con el campo (coma), el del aplanático
+crece *cuadrático* (el coma se fue, queda astigmatismo). Medido: cocientes
+2.00 y 4.00 exactos al duplicar el campo.
+
+![Aplanatismo: mapa M, superficie imagen, crecimiento del blur](docs/img/aplanatism.png)
+
+El panel central muestra **la superficie donde se forma la imagen
+aplanática** — la línea discontinua de las figuras del artículo —
+localizada trazando un cono desde cada punto objeto desplazado y reduciendo
+el haz emergente a su punto de mínimos cuadrados (`aplanatic_image_surface`).
+El aplanatismo no la aplana: el singlete simétrico es aplanático exacto con
+7,8 mm de sagita en 3 mm de campo. Aplanarla es una restricción adicional
+que el optimizador acepta como término de campo plano (`flat_field_weight`),
+y el experimento del ejemplo la recorre por número de superficies:
+
+| N superficies | (M−1)_RMS | sagita máx (campo 3 mm) |
+|---|---|---|
+| 2 (aplanático exacto, sin libertad) | 1.7e-16 | 7.77 mm |
+| 4 (cementado, peso de campo plano) | 2.9e-04 | 0.0000 mm |
+| 6 (triplete en aire, peso de campo plano) | 7.9e-06 | 0.0001 mm |
+
+Con 3 grados de libertad (N=4) se compra aplanatismo *o* campo plano; con 5
+(N=6) alcanza para los dos: el mínimo en superficies que logra **aplanatismo
+en un plano**, bajo las tolerancias del ejemplo, es 6. Las conjugadas
+intermedias infinitas declaran espacios colimados y son estructurales — el
+optimizador no las toca — y una superficie con sus dos conjugadas vecinas en
+infinito degenera exactamente en un **plano**: así entra una cara plana,
+fabricable, en un tren exactamente estigmático.
+
+La construcción en dos superficies sigue la abstracción Ω (`OmegaLens`) del
+[generador de STL de superficies cartesianas](https://github.com/blancusjh/cartesian-surfaces-stl-generator)
+del autor; aquí la misma lente queda lista para el trazador secuencial.
+
+**Fuentes.** A. Silva-Lora y R. Torres, *Aplanatism in stigmatic optical
+systems*, J. Opt. Soc. Am. A 37 (2020); *Superconical aplanatic ovoid
+singlet lenses*, J. Opt. Soc. Am. A 37, 1155–1165 (2020); *Explicit
+Cartesian oval as a superconic surface for stigmatic imaging optical systems
+with real or virtual source or image*, Proc. R. Soc. A 476, 20190894 (2020).
+La parametrización GOTS de `raytracer.surfaces.cartesian_oval` transcribe la
+del segundo artículo; `raytracer.analysis.aberrations.aplanatism` implementa
+las Ecs. (24)–(31) del primero.
+
 ## La ontología del paquete
 
 Los paquetes están cortados por la **naturaleza** de cada pieza, y las
@@ -201,7 +290,7 @@ dependencias forman una cadena estrictamente descendente. Cada import a
 nivel de módulo apunta a un paquete anterior en el orden:
 
 ```
-math  →  surfaces  →  optics  →  design  →  propagation  →  io  →  analysis  →  viz
+math → surfaces → optics → design → propagation → io → analysis → optimize → viz
 ```
 
 Esas son las aristas reales del grafo, leídas del AST de cada módulo:
@@ -209,12 +298,13 @@ Esas son las aristas reales del grafo, leídas del AST de cada módulo:
 | paquete | importa a nivel de módulo | líneas |
 |---|---|---|
 | **`math`** | — | 463 |
-| **`surfaces`** | `math` | 1136 |
+| **`surfaces`** | `math` | 1157 |
 | **`optics`** | `math`, `surfaces` | 947 |
-| **`design`** | `surfaces`, `optics` | 378 |
+| **`design`** | `surfaces`, `optics` | 667 |
 | **`propagation`** | `math`, `surfaces`, `optics`, `design` | 1094 |
 | **`io`** | `surfaces`, `optics`, `design` | 201 |
-| **`analysis`** | `design`, `propagation` | 1928 |
+| **`analysis`** | `design`, `propagation` | 2274 |
+| **`optimize`** | `design`, `analysis` | 207 |
 | **`viz`** | `surfaces`, `optics`, `design`, `propagation`, `analysis` | 3863 |
 
 `tests/test_architecture.py` recorre el AST de cada módulo y lo comprueba, de
@@ -247,8 +337,9 @@ prescripción: radio, espesor al siguiente, material, semidiámetro, constante
 cónica, coeficientes asféricos, tipo de superficie. `OpticalSystem` es la
 secuencia completa, con los vértices acumulados, los índices a cada lado de
 cada superficie, el índice del diafragma y los planos objeto e imagen.
-Describe **qué es** un sistema y contiene cero lógica de propagación: un
-diseño existe antes de que exista un motor que lo trace.
+`StigmaticTrain` es la familia paramétrica de lentes ovoides estigmáticas
+(ver abajo). Describe **qué es** un sistema y contiene cero lógica de
+propagación: un diseño existe antes de que exista un motor que lo trace.
 
 **`propagation` — los algoritmos.** El único lugar que gobierna qué hace un
 rayo después de chocar. `sequential` vectoriza N rayos por M superficies en
@@ -267,8 +358,14 @@ archivo es una naturaleza distinta de lo que un sistema es.
 por el objeto de la medida: `imaging` mira la imagen (spots, PSF escalar,
 imagen aérea de Abbe, contraste) y `aberrations` mira el error de rayo y de
 frente de onda (métricas de campo, distorsión, Seidel, cromática, eikonal,
-Zernike, ray fans, estigmatismo). Los dos re-exportan desde
+Zernike, ray fans, estigmatismo, aplanatismo). Los dos re-exportan desde
 `raytracer.analysis`, derivando la lista de sus propios `__all__`.
+
+**`optimize` — mover parámetros.** Todo lo anterior a este paquete mide;
+este varía. Su rasgo distintivo es *qué* varía: no coeficientes de una
+superficie ajustándose a una forma, sino las conjugadas libres de familias
+cuyos miembros ya son todos exactos en un sentido (estigmáticos), gastando
+esa libertad en comprar una segunda propiedad: aplanatismo, campo plano.
 
 **`viz` — presentación.** `plots` para las figuras matplotlib, `scene` para
 la escena neutral de ítems, `gl/` para el visor OpenGL (cámara, shaders,
@@ -321,6 +418,7 @@ python -m examples.lithography.duv_objective_2d              # el mismo objetivo
 python -m examples.stigmatic_surfaces.ellipse_mirror
 python -m examples.stigmatic_surfaces.cartesian_oval_refractor_2d
 python -m examples.stigmatic_surfaces.cartesian_oval_refractor_3d --beam
+python -m examples.stigmatic_surfaces.aplanatic_sol            # esfera vs estigmática vs aplanática
 python -m examples.telescopes.keplerian                      # y galilean, newtonian
 python -m examples.imaging.single_lens_relay                 # matplotlib y OpenGL
 python -m examples.imaging.interactive_doublet               # arrastra fuente/lente/pantalla
@@ -355,8 +453,8 @@ trabajo, a 120 mm del eje.
 ## Tests
 
 ```bash
-pytest                                    # 159 tests
-xvfb-run -a pytest                        # 163, incluidos los de contexto OpenGL
+pytest                                    # 188 tests
+xvfb-run -a pytest                        # 192, incluidos los de contexto OpenGL
 ```
 
 Las verdades de referencia son analíticas donde existen: conjugados de
@@ -366,8 +464,11 @@ tras quitar tilt y desenfoque), primer cero de Airy, colapso de contraste en
 el límite de coherencia parcial, y linealidad aditiva del framebuffer HDR.
 Los dos métodos de intersección se contrastan entre sí sobre el óvalo de
 Descartes —la única superficie que ofrece ambas descripciones— exigiendo que
-caigan en el mismo punto para el mismo rayo. La cadena de dependencias entre
-paquetes se comprueba leyendo el AST de cada módulo.
+caigan en el mismo punto para el mismo rayo. La Ec. (24) del artículo de
+aplanatismo se contrasta con la construcción geométrica de la normal, y el
+mapa `M` con el cociente de senos de los rayos exactos, a 1e-9 por rayo; el
+singlete simétrico ancla el caso `M ≡ 1` a precisión de máquina. La cadena
+de dependencias entre paquetes se comprueba leyendo el AST de cada módulo.
 
 ## Estructura del repositorio
 

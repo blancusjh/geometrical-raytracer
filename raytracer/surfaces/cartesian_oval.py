@@ -56,7 +56,26 @@ def gots_params(n0: float, z0: float, ni: float, zi: float) -> tuple[float, floa
     ``zi`` the image side. Signs follow the usual optics convention: ``z0`` is
     negative for an object to the left of the vertex, ``zi`` positive for a
     real image to the right.
+
+    Either conjugate may be ``±inf``, meaning collimated light on that side;
+    the parameters are then the exact limits of Eqs. (3)-(6) of Silva-Lora &
+    Torres (2020) and the surface degenerates to the corresponding Cartesian
+    conic (e.g. the collimating hyperbola for a real object into a denser
+    medium). With *both* conjugates infinite the surface is the plane
+    ``z = 0``, and all four parameters are zero.
     """
+
+    z0_inf, zi_inf = np.isinf(z0), np.isinf(zi)
+    if z0_inf and zi_inf:
+        return 0.0, 0.0, 0.0, 0.0
+    if zi_inf:
+        G = -(ni**2) / n0**2
+        O = -n0 / (z0 * (ni - n0))
+        return G, O, 0.0, 0.0
+    if z0_inf:
+        G = -(n0**2) / ni**2
+        O = ni / (zi * (ni - n0))
+        return G, O, 0.0, 0.0
 
     G = (ni**2 * zi - n0**2 * z0) ** 2 / (
         ni * n0 * (ni * zi - n0 * z0) * (ni * z0 - n0 * zi)
@@ -257,7 +276,9 @@ class CartesianOvalProfile:
 
     @property
     def is_plane(self) -> bool:
-        return False
+        """True only in the doubly-collimated degenerate case ``z ≡ 0``."""
+
+        return self.G == 0.0 and self.O == 0.0 and self.T == 0.0 and self.S == 0.0
 
     @property
     def max_usable_height(self) -> float:

@@ -1,5 +1,13 @@
 """Aberration analysis: field metrics, distortion, wavefront, Zernike, fans."""
 
+from .aplanatism import (
+    AplanatismReport,
+    ImageSurface,
+    aplanatic_image_surface,
+    aplanatism_map,
+    aplanatism_report,
+    normal_axis_crossing,
+)
 from .chromatic import (
     AxialColor,
     ChromaticSpots,
@@ -29,6 +37,12 @@ from .zernike import (
 )
 
 __all__ = [
+    "AplanatismReport",
+    "ImageSurface",
+    "aplanatic_image_surface",
+    "aplanatism_map",
+    "aplanatism_report",
+    "normal_axis_crossing",
     "AxialColor",
     "LateralColor",
     "ChromaticSpots",

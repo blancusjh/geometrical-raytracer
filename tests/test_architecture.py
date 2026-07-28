@@ -32,6 +32,7 @@ LAYERS = [
     "propagation",
     "io",
     "analysis",
+    "optimize",
     "viz",
 ]
 RANK = {name: i for i, name in enumerate(LAYERS)}

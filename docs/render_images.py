@@ -179,6 +179,27 @@ def render_distortion_grids() -> None:
               f"coverage {grid.valid_fraction:.1%}")
 
 
+def render_aplanatism() -> None:
+    """Sphere vs stigmatic vs aplanatic singlet: the sine condition made visible.
+
+    Delegates to the example's own figure so the README shows exactly what
+    ``examples.stigmatic_surfaces.aplanatic_sol --save`` produces.
+    """
+
+    import warnings
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+    from examples.stigmatic_surfaces.aplanatic_sol import field_blur, figure
+
+    print("aplanatism comparison:")
+    path = OUT / "aplanatism.png"
+    figure(field_blur(), str(path))
+    shrink(path)
+
+
 def render_stigmatic_spots() -> None:
     """Sphere vs Cartesian oval: same conjugates, same vertex curvature.
 
@@ -261,6 +282,7 @@ if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     render_analysis()
     render_distortion_grids()
+    render_aplanatism()
     render_stigmatic_spots()
     render_examples()
     render_newtonian()
