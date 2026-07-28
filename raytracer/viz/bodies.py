@@ -20,11 +20,13 @@ drawing:
   neighbouring bodies apart** where one lens's back face crosses the next
   lens's front face. The space between the crossed faces is claimed by
   both mathematical solids — a genuine ambiguity of the description for
-  two different media — so it is assigned to *neither* drawn part: both
-  bodies end at the cut height and the ambiguous annulus stays hollow.
-  Each part is a well-defined solid covering only unambiguous glass,
-  ready for future per-lens export. :func:`body_overlaps` reports where
-  cuts were needed — worth a design review, not only a drawing fix.
+  two different media — so it is assigned to *neither* drawn part; each
+  part keeps exactly its unambiguous glass and the ambiguous annulus
+  stays hollow. The cut height bounds the design's **valid aperture**:
+  rays whose hits stay on the drawn parts are physical, rays reaching a
+  face beyond them meet no medium there and are artifacts of the
+  sequential formalism. :func:`body_overlaps` reports where cuts were
+  needed — worth a design review, not only a drawing fix.
 - :func:`index_color` maps refractive index to fill colors on the
   celestial-blue ramp of the package's palette: nothing for n = 1, then
   sky blue deepening with density — denser media draw darker,
@@ -33,15 +35,15 @@ drawing:
   axes: bodies, bare surfaces, mirrors (drawn over the sub-aperture the
   rays actually use, via :func:`~raytracer.viz.sag_drawing.mirror_arcs_from_paths`,
   when rays are traced), meridional ray fans, and the image plane — the
-  shared meridional renderer for figures and notebooks. Any refracting
-  face whose traced rays hit beyond its drawn extent — past an inter-lens
-  cut, or past a clear aperture — is continued as a dashed curve over the
-  heights the rays reach: the sequential model keeps the whole
-  mathematical surface, every drawn refraction happens on a drawn curve,
-  and no kink ever sits inside a filled body.
+  shared meridional renderer for figures and notebooks. When traced rays
+  refract beyond the drawn glass — outside the valid aperture — it warns
+  instead of decorating: there is no medium there to refract against, and
+  no drawing can make that physical.
 """
 
 from __future__ import annotations
+
+import warnings
 
 import numpy as np
 
@@ -207,6 +209,46 @@ def body_overlaps(system: OpticalSystem) -> list[tuple[int, int, float]]:
     return overlaps
 
 
+def _chord_clear(hs: np.ndarray, z_a: float, h_a: float, z_b: float, h_b: float,
+                 curve, *, side: float) -> bool:
+    """True when the chord (z_a,h_a)→(z_b,h_b) stays on *side* of *curve*.
+
+    ``side=+1`` requires the chord at or behind the curve (larger z),
+    ``side=-1`` in front of it — sampled over the heights *hs*.
+    """
+
+    chord = z_a + (z_b - z_a) * (hs - h_a) / (h_b - h_a)
+    return bool((side * (chord - curve(hs)) >= -1e-9).all())
+
+
+def _downstream_back_extent(
+    system: OpticalSystem, jb: int, p: int, q: int, h_cut: float
+) -> float:
+    """How far the downstream body's back face *q* keeps valid glass.
+
+    Above the cut, the downstream lens still owns the unambiguous band
+    between the upstream back face *jb* and its own back face *q* — its
+    back face refracts physically there. That band closes where *q* falls
+    behind *jb* (or at *q*'s own extent), and the part keeps it only if
+    the closing rim verifiably stays behind *jb* (out of the ambiguous
+    region); otherwise the body caps at the cut.
+    """
+
+    e_q = _usable_semidiameter(system, q, 50.0)
+    upper = min(_usable_semidiameter(system, jb, 50.0), e_q)
+    h_star = _crossing_height(_face(system, jb), _face(system, q), upper)
+    candidate = min(h_star if h_star is not None else e_q, e_q)
+    if candidate <= h_cut:
+        return h_cut
+    z_x = float(_face(system, p)(np.asarray([h_cut]))[0])
+    z_top = float(_face(system, q)(np.asarray([candidate]))[0])
+    hs = np.linspace(h_cut, min(candidate, upper), 120)
+    if _chord_clear(hs, z_x, h_cut, z_top, candidate,
+                    _face(system, jb), side=+1.0):
+        return candidate
+    return h_cut
+
+
 def _rim_stays_clear(
     system: OpticalSystem, i: int, e_i: float, j: int, p: int, h_cut: float
 ) -> bool:
@@ -230,9 +272,9 @@ def _rim_stays_clear(
     )
     if upper <= h_cut:
         return True
-    h = np.linspace(h_cut, upper, 120)
-    rim_z = z_cut + (z_top - z_cut) * (h - h_cut) / (e_i - h_cut)
-    return bool((rim_z <= _face(system, p)(h) + 1e-9).all())
+    hs = np.linspace(h_cut, upper, 120)
+    return _chord_clear(hs, z_cut, h_cut, z_top, e_i,
+                        _face(system, p), side=-1.0)
 
 
 def body_outlines(system: OpticalSystem):
@@ -242,13 +284,14 @@ def body_outlines(system: OpticalSystem):
     :func:`body_overlaps` finds body A's back face crossing body B's front
     face, the space between the crossed faces above the cut is ambiguous —
     both mathematical solids claim it — so it is assigned to *neither*
-    part: A's back face is trimmed to the cut, B is capped **entirely**
-    (both faces) at the cut height, because any rim from B's trimmed front
-    edge to a longer back edge would sweep across the ambiguous region and
-    claim it for B. A keeps its full front face only while its own rim
-    stays in front of the region (checked; otherwise A is capped too).
-    The returned parts never interpenetrate, and no part covers space the
-    description leaves ambiguous.
+    part: both crossed faces are trimmed to the cut. Each body keeps the
+    rest of its **unambiguous** glass: A its full front face while its rim
+    verifiably stays in front of the ambiguous region, B its back face
+    over the band behind A's back face, up to where that band closes
+    (:func:`_downstream_back_extent`) — refractions on B's back face above
+    the cut are physical, glass sits in front of them. The returned parts
+    never interpenetrate, and no part covers ambiguous space; checks that
+    fail degrade to capping at the cut, never to over-claiming.
     """
 
     gaps = dense_gaps(system)
@@ -261,8 +304,9 @@ def body_outlines(system: OpticalSystem):
         cap(back_face, h_cut)
         cap(front_face, h_cut)
         for i, j, _, _ in gaps:
-            if i == front_face:  # downstream body: cap it entirely
-                cap(j, h_cut)
+            if i == front_face:  # downstream body: unambiguous back band
+                cap(j, _downstream_back_extent(
+                    system, back_face, front_face, j, h_cut))
             if j == back_face:  # upstream body: keep the front face only
                 e_i = _usable_semidiameter(system, i, 50.0)
                 if not _rim_stays_clear(system, i, e_i, j, front_face, h_cut):
@@ -374,7 +418,6 @@ def draw_system(
     # -- bodies, cut apart, colored by density -----------------------------
     drawn_faces: set[int] = set()
     drawn_extent: dict[int, float] = {}
-    face_edge_color: dict[int, str] = {}
     for i, j, n, name, polygon, (e_front, e_back) in body_outlines(system):
         colors = (material_colors or {}).get(name.upper()) or index_color(n)
         if colors is None:
@@ -385,7 +428,6 @@ def draw_system(
         drawn_faces.update((i, j))
         drawn_extent[i] = max(drawn_extent.get(i, 0.0), e_front)
         drawn_extent[j] = max(drawn_extent.get(j, 0.0), e_back)
-        face_edge_color[i] = face_edge_color[j] = edge
 
     # -- mirrors and unpaired refracting faces -----------------------------
     if system.mirror_indices and traced:
@@ -408,32 +450,32 @@ def draw_system(
             ax.plot(z, h, color="#3a6ea5", lw=1.6, zorder=2)
             drawn_extent[i] = semi
 
-    # The sequential model keeps every face's whole mathematical surface,
-    # while a solid part may end earlier — at an inter-lens cut, or at a
-    # clear aperture smaller than what steep rays reach. Any refracting
-    # face whose traced hits land beyond its drawn extent is continued as
-    # a dashed curve over the heights the rays actually reach: every drawn
-    # refraction happens on a drawn curve, and the region beyond the solid
-    # is visibly not glass.
+    # The sequential formalism refracts at every surface sheet wherever a
+    # ray meets it — but a refraction is only physical where the media
+    # description defines glass against the face. Beyond a drawn part
+    # (past an inter-lens cut) there is no medium to refract against, so
+    # a hit there marks rays outside the design's valid aperture: warn
+    # loudly instead of decorating the artifact.
     if traced:
         paths_arr = np.stack([path for path, _ in traced])
         hit_tops = np.abs(paths_arr[:, 1:-1, 1]).max(axis=0)
-        for k, row in enumerate(system.rows):
-            if row.kind is not SurfaceKind.REFRACT or k not in drawn_extent:
-                continue
-            shown = drawn_extent[k]
-            top = min(
-                _usable_semidiameter(system, k, 50.0),
-                1.02 * float(hit_tops[k]),
+        artifacts = [
+            (k, float(hit_tops[k]), drawn_extent[k])
+            for k, row in enumerate(system.rows)
+            if row.kind is SurfaceKind.REFRACT and k in drawn_extent
+            and float(hit_tops[k]) > drawn_extent[k] * 1.001
+        ]
+        if artifacts:
+            detail = "; ".join(
+                f"face {k}: hits to h = {hit:.3f} mm, glass ends at {edge:.3f}"
+                for k, hit, edge in artifacts
             )
-            if top <= shown * 1.001:
-                continue
-            h = np.linspace(shown, top, 60)
-            z = system.vertices[k] + row.profile.sag(h)
-            color = face_edge_color.get(k, "#3a6ea5")
-            for sign in (1.0, -1.0):
-                ax.plot(z, sign * h, color=color, lw=1.0, alpha=0.9,
-                        ls=(0, (2.6, 2.2)), zorder=2)
+            warnings.warn(
+                "rays refract beyond the drawn glass — outside the design's "
+                f"valid aperture, the description defines no medium there "
+                f"({detail})",
+                stacklevel=2,
+            )
 
     for path, color in traced:
         finite = path[np.isfinite(path[:, 2])]

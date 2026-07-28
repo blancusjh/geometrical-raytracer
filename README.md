@@ -5,7 +5,7 @@ la ecuación de cada superficie, sin aproximación paraxial— a través de
 sistemas ópticos reales, y mide lo que sale: aberraciones, distorsión,
 frente de onda, PSF, formación de imagen.
 
-**12.000 líneas · 9 paquetes en cadena estricta · 227 tests contra verdades
+**12.000 líneas · 9 paquetes en cadena estricta · 228 tests contra verdades
 analíticas · dos objetivos de patente replicados dígito a dígito · lentes
 estigmáticas y aplanáticas por superficies de Descartes, con optimizador de
 restricciones enchufables y materiales reales**
@@ -390,9 +390,10 @@ superficies encierra qué medio se *deduce* de la descripción estándar
 de las caras cuando se cruzan bajo la apertura (la unión Ω del generador de
 STL del autor), los cuerpos vecinos que se interpenetran se cortan a la
 altura del cruce — la región que ambos sólidos reclaman no pertenece a
-ninguna pieza; los rayos que el modelo secuencial refracta más allá del
-corte lo hacen sobre la continuación discontinua de la cara matemática,
-nunca dentro de un cuerpo — piezas separadas y bien definidas, listas para
+ninguna pieza y acota la *apertura válida* del diseño; si un haz trazado
+refracta más allá del vidrio dibujado, `draw_system` lo advierte en vez
+de decorarlo: ahí la descripción no define medio alguno — piezas
+separadas y bien definidas, listas para
 exportarse lente a lente — y cada cuerpo se colorea por densidad óptica
 sobre una rampa de azul celeste: a mayor índice, más profundo el azul,
 automáticamente —, `scene` para la escena neutral
@@ -485,7 +486,8 @@ aplanático. `building_optical_systems.ipynb` construye cuatro sistemas
 potentes de solo lentes y aire con vidrios reales del catálogo Sellmeier —
 objetivo de telescopio acromático de 2 lentes (blur 1,5 µm contra 5,5 µm de
 Airy), microscopio 20×/NA 0.25 de 3 lentes con campo plano y 0,1 % de
-distorsión, ultra-gran-angular de objeto virtual (estigmático exacto a ±55°)
+distorsión, ultra-gran-angular de objeto virtual (estigmático exacto; campo físico
+±43°, acotado por el cruce de caras de sus dos lentes)
 y proyector de 4 lentes — cada uno optimizado con las restricciones
 enchufables (`Aplanatism`, `Distortion`, `FlatImageSurface`,
 `TargetMagnification`, `AxialColor`), y cierra con el microscopio
@@ -496,8 +498,8 @@ medida leída de `data/materials/formlabs_resins.csv` y su color axial declarado
 ## Tests
 
 ```bash
-pytest                                    # 223 tests
-xvfb-run -a pytest                        # 227, incluidos los de contexto OpenGL
+pytest                                    # 224 tests
+xvfb-run -a pytest                        # 228, incluidos los de contexto OpenGL
 ```
 
 Las verdades de referencia son analíticas donde existen: conjugados de

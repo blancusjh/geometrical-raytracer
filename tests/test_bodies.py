@@ -144,15 +144,16 @@ def test_neighbouring_bodies_of_different_media_are_cut_apart():
 
 def test_no_part_claims_the_ambiguous_region():
     """The space between the crossed faces above the cut belongs to both
-    mathematical solids, so the drawn parts must leave it hollow: the
-    downstream BK7 body caps entirely at the cut (a longer back face would
-    drag its rim across the region), while the SF11 body keeps its full
-    front face because its rim stays clear in front of the region."""
+    mathematical solids, so the drawn parts must leave it hollow — while
+    each part keeps its unambiguous glass: the SF11 body its full front
+    face (its rim stays clear in front of the region), the BK7 body its
+    back face over the band behind the SF11 back face, up to where that
+    band closes (h* ≈ 8.02, where the two back faces meet)."""
 
     system = ultrawide_system()
     h_cut = body_overlaps(system)[0][2]
     cut = {(i, j): poly for i, j, _, _, poly, _ in body_outlines(system)}
-    assert np.abs(cut[(2, 3)][:, 1]).max() == pytest.approx(h_cut, abs=1e-9)
+    assert np.abs(cut[(2, 3)][:, 1]).max() == pytest.approx(8.0215, abs=5e-3)
     assert np.abs(cut[(0, 1)][:, 1]).max() == pytest.approx(22.0, abs=1e-9)
 
     # the ambiguous annulus — between the crossed faces, above the cut —
@@ -168,10 +169,12 @@ def test_no_part_claims_the_ambiguous_region():
         assert not PolygonPath(polygon).contains_points(probe).any()
 
 
-def test_steep_rays_refract_on_drawn_curves_never_inside_a_body():
-    """A 55°-aim ray refracts at h ≈ 14.2 on the drawn front face and, past
-    the cut, on dashed continuations of faces 1, 2 and 3 — every kink must
-    lie on a drawn curve and no kink may sit inside a filled body."""
+def test_valid_aperture_fan_refracts_only_on_drawn_glass():
+    """A ±43° fan stays inside the valid aperture: every refraction lands
+    on its face within the drawn part (glass against the surface), no kink
+    sits strictly inside a body, and no artifact warning is raised."""
+
+    import warnings
 
     import matplotlib
 
@@ -186,50 +189,67 @@ def test_steep_rays_refract_on_drawn_curves_never_inside_a_body():
     system = train.to_system()
     fig, ax = plt.subplots()
     try:
-        paths = draw_system(ax, train, fields=(np.sin(np.radians(55.0)),),
-                            rays=3, launch=-30.0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            paths = draw_system(
+                ax, train,
+                fields=[np.sin(np.radians(a)) for a in (15.0, 30.0, 43.0)],
+                rays=7, launch=-25.0,
+            )
         assert paths is not None
         kinks = paths[:, 1:-1, :]  # surface hits of every traced ray
 
-        outlines = {(i, j): poly
-                    for i, j, _, _, poly, _ in body_outlines(system)}
-        assert np.abs(outlines[(0, 1)][:, 1]).max() > 14.2  # steep hit covered
+        extents = {}
+        outlines = {}
+        for i, j, _, _, poly, (e_front, e_back) in body_outlines(system):
+            extents[i], extents[j] = e_front, e_back
+            outlines[(i, j)] = poly
+        for k in range(kinks.shape[1]):
+            assert np.abs(kinks[:, k, 1]).max() <= extents[k] + 1e-9
 
-        # no refraction point sits strictly inside any filled body
+        # no kink strictly inside a body: "inside" means contained AND more
+        # than 5 µm from the boundary polyline — on-surface hits register
+        # as contained only through the ~1 µm sag of the sampled chords
+        # (Path.contains_points' radius trick is orientation-dependent, so
+        # the distance is computed explicitly)
+        def strictly_inside(polygon, pts, tol=5e-3):
+            contained = PolygonPath(polygon).contains_points(pts)
+            edge_a, edge_b = polygon[:-1], polygon[1:]
+            span = edge_b - edge_a
+            length2 = np.maximum((span * span).sum(axis=1), 1e-30)
+            for idx in np.nonzero(contained)[0]:
+                offset = pts[idx] - edge_a
+                t = np.clip((offset * span).sum(axis=1) / length2, 0.0, 1.0)
+                nearest = edge_a + t[:, None] * span
+                if np.hypot(*(pts[idx] - nearest).T).min() > tol:
+                    return True
+            return False
+
         points = kinks[:, :, [2, 1]].reshape(-1, 2)
         for polygon in outlines.values():
-            inside = PolygonPath(polygon).contains_points(points, radius=-1e-6)
-            assert not inside.any()
+            assert not strictly_inside(polygon, points)
+    finally:
+        plt.close(fig)
 
-        # dashed continuations start at each face's drawn extent and cover
-        # the hits — the outermost is the BK7 back face's (h ≈ 8.0)
-        dashed = [line for line in ax.lines
-                  if line.get_linestyle() not in ("-", "None", ":")
-                  and len(line.get_xdata()) > 2]
-        assert dashed, "faces hit beyond their drawn extent must continue dashed"
-        h_cut = body_overlaps(system)[0][2]
-        assert min(np.abs(line.get_ydata()).min() for line in dashed) == (
-            pytest.approx(h_cut, abs=1e-6)
-        )
-        hit3 = np.abs(kinks[:, 3, 1]).max()
-        assert max(np.abs(line.get_ydata()).max() for line in dashed) == (
-            pytest.approx(1.02 * hit3, rel=1e-6)
-        )
 
-        # every kink lies on a drawn curve: within its face's solid extent
-        # (the 14.2 mm hit on the front face), or on a dashed continuation
-        extents = {}
-        for i, j, _, _, _, (e_front, e_back) in body_outlines(system):
-            extents[i], extents[j] = e_front, e_back
-        for k in range(kinks.shape[1]):
-            for z, y in kinks[:, k, :][:, [2, 1]]:
-                if abs(y) <= extents[k] + 1e-9:
-                    continue  # refracts on the drawn solid face
-                distances = [
-                    np.hypot(line.get_xdata() - z, line.get_ydata() - y).min()
-                    for line in dashed
-                ]
-                assert min(distances) < 0.12
+def test_rays_beyond_the_valid_aperture_warn():
+    """A 55°-aim fan refracts where the description defines no medium —
+    an artifact of the sequential formalism, and draw_system must say so."""
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    train = read_train(
+        DATA / "optical_systems/ultrawide/sf11_bk7_virtual_object.json",
+        materials=default_materials(),
+    )
+    fig, ax = plt.subplots()
+    try:
+        with pytest.warns(UserWarning, match="valid aperture"):
+            draw_system(ax, train, fields=(np.sin(np.radians(55.0)),),
+                        rays=3, launch=-30.0)
     finally:
         plt.close(fig)
 

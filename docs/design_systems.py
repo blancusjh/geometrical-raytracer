@@ -214,7 +214,9 @@ class VirtualObjectAplanatism(Constraint):
 
 def ultrawide():
     print("=" * 70)
-    print("ULTRAWIDE — 2 lenses (N-BK7), virtual object d0 = +8 mm, rays to ±55°")
+    print("ULTRAWIDE — 2 lenses (N-SF11 + N-BK7), virtual object d0 = +8 mm")
+    print("  search sweeps aims over 5-55 deg; the built parts bound the")
+    print("  physical field at ±43 deg (L1-back/L2-front crossing, h = 5.86 mm)")
     t0 = time.time()
 
     def build(d):
@@ -234,10 +236,11 @@ def ultrawide():
     s, fit = best
     ctx = EvaluationContext(fit.train, na_object_sine=0.1, samples=5)
     res = cons[0].residuals(ctx)
-    # stigmatism check at the extreme angle: manual trace to the image plane
+    # stigmatism check across the physical field: manual trace to the image
+    # plane (beyond ±44 deg rays refract where no medium is defined)
     tracer = SequentialTracer(fit.train.to_system())
     spread = []
-    for deg in (15.0, 35.0, 55.0):
+    for deg in (15.0, 30.0, 43.0):
         t = np.tan(np.deg2rad(deg))
         origin = np.array([0.0, (8.0 - (-25.0)) * t, -25.0])
         direction = np.array([0.0, -t, 1.0]) / np.sqrt(1 + t * t)
@@ -246,7 +249,7 @@ def ultrawide():
     print(f"  d* = {tuple(round(v, 3) for v in fit.result.x)}   [{time.time()-t0:.0f}s]")
     print(f"  aplanatism |M-1| rms over 5-55 deg: {s:.3e}   "
           f"(worst {np.max(np.abs(res)):.3e})")
-    print(f"  image height of rays aimed at A from 15/35/55 deg: "
+    print(f"  image height of rays aimed at A from 15/30/43 deg: "
           f"{np.array2string(np.array(spread) * 1e3, precision=3)} um  <- stigmatic at all angles")
     return fit
 
