@@ -61,4 +61,45 @@ def lens_fill_mesh(system, i: int, j: int, *, samples: int = 200) -> tuple[np.nd
     return verts, faces
 
 
-__all__ = ["surface_semidiameter", "sample_profile_curve", "lens_outline", "lens_fill_mesh"]
+def mirror_arcs_from_paths(
+    system,
+    paths,
+    *,
+    pad: float = 0.06,
+    samples: int = 200,
+) -> list[tuple[int, np.ndarray, np.ndarray]]:
+    """Per-mirror meridional arcs spanning the heights the rays actually hit.
+
+    For off-axis systems (ring fields, folded paths) a mirror's *used*
+    sub-aperture is displaced from the axis, so drawing the parent surface
+    as a symmetric on-axis cap puts the drawn curve away from the real
+    reflection points. This derives each mirror's arc from the traced
+    *paths* themselves (``keep_paths`` output, shape ``(N, n_surfaces+2, 3)``;
+    column ``i+1`` is the hit point on surface ``i``), extended by *pad*
+    fractionally beyond the hit envelope.
+
+    Returns ``[(mirror_number, z, y), ...]`` ready for ``ax.plot(z, y)``.
+    """
+
+    paths = np.asarray(paths, dtype=float)
+    arcs: list[tuple[int, np.ndarray, np.ndarray]] = []
+    for count, i in enumerate(system.mirror_indices, 1):
+        y_hits = paths[:, i + 1, 1]
+        y_hits = y_hits[np.isfinite(y_hits)]
+        if y_hits.size == 0:
+            continue
+        y_lo, y_hi = float(y_hits.min()), float(y_hits.max())
+        margin = pad * max(y_hi - y_lo, 1.0)
+        h = np.linspace(y_lo - margin, y_hi + margin, samples)
+        z = system.vertices[i] + system.rows[i].profile.sag(np.abs(h))
+        arcs.append((count, z, h))
+    return arcs
+
+
+__all__ = [
+    "surface_semidiameter",
+    "sample_profile_curve",
+    "lens_outline",
+    "lens_fill_mesh",
+    "mirror_arcs_from_paths",
+]

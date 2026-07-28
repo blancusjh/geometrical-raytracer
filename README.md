@@ -5,7 +5,7 @@ la ecuación de cada superficie, sin aproximación paraxial— a través de
 sistemas ópticos reales, y mide lo que sale: aberraciones, distorsión,
 frente de onda, PSF, formación de imagen.
 
-**12.000 líneas · 9 paquetes en cadena estricta · 224 tests contra verdades
+**12.000 líneas · 9 paquetes en cadena estricta · 227 tests contra verdades
 analíticas · dos objetivos de patente replicados dígito a dígito · lentes
 estigmáticas y aplanáticas por superficies de Descartes, con optimizador de
 restricciones enchufables y materiales reales**
@@ -388,8 +388,11 @@ para los cuerpos de lente deducidos de la secuencia de medios — qué par de
 superficies encierra qué medio se *deduce* de la descripción estándar
 (aire → Σ1 → vidrio → Σ2 → aire), el contorno se cierra en la intersección
 de las caras cuando se cruzan bajo la apertura (la unión Ω del generador de
-STL del autor) y cada cuerpo se colorea por densidad óptica: a mayor
-índice, azul más oscuro, automáticamente —, `scene` para la escena neutral
+STL del autor), los cuerpos vecinos que se interpenetran se cortan a la
+altura del cruce — piezas separadas y bien definidas, listas para
+exportarse lente a lente — y cada cuerpo se colorea por densidad óptica
+sobre una rampa de azul celeste: a mayor índice, más profundo el azul,
+automáticamente —, `scene` para la escena neutral
 de ítems, `gl/` para el visor OpenGL (cámara, shaders, renderers, ventana)
 e `interactive` para arrastrar fuente, lente y pantalla en vivo. Es el
 paquete más grande y el único del que nada depende.
@@ -490,8 +493,8 @@ medida leída de `data/materials/formlabs_resins.csv` y su color axial declarado
 ## Tests
 
 ```bash
-pytest                                    # 220 tests
-xvfb-run -a pytest                        # 224, incluidos los de contexto OpenGL
+pytest                                    # 223 tests
+xvfb-run -a pytest                        # 227, incluidos los de contexto OpenGL
 ```
 
 Las verdades de referencia son analíticas donde existen: conjugados de
