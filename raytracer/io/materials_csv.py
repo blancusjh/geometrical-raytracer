@@ -17,7 +17,7 @@ Format: comma-separated with a header row, ``#`` lines ignored::
 
 ``source`` is free text (measurement provenance); it is carried into the
 material's registry but not interpreted. See
-``data/formlabs_resins.csv`` for a real catalog in this format.
+``data/materials/formlabs_resins.csv`` for a real catalog in this format.
 """
 
 from __future__ import annotations
