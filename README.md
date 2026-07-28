@@ -5,7 +5,7 @@ la ecuación de cada superficie, sin aproximación paraxial— a través de
 sistemas ópticos reales, y mide lo que sale: aberraciones, distorsión,
 frente de onda, PSF, formación de imagen.
 
-**12.000 líneas · 9 paquetes en cadena estricta · 228 tests contra verdades
+**12.000 líneas · 9 paquetes en cadena estricta · 232 tests contra verdades
 analíticas · dos objetivos de patente replicados dígito a dígito · lentes
 estigmáticas y aplanáticas por superficies de Descartes, con optimizador de
 restricciones enchufables y materiales reales**
@@ -498,8 +498,8 @@ medida leída de `data/materials/formlabs_resins.csv` y su color axial declarado
 ## Tests
 
 ```bash
-pytest                                    # 224 tests
-xvfb-run -a pytest                        # 228, incluidos los de contexto OpenGL
+pytest                                    # 228 tests
+xvfb-run -a pytest                        # 232, incluidos los de contexto OpenGL
 ```
 
 Las verdades de referencia son analíticas donde existen: conjugados de

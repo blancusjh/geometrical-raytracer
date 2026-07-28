@@ -96,10 +96,70 @@ def mirror_arcs_from_paths(
     return arcs
 
 
+def beam_foci_from_paths(
+    paths,
+    *,
+    pinch_ratio: float = 0.2,
+    min_rays: int = 3,
+) -> list[tuple[float, float, float, int, bool]]:
+    """Where a traced beam actually focuses, segment by segment.
+
+    Between consecutive surfaces every ray is a straight line; the beam's
+    focus on that leg is the least-squares convergence point of those lines
+    (the parabola ``var(a)·z² + 2·cov(a,b)·z + var(b)`` in the meridional
+    slopes/intercepts has its minimum at the pinch). An *intermediate* leg
+    counts as a focus only when the pinch is genuine — residual blur below
+    ``pinch_ratio`` of the beam's spread at both ends, a constriction of
+    5× or better at the default — so mere narrowing is not decorated. An
+    aberrated intermediate image reports where the traced beam *actually*
+    pinches, which need not be the design's nominal plane. The *final* leg (to the image plane) is where the
+    system claims to focus, and is always reported when the beam converges
+    to a real point on or beyond the last surface; a collimated exit
+    (afocal system) or virtual focus reports nothing.
+
+    Returns ``[(z, y, blur_rms, leg_index, is_final), ...]`` with *paths*
+    of shape ``(rays, points, 3)`` from ``keep_path`` traces.
+    """
+
+    paths = np.asarray(paths, dtype=float)
+    foci: list[tuple[float, float, float, int, bool]] = []
+    n_legs = paths.shape[1] - 1
+    for leg in range(1, n_legs):
+        p0, p1 = paths[:, leg, :], paths[:, leg + 1, :]
+        dz = p1[:, 2] - p0[:, 2]
+        keep = np.isfinite(dz) & (np.abs(dz) > 1e-12)
+        keep &= np.isfinite(p0[:, 1]) & np.isfinite(p1[:, 1])
+        if keep.sum() < min_rays:
+            continue
+        slope = (p1[keep, 1] - p0[keep, 1]) / dz[keep]
+        intercept = p0[keep, 1] - slope * p0[keep, 2]
+        var_a = float(np.var(slope))
+        if var_a < 1e-18:
+            continue  # collimated leg: no focus
+        z_star = -float(np.cov(slope, intercept, bias=True)[0, 1]) / var_a
+        y_star = float(np.mean(slope * z_star + intercept))
+        blur = float(np.std(slope * z_star + intercept))
+        is_final = leg == n_legs - 1
+        z_lo = float(np.minimum(p0[keep, 2], p1[keep, 2]).min())
+        z_hi = float(np.maximum(p0[keep, 2], p1[keep, 2]).max())
+        if is_final:
+            if z_star < z_lo:  # virtual focus behind the last surface
+                continue
+        else:
+            span = z_hi - z_lo
+            inside = z_lo + 0.01 * span <= z_star <= z_hi - 0.01 * span
+            spread = min(float(np.std(p0[keep, 1])), float(np.std(p1[keep, 1])))
+            if not inside or blur > pinch_ratio * max(spread, 1e-12):
+                continue
+        foci.append((z_star, y_star, blur, leg, is_final))
+    return foci
+
+
 __all__ = [
     "surface_semidiameter",
     "sample_profile_curve",
     "lens_outline",
     "lens_fill_mesh",
     "mirror_arcs_from_paths",
+    "beam_foci_from_paths",
 ]

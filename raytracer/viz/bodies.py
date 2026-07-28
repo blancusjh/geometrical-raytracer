@@ -35,10 +35,15 @@ drawing:
   axes: bodies, bare surfaces, mirrors (drawn over the sub-aperture the
   rays actually use, via :func:`~raytracer.viz.sag_drawing.mirror_arcs_from_paths`,
   when rays are traced), meridional ray fans, and the image plane — the
-  shared meridional renderer for figures and notebooks. When traced rays
-  refract beyond the drawn glass — outside the valid aperture — it warns
-  instead of decorating: there is no medium there to refract against, and
-  no drawing can make that physical.
+  shared meridional renderer for figures and notebooks. Where the light
+  *focuses* is part of the trace and draws by default: each field's
+  convergence points — the final focus and any genuine intermediate
+  image, via :func:`~raytracer.viz.sag_drawing.beam_foci_from_paths` —
+  plus the aperture stop, and a corner note when the final focus lies
+  beyond the frame. When traced rays refract beyond the drawn glass —
+  outside the valid aperture — it warns instead of decorating: there is
+  no medium there to refract against, and no drawing can make that
+  physical.
 """
 
 from __future__ import annotations
@@ -51,7 +56,11 @@ from ..design.rows import SurfaceKind
 from ..design.system import OpticalSystem
 from ..propagation.fields import chief_ray_slopes, FieldPoint, trace_from_object
 from ..propagation.sequential import SequentialTracer
-from .sag_drawing import mirror_arcs_from_paths, surface_semidiameter
+from .sag_drawing import (
+    beam_foci_from_paths,
+    mirror_arcs_from_paths,
+    surface_semidiameter,
+)
 
 FIELD_COLORS = ["#d62728", "#2878b5", "#1a6e3c", "#9467bd", "#8c564b"]
 
@@ -375,6 +384,13 @@ def draw_system(
     traced rays actually hit when there are rays (the honest extent for
     off-axis and ring-field systems), or over their full cap otherwise.
 
+    Where the light focuses is part of the trace and is drawn by default:
+    each field's convergence points (:func:`~raytracer.viz.sag_drawing.beam_foci_from_paths`
+    on the traced paths — the final focus and any genuine intermediate
+    image) are marked in the field's color, the aperture stop draws as a
+    dotted vertical, and when the final focus lies beyond ``xlim`` the
+    frame says so in a corner note instead of silently cropping it.
+
     Returns the traced ray paths, stacked ``(rays, points, 3)``, so
     annotation layers can reuse them (e.g. labeling mirrors along the arcs
     from :func:`~raytracer.viz.sag_drawing.mirror_arcs_from_paths`), or
@@ -391,8 +407,10 @@ def draw_system(
 
     # -- rays first, so mirror arcs can follow the real hit envelope -------
     traced: list[tuple[np.ndarray, str]] = []
+    beams: list[tuple[list[np.ndarray], str]] = []
     smax = na / np.sqrt(1.0 - na * na)
     for h_field, color in zip(fields, field_colors):
+        bundle: list[np.ndarray] = []
         if launch is None:
             if stop_index is not None:
                 _, chief = chief_ray_slopes(
@@ -404,7 +422,7 @@ def draw_system(
                 r = trace_from_object(tracer, (0.0, h_field), (0.0, chief + s),
                                       keep_path=True)
                 if r.ok:
-                    traced.append((r.path, color))
+                    bundle.append(r.path)
         else:
             t0 = np.tan(np.arcsin(h_field))
             for dt in np.linspace(-0.04, 0.04, rays):
@@ -413,7 +431,10 @@ def draw_system(
                 direction = np.array([0.0, -t, 1.0]) / np.hypot(t, 1.0)
                 r = tracer.trace(origin, direction, keep_path=True)
                 if r.ok:
-                    traced.append((np.vstack([origin, r.path[1:]]), color))
+                    bundle.append(np.vstack([origin, r.path[1:]]))
+        traced.extend((path, color) for path in bundle)
+        if bundle:
+            beams.append((bundle, color))
 
     # -- bodies, cut apart, colored by density -----------------------------
     drawn_faces: set[int] = set()
@@ -485,6 +506,24 @@ def draw_system(
         for h_field, color in zip(fields, field_colors):
             ax.plot([object_z], [h_field], "o", color=color, ms=4, zorder=4)
 
+    # -- where the light focuses: convergence points of each traced beam ---
+    focus_beyond_frame = False
+    for bundle, color in beams:
+        for z_f, y_f, _, _, is_final in beam_foci_from_paths(np.stack(bundle)):
+            if xlim is not None and not (xlim[0] <= z_f <= xlim[1]):
+                focus_beyond_frame |= is_final
+                continue
+            ax.plot([z_f], [y_f], "o", ms=4.5, mfc="white", mec=color,
+                    mew=1.2, zorder=6)
+    if focus_beyond_frame:
+        ax.annotate(f"image at z = {system.image_z:g} mm",
+                    xy=(0.985, 0.04), xycoords="axes fraction", ha="right",
+                    fontsize=8, style="italic", color="#666666")
+
+    stop = stop_index if stop_index is not None else system.stop_index
+    if stop is not None:
+        ax.axvline(system.vertices[stop], color="#777777", ls=":", lw=0.8,
+                   zorder=0)
     if image_plane:
         ax.axvline(system.image_z, color="#999999", ls=":", lw=0.8)
     if xlim is not None:

@@ -22,7 +22,7 @@ from ..analysis.aberrations.wavefront import WavefrontSamples
 from ..analysis.aberrations.zernike import ZernikeExpansion
 from ..analysis.imaging.spots import SpotData
 from .bodies import body_outlines, draw_system, index_color
-from .sag_drawing import mirror_arcs_from_paths, sample_profile_curve
+from .sag_drawing import beam_foci_from_paths, mirror_arcs_from_paths, sample_profile_curve
 
 DEFAULT_MATERIAL_COLORS = {
     "SIO2": ("#bde0fe", "#2878b5"),
@@ -50,7 +50,10 @@ def layout_figure(
     with index above 1) and colored by optical density via
     :func:`raytracer.viz.bodies.index_color` — denser media draw darker,
     automatically. ``material_colors`` overrides individual media by name
-    (``DEFAULT_MATERIAL_COLORS`` keeps the README's DUV palette).
+    (``DEFAULT_MATERIAL_COLORS`` keeps the README's DUV palette). Where
+    each field's light focuses — the final convergence point of its traced
+    fan, and any genuine intermediate image — is marked in the field's
+    color (:func:`~raytracer.viz.sag_drawing.beam_foci_from_paths`).
     """
 
     system = tracer.system
@@ -114,14 +117,23 @@ def layout_figure(
     if fields:
         for field_y, color in zip(fields, FIELD_COLORS):
             _, sy0 = chief_ray_slopes(tracer, FieldPoint(y=field_y))
+            bundle = []
             for delta in np.linspace(-fan_half_slope, fan_half_slope, fan_count):
                 result = trace_from_object(
                     tracer, (0.0, field_y), (0.0, sy0 + delta), keep_path=True
                 )
                 if result.path is None:
                     continue
+                if result.ok:
+                    bundle.append(result.path)
                 path = result.path[~np.isnan(result.path[:, 2])]
                 ax.plot(path[:, 2], path[:, 1], color=color, lw=0.65, alpha=0.72, zorder=3)
+            # where this field's light focuses: final and genuine
+            # intermediate convergence points of the traced fan
+            if bundle:
+                for z_f, y_f, _, _, _ in beam_foci_from_paths(np.stack(bundle)):
+                    ax.plot([z_f], [y_f], "o", ms=4.5, mfc="white", mec=color,
+                            mew=1.2, zorder=6)
 
     if system.object_z is not None:
         ax.axvline(system.object_z, color="black", ls="--", lw=1, label="object plane")
