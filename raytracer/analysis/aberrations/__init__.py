@@ -18,6 +18,14 @@ from .chromatic import (
 )
 from .distortion import DistortionGrid, chief_ray_distortion, distortion_grid
 from .fans import FanData, ray_fans
+from .field_geometry import (
+    DistortionMap,
+    ParabasalFocus,
+    distortion_map,
+    ideal_image_xy,
+    parabasal_focus,
+)
+from .fitted_aberrations import FittedLowOrderCoefficients, fitted_low_order_coefficients
 from .geometric import GeometricAberrations, axial_intercepts, geometric_aberrations
 from .metrics import export_metrics_csv, field_metrics
 from .seidel import SeidelCoefficients, seidel_coefficients
@@ -38,6 +46,13 @@ from .zernike import (
 )
 
 __all__ = [
+    "DistortionMap",
+    "ParabasalFocus",
+    "distortion_map",
+    "ideal_image_xy",
+    "parabasal_focus",
+    "FittedLowOrderCoefficients",
+    "fitted_low_order_coefficients",
     "GeometricAberrations",
     "axial_intercepts",
     "geometric_aberrations",

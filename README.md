@@ -74,7 +74,7 @@ orden y 45 rayos de referencia calculados por RayOptics.
 | Materiales | Procedencia, límites espectrales declarados y modelos aproximados identificados; contraste N-BK7/N-F2 con SCHOTT |
 | Sensibilidad | Descentramientos, inclinaciones de grupos, espesor, radio e índice; diferencias a dos pasos y Monte Carlo reproducible |
 | Informes y layout | JSON con prescripción, ajustes, versiones y huellas SHA-256; superficies y rayos en sus marcos 3D reales |
-| Análisis axiales existentes | Abanicos, distorsión y Seidel; requieren un sistema centrado en coordenadas axiales |
+| Tercer orden y campo | Cinco sumas Seidel por superficie, corrección cónica/asférica, focos parabasales, Petzval y distorsión con referencias explícitas; sistemas centrados |
 | Persistencia | JSON versionado con materiales y coeficientes completos, aperturas, marcos y conjugados; CSV restringido a lo que puede representar |
 | Motor ramificado | Propagación 2D existente; el puente desde sistemas secuenciales conserva los diafragmas circulares |
 
@@ -132,6 +132,25 @@ adapte simultáneamente a todos ellos. La transmisión es geométrica: no incluy
 Fresnel ni absorción. Los resultados Monte Carlo describen las distribuciones
 introducidas; no constituyen rendimiento de fabricación sin criterios de aceptación.
 
+## Seidel por superficie y geometría de campo
+
+```bash
+python -m examples.aberrations.third_order_validation
+```
+
+Se calculan las cinco sumas clásicas con dos rayos paraxiales, conservando sus
+contribuciones por superficie. Los focos parabasales, el mejor foco RMS y la
+curvatura de tercer orden tienen definiciones separadas. La distorsión permite
+referencias rectilínea y angular; el centroide se informa aparte.
+
+![Tercer orden y geometría de campo](docs/img/third_order_validation.png)
+
+La [guía de tercer orden](docs/third_order_validation.md) deriva las convenciones
+y conversiones, documenta cinco sistemas de referencia independientes y explica
+la reducción de error de quinto orden. El [informe numérico](docs/third_order_results.json)
+conserva las curvas y los residuos. Los antiguos ajustes de apertura finita se
+llaman ahora `fitted_low_order_coefficients`; no son sumas clásicas de Seidel.
+
 ## Diez pruebas esenciales
 
 La batería anterior se ha sustituido por **exactamente diez pruebas**, sin
@@ -145,9 +164,9 @@ o de integridad del proyecto:
 5. Aperturas, conservación del medio, cuadratura y viñeteo ponderado.
 6. Invariancia 3D, espejo plegado, sensibilidad analítica y Monte Carlo reproducible.
 7. Apuntado a pupila para campos finitos/infinitos y simetría del cono angular.
-8. Aberración esférica y mejor foco contrastado con un nuevo trazado al detector.
+8. Aberración esférica, mejor foco RMS y focos parabasales de espejo con solución analítica.
 9. Persistencia de geometría y materiales; informes trazables y formatos incompatibles.
-10. Intersecciones, dirección de salida y camino óptico de 45 rayos de RayOptics.
+10. Referencias RayOptics: 45 rayos, 40 coeficientes Seidel por superficie, focos de campo y convergencia asintótica.
 
 La [guía de validación](docs/geometrical_validation.md) explica ecuaciones,
 tolerancias, independencia de las referencias y limitaciones. GitHub Actions
@@ -162,10 +181,9 @@ Eso no sustituye la comprobación de los resultados de cada ejecución de CI.
 - `tests/reference`: resultados externos versionados; `reference`: regeneración.
 - `examples`, `data`, `docs`: ejemplos, prescripciones y documentación.
 
-Para la siguiente etapa: definición y validación completa de coeficientes de
-Seidel por superficie; curvatura de campo tangencial/sagital y distorsión frente
-a referencias independientes; pupilas de entrada/salida y telecentricidad;
-ampliación del catálogo con datos primarios verificados; sensibilidad con
-correlaciones y criterios de aceptación; interfaz de edición y diagnóstico 3D.
+Para la siguiente etapa: pupilas de entrada/salida y telecentricidad;
+expansión de vértice de perfiles adicionales; aberraciones de sistemas descentrados;
+ampliación del catálogo con datos primarios; convergencia de muestreo con viñeteo;
+sensibilidad con correlaciones y una interfaz integrada de edición y diagnóstico.
 Los ejemplos y notebooks históricos se conservan como material de trabajo:
 sus cifras anteriores no se consideran revalidadas por estas diez pruebas.

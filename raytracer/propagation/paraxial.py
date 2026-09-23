@@ -89,9 +89,11 @@ class ParaxialModel:
     def _build(self) -> None:
         system = self.system
         matrix = np.eye(2)
+        self.matrices_before = []
         sign = 1.0
         n1 = system.n_before[0]
         for i, row in enumerate(system.rows):
+            self.matrices_before.append(matrix.copy())
             n1_signed = sign * system.n_before[i]
             if row.kind is SurfaceKind.MIRROR:
                 sign = -sign
@@ -106,6 +108,34 @@ class ParaxialModel:
         self.matrix_first_vertex_to_image = matrix
         self.n_object = float(n1)
         self.n_image_signed = float(sign * system.n_after[-1])
+
+    def launch_state(self, field, stop_height_mm=0.0, *, stop_index=None):
+        """First-vertex (y, n*u) state aimed paraxially to a stop height.
+
+        ``field`` is a scalar meridional FieldPoint (x=0). For an angular
+        field u=tan(theta); for a finite field the object coordinate is y.
+        Stops conjugate to the object cannot define a unique aperture ray.
+        """
+        stop = self.system.stop_index if stop_index is None else stop_index
+        if stop is None or not 0 <= stop < len(self.system.rows):
+            raise ValueError("a valid stop surface is required")
+        if field.x != 0 or not np.isfinite(stop_height_mm):
+            raise ValueError("paraxial launch requires a meridional field and finite stop height")
+        row = self.matrices_before[stop][0]
+        if field.kind == "angle":
+            fixed = np.array([0.0, self.n_object * np.tan(np.deg2rad(field.y))])
+            variable = np.array([1.0, 0.0])
+        else:
+            z = self.system.object_z
+            if z is None or not np.isfinite(z):
+                raise ValueError("height fields require a finite object_z")
+            fixed = np.array([field.y, 0.0])
+            variable = np.array([-z, self.n_object])
+        denominator = row @ variable
+        scale = np.linalg.norm(row) * np.linalg.norm(variable)
+        if abs(denominator) <= 1e-14 * scale:
+            raise ValueError("stop is conjugate to the object; aperture launch is singular")
+        return fixed + variable * ((stop_height_mm - row @ fixed) / denominator)
 
     def solve_object_plane(self) -> ConjugateSolution:
         """Impose B = 0 at the image plane; returns object z and magnification."""

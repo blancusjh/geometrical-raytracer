@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
+from raytracer.analysis.aberrations import distortion_map, parabasal_focus, seidel_coefficients
 from raytracer.analysis.aberrations.chromatic import axial_color, chromatic_spots
 from raytracer.analysis.aberrations.geometric import axial_intercepts, geometric_aberrations
 from raytracer.analysis.tolerancing import (
@@ -37,6 +38,7 @@ from raytracer.propagation import (
     solve_object_plane,
     trace_pupil,
 )
+from raytracer.propagation.aiming import aim_stop_targets
 from raytracer.surfaces.apertures import CircularAperture, RectangularAperture
 from raytracer.surfaces.profile import AsphereProfile
 
@@ -292,6 +294,25 @@ def test_06_three_dimensional_covariance_and_folded_mirror():
         result.directions, transform.direction_to_world(original.directions), atol=2e-13
     )
     assert_allclose(result.opl, original.opl, atol=2e-11)
+    field = FieldPoint(x=2, y=3)
+    before = parabasal_focus(SequentialTracer(system), field)
+    after = parabasal_focus(SequentialTracer(moved), field)
+    assert_allclose(
+        [before.tangential_shift_mm, before.sagittal_shift_mm],
+        [after.tangential_shift_mm, after.sagittal_shift_mm],
+        atol=2e-7,
+        rtol=0,
+    )
+    assert_allclose(
+        distortion_map(SequentialTracer(system), [field]).chief_xy_mm,
+        distortion_map(SequentialTracer(moved), [field]).chief_xy_mm,
+        atol=2e-11,
+    )
+    assert_allclose(
+        seidel_coefficients(system, FieldPoint(y=3)).sums_mm,
+        seidel_coefficients(moved, FieldPoint(y=3)).sums_mm,
+        atol=1e-15,
+    )
     # Move a complete two-surface element while preserving its internal geometry.
     grouped = copy.deepcopy(system)
     grouped.transform_surfaces([0, 1], transform)
@@ -434,6 +455,36 @@ def test_08_geometric_spherical_aberration_and_best_focus():
             focus_policy="refocus",
         )
 
+    # Exact Coddington result for a spherical mirror, chief at its vertex:
+    # z_T = -R*cos(theta)^2/2, z_S = -R/2.
+    for angle in (0.0, 3.0, 10.0):
+        field = FieldPoint.angle(y_deg=angle)
+        focus = parabasal_focus(SequentialTracer(system), field)
+        assert_allclose(
+            focus.tangential_shift_mm,
+            radius / 2 * np.sin(np.deg2rad(angle)) ** 2,
+            atol=3e-9,
+            rtol=0,
+        )
+        assert_allclose(focus.sagittal_shift_mm, 0, atol=3e-9)
+        assert np.max(focus.step_difference_mm) < 1e-8
+    theta = np.deg2rad(10.0)
+    field = FieldPoint.angle(y_deg=10.0)
+    rectilinear = distortion_map(SequentialTracer(system), [FieldPoint.angle(), field])
+    assert_allclose(rectilinear.deviation_mm, 0, atol=5e-12)
+    assert np.isnan(rectilinear.radial_percent[0])
+    angular = distortion_map(SequentialTracer(system), [field], reference="f_theta")
+    assert_allclose(angular.deviation_mm[0, 1], radius / 2 * (np.tan(theta) - theta), atol=3e-12)
+    # Stop obstruction changes physical transmission, not geometric reference.
+    obscured = copy.deepcopy(system)
+    obscured.rows[0].aperture = CircularAperture(8.0, inner_radius=1.0)
+    assert not parabasal_focus(SequentialTracer(obscured), field).chief_transmitted
+    assert_allclose(
+        distortion_map(SequentialTracer(obscured), [field]).chief_xy_mm,
+        rectilinear.chief_xy_mm[1:],
+        atol=2e-12,
+    )
+
 
 def test_09_prescription_roundtrip_preserves_the_complete_system(tmp_path):
     """Reopening a project preserves geometry, materials, frames and ray results."""
@@ -536,3 +587,105 @@ def test_10_independent_rayoptics_cooke_reference():
         )
         assert_allclose(ray.direction, case["outgoing_direction"], atol=1e-11, rtol=0)
         assert_allclose(ray.opl, case["opl_mm"], atol=1e-9, rtol=0)
+
+    reference = json.loads((ROOT / "tests/reference/rayoptics_third_order.json").read_text())
+    assert reference["version"] == "0.9.8"
+    pupil = np.array([[0.0, 0.7], [0.4, 0.2], [0.0, 0.0], [0.5, -0.5]])
+    for case in reference["cases"]:
+        system, field = reference_third_order_system(case)
+        tracer = SequentialTracer(system, clip_apertures=False)
+        ledger = seidel_coefficients(system, field)
+        assert_allclose(
+            ledger.surface_sums_mm,
+            case["surface_sums_mm"],
+            atol=2e-14,
+            rtol=0,
+            err_msg=case["name"],
+        )
+        assert_allclose(ledger.sums_mm, case["sums_mm"], atol=2e-14, rtol=0)
+        focus = parabasal_focus(tracer, field)
+        assert_allclose(
+            [focus.tangential_shift_mm, focus.sagittal_shift_mm],
+            case["parabasal_shifts_mm"],
+            atol=2e-8,
+            rtol=0,
+        )
+        distortion = distortion_map(tracer, [field])
+        assert_allclose(distortion.chief_xy_mm[0], case["chief_image_xy_mm"], atol=2e-10, rtol=0)
+        assert_allclose(ledger.gaussian_image_height_mm, case["gaussian_height_mm"], atol=2e-12)
+        # Correct cubic ray theory leaves a fifth-order remainder when pupil
+        # and field are both scaled. This also exercises the S-V contribution.
+        errors = []
+        focus_errors = []
+        for scale in (0.5, 0.25, 0.125):
+            scaled = (
+                (FieldPoint.angle(y_deg=np.rad2deg(np.arctan(scale * np.tan(np.deg2rad(field.y))))))
+                if field.kind == "angle"
+                else FieldPoint(y=field.y * scale)
+            )
+            origins, directions, residual = aim_stop_targets(
+                tracer, scaled, pupil * ledger.pupil_radius_mm * scale
+            )
+            assert residual.max() < 1e-11
+            rays = tracer.trace_batch(origins, directions)
+            assert rays.valid.all()
+            exact = rays.image_points[:, :2] - [0, scale * ledger.gaussian_image_height_mm]
+            errors.append(np.max(abs(exact - ledger.transverse(pupil) * scale**3)))
+            measured = parabasal_focus(tracer, scaled, step_mm=5e-4)
+            curvatures = ledger.field_curvatures_per_mm
+            predicted_focus = (
+                0.5
+                * np.array([curvatures["tangential"], curvatures["sagittal"]])
+                * (scale * ledger.gaussian_image_height_mm) ** 2
+            )
+            focus_errors.append(
+                np.max(
+                    abs(
+                        np.array([measured.tangential_shift_mm, measured.sagittal_shift_mm])
+                        - predicted_focus
+                    )
+                )
+            )
+        ratios = np.array(errors[:-1]) / errors[1:]
+        assert_allclose(ratios, 32.0, rtol=0.015, err_msg=case["name"])
+        assert_allclose(
+            np.array(focus_errors[:-1]) / focus_errors[1:], 16.0, rtol=0.05, err_msg=case["name"]
+        )
+        # Marginal/field normalization and the Lagrange invariant are explicit.
+        assert_allclose(ledger.marginal_y_mm[case["stop"]], case["radius"], atol=1e-13)
+        assert_allclose(ledger.chief_y_mm[case["stop"]], 0, atol=1e-13)
+        invariant = ledger.signed_indices_after * (
+            ledger.marginal_y_mm * ledger.chief_slope_after
+            - ledger.chief_y_mm * ledger.marginal_slope_after
+        )
+        assert_allclose(invariant, ledger.invariant_mm, atol=1e-13)
+
+
+def reference_third_order_system(case):
+    """Reconstruct only the explicit inputs of the independent reference."""
+    rows = []
+    for index, record in enumerate(case["rows"]):
+        options = dict(
+            radius=record["radius"],
+            thickness=record["thickness"],
+            conic=record.get("conic", 0.0),
+            coefficients=(record.get("a4", 0.0),),
+            semidiameter=case["radius"] if index == case["stop"] else 20.0,
+            is_stop=index == case["stop"],
+        )
+        row = (
+            SurfaceRow.mirror(**options)
+            if record.get("mirror")
+            else SurfaceRow.refracting(
+                **options, material=ConstantIndex("reference", record["index"])
+            )
+        )
+        rows.append(row)
+    system = OpticalSystem(rows, object_z=-np.inf if case["object_z"] is None else case["object_z"])
+    system.set_thickness(len(rows) - 1, case["gaussian_z_mm"] - system.vertices[-1])
+    field = (
+        FieldPoint.angle(y_deg=case["field"])
+        if case["object_z"] is None
+        else FieldPoint(y=case["field"])
+    )
+    return system, field

@@ -1,4 +1,4 @@
-# Fundamentos y validación geométrica (0.4–0.5)
+# Fundamentos y validación geométrica (0.4–0.6)
 
 ## Qué se considera validado
 
@@ -53,9 +53,9 @@ la equivalencia general con un programa comercial.
 | 5 | Pupila y aperturas | Momentos exactos del disco, medio conservado por un stop, máscaras circular/anular/rectangular, transmisión de medio disco=0.5 y stop en puente 2D |
 | 6 | Marcos 3D | Covariancia de posiciones, direcciones y OPL bajo transformación rígida; movimiento de grupo; espejo a 45° que pliega el eje 90° |
 | 7 | Apuntado | Error de coordenada objetivo en el diafragma <1e-9 mm para campo finito y angular; isotropía del cono de senos |
-| 8 | Aberración esférica | Leyes LSA∝h² y TSA∝h³ con coeficientes analíticos; reducción del RMS en el mejor foco |
+| 8 | Aberración esférica | Leyes LSA∝h² y TSA∝h³ con coeficientes analíticos; reducción del RMS en el mejor foco; focos parabasales del espejo y referencias de distorsión |
 | 9 | Integridad del proyecto | JSON conserva geometría, materiales, aperturas, marcos y trazas; CSV rechaza datos no representables; versión desconocida rechazada |
-| 10 | Referencia externa | 45 rayos de RayOptics: todas las posiciones y OPL con atol=1e-9 mm, componentes de dirección con atol=1e-11; rtol=0 |
+| 10 | Referencia externa | 45 rayos de RayOptics: todas las posiciones y OPL con atol=1e-9 mm, componentes de dirección con atol=1e-11; rtol=0. Además: cinco sistemas, 40 sumandos Seidel, focos y convergencia de órdenes 5 y 4; criterios en la guía de tercer orden |
 
 Los umbrales son criterios de regresión para estas escalas geométricas. No
 constituyen estimaciones universales del error del algoritmo. Para las leyes
@@ -209,13 +209,12 @@ permite inspeccionar la referencia usada. Las identidades analíticas anteriores
 se explicitan aquí para que las pruebas puedan revisarse sin depender de una
 salida numérica externa.
 
-Esta etapa no certifica la extracción existente de Seidel ni su separación por
-superficie. Sigue siendo prioritario contrastar sus convenciones y coeficientes
-con teoría independiente, junto con curvatura de campo, astigmatismo, coma y
-distorsión para varios campos y aperturas. También faltan pupilas de entrada y
-salida completas y ampliar la validación del catálogo en sus rangos espectrales.
-La etapa 0.5 incorpora [cromática y sensibilidad geométrica](chromatic_sensitivity.md),
-con sus propios oráculos analíticos, materiales contrastados y límites explícitos.
+La etapa 0.6 incorpora [sumas clásicas de Seidel y geometría de campo](third_order_validation.md),
+con referencias por superficie y pruebas de convergencia. El ajuste histórico
+sobre Zernike continúa sin certificarse como extracción clásica. La etapa 0.5
+incorporó [cromática y sensibilidad geométrica](chromatic_sensitivity.md).
+Siguen pendientes pupilas de entrada/salida completas, telecentricidad y ampliar
+los casos y rangos del catálogo contrastados con fuentes primarias.
 
 Los layouts históricos y visores de sólidos conservan sus hipótesis axiales;
 el nuevo layout geométrico representa las colocaciones 3D reales. El trazador

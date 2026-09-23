@@ -51,6 +51,75 @@ def trace_stop_pupil(
         )
         targets = uv * (physical_radius / radius)[:, None]
     targets = np.vstack([np.zeros(2), targets])
+    origins, directions, errors = aim_stop_targets(
+        tracer,
+        field,
+        targets,
+        stop_index=stop,
+        tolerance_mm=tolerance_mm,
+        max_iterations=max_iterations,
+    )
+    aiming_tracer = copy.copy(tracer)
+    aiming_tracer.clip_apertures = False
+    if not np.isfinite(errors[0]) or errors[0] > tolerance_mm:
+        raise RuntimeError("chief-ray aiming did not converge to the stop center")
+    chief = aiming_tracer.trace(origins[0], directions[0], keep_path=True)
+    batch = tracer.trace_batch(origins[1:], directions[1:], keep_paths=keep_paths)
+    failed = ~np.isfinite(errors[1:]) | (errors[1:] > tolerance_mm)
+    batch.status[failed] = TraceStatus.DIVERGED
+    batch.failed_surface[failed] = stop
+    batch.image_points[failed] = np.nan
+    if batch.paths is not None:
+        batch.paths[failed] = np.nan
+    all_weights = sampling.area_weights(uv)
+    weights = all_weights[batch.valid]
+    if weights.size:
+        weights = weights / weights.sum()
+    return PupilTrace(
+        field,
+        uv,
+        weights,
+        batch,
+        chief,
+        np.nan,
+        sampling,
+        sample_weights=all_weights,
+        aiming_residual_mm=errors[1:],
+        launch_origins=origins[1:].copy(),
+        launch_directions=directions[1:].copy(),
+    )
+
+
+def aim_stop_targets(
+    tracer: SequentialTracer,
+    field: FieldPoint,
+    targets_mm,
+    *,
+    stop_index=None,
+    tolerance_mm=1e-11,
+    max_iterations=30,
+):
+    """Return launches and residuals for arbitrary local stop coordinates.
+
+    Aiming ignores apertures. The caller chooses whether the final trace
+    represents transmitted rays or unblocked geometric reference rays.
+    Targets need not include the origin; no chief ray is inserted implicitly.
+    """
+    system = tracer.system
+    system._rebuild()
+    stop = system.stop_index if stop_index is None else stop_index
+    targets = np.asarray(targets_mm, dtype=float)
+    if stop is None or not 0 <= stop < len(system.rows):
+        raise ValueError("aiming requires a valid stop surface")
+    if (
+        targets.ndim != 2
+        or targets.shape[1] != 2
+        or not len(targets)
+        or not np.all(np.isfinite(targets))
+    ):
+        raise ValueError("targets_mm must be a nonempty finite (N, 2) array")
+    if not np.isfinite(tolerance_mm) or tolerance_mm <= 0 or max_iterations < 1:
+        raise ValueError("aiming tolerance and iteration count must be positive")
     count = len(targets)
     stop_frame = system.surface_frame(stop)
     target_sag = system.rows[stop].profile.sag(np.linalg.norm(targets, axis=1))
@@ -63,7 +132,7 @@ def trace_stop_pupil(
         slopes = np.tan(np.deg2rad([field.x, field.y]))
         direction = np.r_[slopes, 1.0]
         direction /= np.linalg.norm(direction)
-        launch_z = min(system.vertices) - 2 * max(aperture.radius, 1.0)
+        launch_z = min(system.vertices) - 2 * max(np.linalg.norm(targets, axis=1).max(), 1.0)
         initial = target_system[:, :2] - (target_system[:, 2] - launch_z)[:, None] * slopes
 
         def launch(parameters):
@@ -126,31 +195,4 @@ def trace_stop_pupil(
                 break
 
     origins, directions = launch(parameters)
-    errors = np.linalg.norm(error, axis=1)
-    if not np.isfinite(errors[0]) or errors[0] > tolerance_mm:
-        raise RuntimeError("chief-ray aiming did not converge to the stop center")
-    chief = aiming_tracer.trace(origins[0], directions[0], keep_path=True)
-    batch = tracer.trace_batch(origins[1:], directions[1:], keep_paths=keep_paths)
-    failed = ~np.isfinite(errors[1:]) | (errors[1:] > tolerance_mm)
-    batch.status[failed] = TraceStatus.DIVERGED
-    batch.failed_surface[failed] = stop
-    batch.image_points[failed] = np.nan
-    if batch.paths is not None:
-        batch.paths[failed] = np.nan
-    all_weights = sampling.area_weights(uv)
-    weights = all_weights[batch.valid]
-    if weights.size:
-        weights = weights / weights.sum()
-    return PupilTrace(
-        field,
-        uv,
-        weights,
-        batch,
-        chief,
-        np.nan,
-        sampling,
-        sample_weights=all_weights,
-        aiming_residual_mm=errors[1:],
-        launch_origins=origins[1:].copy(),
-        launch_directions=directions[1:].copy(),
-    )
+    return origins, directions, np.linalg.norm(error, axis=1)

@@ -178,8 +178,8 @@ El contorno del detector es un parche de visualización, no una apertura física
 No infiere monturas, sólidos mecánicos ni interferencias. Los visores históricos
 con hipótesis axiales siguen siendo herramientas diferentes.
 
-Quedan por validar con casos independientes la extracción completa de Seidel,
-curvatura de campo tangencial/sagital, distorsión y pupilas de entrada/salida.
+La etapa 0.6 añade [Seidel por superficie, focos parabasales y distorsión](third_order_validation.md)
+con casos independientes. Siguen pendientes pupilas de entrada/salida completas.
 También faltan un catálogo más amplio de fuentes primarias, convergencia de
 muestreo para cada familia de sistemas y una interfaz integrada de edición.
 La batería de diez contratos valida los casos declarados, no todo ese alcance.

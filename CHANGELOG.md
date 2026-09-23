@@ -1,5 +1,24 @@
 # Cambios
 
+## 0.6.0 — tercer orden y geometría de campo (propuesta)
+
+- Cinco sumas Seidel por superficie desde rayos paraxiales; corrección cónica y
+  cuártica explícita, predicción transversal y curvaturas con signo documentado.
+- Focos parabasales por diferencias a dos pasos, separados del foco RMS.
+- Distorsión para campos finitos e infinitos con mapa paraxial o f-theta;
+  centroide opcional y estado de transmisión del principal explícito.
+- Cinco referencias RayOptics independientes: 40 coeficientes de superficie,
+  focos diferenciales y posiciones del principal. Convergencia residual de
+  quinto orden transversal y cuarto orden en foco de campo. Diez pruebas.
+- Guía matemática, informe reproducible y figura del doblete N-BK7/N-F2.
+
+Migración: `seidel_coefficients(system, field, ...)` calcula sumas clásicas.
+El ajuste anterior cambia a `fitted_low_order_coefficients`; se migran cuatro
+notebooks históricos. En distorsión, grados definen haces realmente paralelos;
+no se acepta una magnificación finita junto a campos angulares. La distorsión
+relativa axial es indefinida, no cero. `aberrations_figure` requiere las nuevas
+claves `parabasal_*` que devuelve `field_metrics`.
+
 ## 0.5.0 — cromática y sensibilidad (propuesta)
 
 - Cromática con pesos espectrales y de pupila; detector común y RMS de centroide
