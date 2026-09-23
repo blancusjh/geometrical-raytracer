@@ -1,24 +1,10 @@
-"""Chief-ray distortion: a 1-D field sweep, and the classic warped grid.
+"""Chief-ray distortion with an explicit reference map.
 
-Distortion is the departure of the real object-to-image map from the ideal
-linear one, ``image = magnification * object``. Both routines here measure
-it with the *chief ray* (the ray through the centre of the aperture stop),
-the industry-standard reference: being a single ray it is immune to the
-coma and vignetting that pull a flux-weighted spot centroid around. See
-:func:`~raytracer.analysis.aberrations.metrics.field_metrics` for the
-centroid-based figure alongside the full aberration summary.
-
-- :func:`chief_ray_distortion` sweeps field height and returns the
-  familiar distortion-vs-field curve.
-- :func:`distortion_grid` traces a square grid of field points and returns
-  it warped at the image plane — the classic optical-design-software
-  display, where barrel/pincushion is visible as a shape rather than read
-  off a curve.
-
-Both use the general 2-D chief-ray solver
-(:func:`raytracer.propagation.fields.chief_ray_slopes`), not the
-rotationally-symmetric 1-D shortcut, so they are correct for a genuinely
-off-axis (x, y) field point in any system this tracer can trace.
+The scalar sweep supports finite heights and true angular fields; its
+reference is computed by field_geometry unless magnification is supplied.
+The older square-grid function uses finite object heights and a specified
+linear magnification. Both require centered systems; arbitrary placed-system
+mapping needs a separately defined ideal map.
 """
 
 from __future__ import annotations
@@ -52,9 +38,7 @@ def _solve_chief_ray(
 
     for guess in (None, *fallback_guesses):
         try:
-            slopes = chief_ray_slopes(
-                tracer, field, stop_index=stop_index, initial_guess=guess
-            )
+            slopes = chief_ray_slopes(tracer, field, stop_index=stop_index, initial_guess=guess)
         except RuntimeError:
             continue
         if trace_from_object(tracer, (field.x, field.y), slopes).ok:
@@ -66,65 +50,49 @@ def chief_ray_distortion(
     tracer: SequentialTracer,
     fields,
     *,
-    magnification: float,
+    magnification: float | None = None,
     field_unit: str = "mm",
     stop_index: int | None = None,
+    reference: str = "paraxial",
 ) -> list[dict]:
-    """Chief-ray distortion swept over a 1-D field range.
+    """One-dimensional chief distortion with explicit finite/angular fields.
 
-    ``fields`` are object heights in mm by default; pass
-    ``field_unit="deg"`` to give them as field *angles* instead, which is
-    the natural parametrization when the object sits at (or stands in for)
-    infinity — they are converted with the system's own object distance.
-
-    Returns one dict per field point, with the same key names
-    :func:`~raytracer.analysis.aberrations.metrics.field_metrics` uses for
-    the corresponding quantities, so the two can be read interchangeably.
-    This is the cheap way to get just distortion: one chief ray per field,
-    where ``field_metrics`` traces a whole pupil bundle to also give spot
-    size, focus shifts, and astigmatism.
+    Degrees mean a true parallel incident bundle, not a remote finite object.
+    The default ideal map comes from ABCD at the current detector. A supplied
+    magnification overrides that map for finite heights only. On-axis relative
+    distortion is undefined (NaN). See distortion_map for centroid comparison.
     """
+    from .field_geometry import distortion_map
 
     if field_unit not in ("mm", "deg"):
-        raise ValueError(f"field_unit must be 'mm' or 'deg', got {field_unit!r}")
-    object_z = tracer.system.object_z
-    if object_z is None:
-        raise ValueError(
-            "system.object_z is unset; call sequential.solve_object_plane(tracer) "
-            "or assign it explicitly"
-        )
-
+        raise ValueError("field_unit must be mm or deg")
+    if magnification is not None and (field_unit != "mm" or not np.isfinite(magnification)):
+        raise ValueError("magnification overrides require finite height fields")
+    values = np.asarray(fields, dtype=float)
+    if values.ndim != 1 or not len(values) or not np.all(np.isfinite(values)):
+        raise ValueError("fields must be a nonempty finite vector")
+    points = [
+        FieldPoint.angle(y_deg=value) if field_unit == "deg" else FieldPoint(y=value)
+        for value in values
+    ]
+    report = distortion_map(tracer, points, stop_index=stop_index, reference=reference)
     rows = []
-    previous = None
-    for value in np.asarray(fields, dtype=float):
-        height = (
-            abs(object_z) * np.tan(np.deg2rad(value)) if field_unit == "deg" else value
-        )
-        field = FieldPoint(y=float(height))
-        fallbacks = (previous,) if previous is not None else ()
-        slopes = _solve_chief_ray(
-            tracer, field, stop_index=stop_index, fallback_guesses=fallbacks
-        )
-        if slopes is None:
-            raise RuntimeError(
-                f"No unvignetted chief ray at field {value:g} {field_unit} "
-                f"(object height {height:.4g} mm); trim the field range"
-            )
-        previous = slopes
-        ideal = height * magnification
-        actual = float(
-            trace_from_object(tracer, (0.0, field.y), slopes).image_point[1]
-        )
+    for index, value in enumerate(values):
+        ideal = report.ideal_xy_mm[index, 1] if magnification is None else magnification * value
+        actual = report.chief_xy_mm[index, 1]
         rows.append(
             {
                 "field": float(value),
-                "object_height_mm": float(height),
+                "field_unit": field_unit,
+                "object_height_mm": float(value) if field_unit == "mm" else None,
                 "paraxial_image_height_mm": float(ideal),
-                "chief_image_height_mm": actual,
-                "chief_ray_distortion_um": (actual - ideal) * 1e3,
-                "chief_ray_relative_distortion_ppm": (
-                    (actual / ideal - 1.0) * 1e6 if ideal != 0.0 else 0.0
-                ),
+                "chief_image_height_mm": float(actual),
+                "chief_ray_distortion_um": float((actual - ideal) * 1000),
+                "chief_ray_relative_distortion_ppm": float((actual / ideal - 1) * 1e6)
+                if ideal
+                else np.nan,
+                "chief_transmitted": bool(report.chief_transmitted[index]),
+                "reference": "specified_magnification" if magnification is not None else reference,
             }
         )
     return rows
@@ -215,6 +183,8 @@ def distortion_grid(
     dropped rather than assuming full coverage.
     """
 
+    tracer.system.require_axial_coordinates()
+
     if isinstance(half_field, (int, float)):
         half_x = half_y = float(half_field)
     else:
@@ -244,9 +214,9 @@ def distortion_grid(
             )
             if slopes is None:
                 continue
-            actual_points[i, j] = trace_from_object(
-                tracer, (field.x, field.y), slopes
-            ).image_point[:2]
+            actual_points[i, j] = trace_from_object(tracer, (field.x, field.y), slopes).image_point[
+                :2
+            ]
             valid[i, j] = True
             guesses[(i, j)] = slopes
 

@@ -17,6 +17,8 @@ of solving *the same equation*, not three methods.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 MIN_LAMBDA = 1e-12
@@ -135,8 +137,9 @@ def solve_implicit_newton(origin, direction, surface, seed, *, max_iter=30, tol=
     return origin + lam * direction, float(lam)
 
 
-def solve_implicit_bracket(origin, direction, surface, lam_max=50.0, samples=500,
-                           *, max_iter=100, tol=1e-10):
+def solve_implicit_bracket(
+    origin, direction, surface, lam_max=50.0, samples=500, *, max_iter=100, tol=1e-10
+):
     """Scan ``[0, lam_max]`` for the first sign change of ``f_Sigma``, then bisect.
 
     The robust fallback for an implicit form with no good Newton seed: it
@@ -228,6 +231,55 @@ def _solve_parametric(origin, direction, surface):
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class ProfileIntersection:
+    distance: np.ndarray
+    height: np.ndarray
+    slope: np.ndarray
+    normals: np.ndarray
+    parallel: np.ndarray
+    diverged: np.ndarray
+    outside_domain: np.ndarray
+
+
+def _conic_distances(points, directions, curvature, conic, tolerance):
+    """Roots of c(x²+y²+(1+K)z²)-2z=0, on the vertex sag branch.
+
+    Prefer the nearest forward root. A backward root is returned only when
+    there is no forward intersection; the caller controls virtual tracing.
+    """
+
+    metric = np.array([1.0, 1.0, 1.0 + conic])
+    a = curvature * np.sum(directions**2 * metric, axis=1)
+    b = 2 * (curvature * np.sum(points * directions * metric, axis=1) - directions[:, 2])
+    c = curvature * np.sum(points**2 * metric, axis=1) - 2 * points[:, 2]
+    discriminant = b**2 - 4 * a * c
+    roundoff = 32 * np.finfo(float).eps * (b**2 + np.abs(4 * a * c))
+    real = discriminant >= -roundoff
+    root = np.sqrt(np.maximum(discriminant, 0.0))
+    stable = -0.5 * (b + np.copysign(root, b))
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        first = stable / a
+        second = c / stable
+        linear = np.abs(a) <= np.finfo(float).eps * max(abs(curvature), 1e-30)
+        first = np.where(linear, -c / b, first)
+        second = np.where(linear, np.nan, second)
+        repeated = (stable == 0) & ~linear
+        first = np.where(repeated, -b / (2 * a), first)
+
+    candidates = np.column_stack([first, second])
+    hits = points[:, None, :] + candidates[:, :, None] * directions[:, None, :]
+    # The second algebraic sheet is not part of z=sag(r).
+    sheet = 1 - (1 + conic) * curvature * hits[:, :, 2]
+    valid = real[:, None] & np.isfinite(candidates) & (sheet >= -tolerance)
+    forward = np.where(valid & (candidates >= -tolerance), candidates, np.inf)
+    forward_distance = forward.min(axis=1)
+    backward = np.where(valid & (candidates < -tolerance), candidates, -np.inf)
+    distance = np.where(np.isfinite(forward_distance), forward_distance, backward.max(axis=1))
+    return np.where(np.isfinite(distance), distance, np.nan)
+
+
 def intersect_rays_with_profile_surface(
     p: np.ndarray,
     d: np.ndarray,
@@ -235,64 +287,86 @@ def intersect_rays_with_profile_surface(
     profile,
     alive: np.ndarray,
     *,
-    max_newton: int = 15,
+    max_newton: int = 30,
     newton_tol: float = 2e-11,
-):
-    """The implicit method, vectorized: N rays against one rotationally-symmetric
-    profile surface at axial position *vertex_z*.
+) -> ProfileIntersection:
+    """Intersect local rays with a rotational profile, without extending its domain.
 
-    Same equation and same Newton iteration as
-    :func:`solve_implicit_newton`, written out over ``(N, 3)`` arrays so the
-    sequential propagation can advance a whole bundle per surface. The
-    implicit form of a profile surface of revolution about z is
-    ``f_Sigma(x, y, z) = z - vertex_z - sag(hypot(x, y))``, whose gradient is
-    ``(-slope x/h, -slope y/h, 1)``; the Newton derivative below is that
-    gradient dotted with the ray direction.
-
-    ``alive`` masks rays still worth solving for. Returns
-    ``(lambda, h, slope, parallel, diverged)``; ``lambda``/``h``/``slope`` are
-    meaningful only where neither failure mask is set. ``parallel`` marks
-    rays running perpendicular to the axis, ``diverged`` marks a failed
-    solve — both are *solve* failures. Vignetting and TIR are physics and
-    stay with the caller.
+    Conics use stable algebraic roots. General profiles use Newton iteration
+    and require both a finite point and a small final surface residual.
+    Normals at a conic equator come from its implicit equation, avoiding an
+    infinite sag derivative. Distances may be negative for virtual segments.
     """
 
-    n_rays = p.shape[0]
-    dz = d[:, 2]
-    parallel = alive & (np.abs(dz) < 1e-14)
-    solving = alive & ~parallel
-    diverged = np.zeros(n_rays, dtype=bool)
+    points = np.asarray(p, dtype=float) - [0.0, 0.0, vertex_z]
+    directions = np.asarray(d, dtype=float)
+    count = len(points)
+    parallel = np.zeros(count, dtype=bool)
+    outside = np.zeros(count, dtype=bool)
+    conic_profile = hasattr(profile, "conic") and not any(profile.coefficients)
 
-    with np.errstate(divide="ignore", invalid="ignore"):
-        # Seed: where the ray crosses the surface's vertex plane.
-        t = np.where(solving, (vertex_z - p[:, 2]) / np.where(dz == 0.0, 1.0, dz), 0.0)
-        step = np.zeros(n_rays)
-        for _ in range(max_newton):
-            q = p + t[:, None] * d
-            h = np.hypot(q[:, 0], q[:, 1])
-            sag, slope = profile.sag_and_slope(h)
-            residual = q[:, 2] - vertex_z - sag  # f_Sigma(A + lambda u)
-            radial_dot = np.where(
-                h > 0.0,
-                (q[:, 0] * d[:, 0] + q[:, 1] * d[:, 1]) / np.where(h == 0.0, 1.0, h),
-                0.0,
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        if conic_profile:
+            distance = _conic_distances(
+                points, directions, profile.curvature, profile.conic, newton_tol
             )
-            derivative = dz - slope * radial_dot  # grad f_Sigma . u
-            stuck = solving & (np.abs(derivative) < 1e-14)
-            if stuck.any():
-                diverged |= stuck
-                solving &= ~stuck
-            step = np.where(solving, residual / np.where(derivative == 0.0, 1.0, derivative), 0.0)
-            t = t - step
-            if not np.any(np.abs(step[solving]) >= newton_tol):
-                break
+            parallel = alive & profile.is_plane & (np.abs(directions[:, 2]) < 1e-14)
+            outside = alive & ~parallel & ~np.isfinite(distance)
+        else:
+            distance = np.divide(
+                -points[:, 2],
+                directions[:, 2],
+                out=np.zeros(count),
+                where=np.abs(directions[:, 2]) > 1e-14,
+            )
+            active = alive.copy()
+            for _ in range(max_newton):
+                hits = points + distance[:, None] * directions
+                height = np.hypot(hits[:, 0], hits[:, 1])
+                sag, slope = profile.sag_and_slope(height)
+                residual = hits[:, 2] - sag
+                radial = np.divide(
+                    np.sum(hits[:, :2] * directions[:, :2], axis=1),
+                    height,
+                    out=np.zeros(count),
+                    where=height > 0,
+                )
+                derivative = directions[:, 2] - slope * radial
+                outside |= active & ~np.isfinite(sag)
+                active &= np.isfinite(residual) & np.isfinite(derivative)
+                active &= (np.abs(residual) > newton_tol) & (np.abs(derivative) > 1e-14)
+                if not active.any():
+                    break
+                distance[active] -= residual[active] / derivative[active]
 
-    diverged |= solving & (~np.isfinite(t) | (np.abs(step) > 1e-6))
+        hits = points + distance[:, None] * directions
+        height = np.hypot(hits[:, 0], hits[:, 1])
+        sag, slope = profile.sag_and_slope(height)
+        if conic_profile:
+            curvature = profile.curvature
+            normals = np.column_stack(
+                [
+                    -curvature * hits[:, 0],
+                    -curvature * hits[:, 1],
+                    1 - (1 + profile.conic) * curvature * hits[:, 2],
+                ]
+            )
+        else:
+            radial_slope = np.divide(slope, height, out=np.zeros(count), where=height > 0)
+            normals = np.column_stack(
+                [
+                    -radial_slope * hits[:, 0],
+                    -radial_slope * hits[:, 1],
+                    np.ones(count),
+                ]
+            )
+        normals /= np.linalg.norm(normals, axis=1, keepdims=True)
 
-    q = p + t[:, None] * d
-    h = np.hypot(q[:, 0], q[:, 1])
-    _, slope = profile.sag_and_slope(h)
-    return t, h, slope, parallel, diverged
+    valid = np.isfinite(distance) & np.isfinite(sag)
+    valid &= np.all(np.isfinite(normals), axis=1)
+    valid &= np.abs(hits[:, 2] - sag) <= newton_tol * (1 + np.abs(sag))
+    diverged = alive & ~valid & ~parallel & ~outside
+    return ProfileIntersection(distance, height, slope, normals, parallel, diverged, outside)
 
 
 __all__ = [

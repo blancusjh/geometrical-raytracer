@@ -1,0 +1,254 @@
+{
+  "format": "geometrical-raytracer",
+  "version": 1,
+  "length_unit": "mm",
+  "name": "N-BK7 / N-F2 reference doublet",
+  "wavelength_um": 0.58756,
+  "object_z_mm": "-infinity",
+  "object_space": {
+    "type": "ConstantIndex",
+    "parameters": {
+      "name": "AIR",
+      "n": 1.0,
+      "metadata": {
+        "source": "",
+        "wavelength_range_um": null,
+        "reference_temperature_c": null,
+        "index_reference": "unspecified",
+        "notes": ""
+      }
+    }
+  },
+  "frame": {
+    "origin_mm": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rotation": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "image_placement": {
+    "origin_mm": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rotation": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "surfaces": [
+    {
+      "profile": {
+        "type": "asphere",
+        "curvature": 0.02238257732079445,
+        "conic": 0.0,
+        "coefficients": []
+      },
+      "thickness_mm": 4,
+      "material_after": {
+        "type": "SellmeierMaterial",
+        "parameters": {
+          "name": "N-BK7",
+          "b": [
+            1.03961212,
+            0.231792344,
+            1.01046945
+          ],
+          "c": [
+            0.00600069867,
+            0.0200179144,
+            103.560653
+          ],
+          "catalog_nd": 1.5168,
+          "metadata": {
+            "source": "https://media.schott.com/api/public/content/41e799d0bf874807a0bb8e702fbb75b5?v=54856406",
+            "wavelength_range_um": [
+              0.3126,
+              2.3254
+            ],
+            "reference_temperature_c": null,
+            "index_reference": "relative to air",
+            "notes": "Supported interval bounded by tabulated refractive-index wavelengths; no absorption or thermal model."
+          }
+        }
+      },
+      "kind": "refractive",
+      "semidiameter_mm": 5,
+      "aperture": null,
+      "is_stop": true,
+      "placement": {
+        "origin_mm": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "comment": ""
+    },
+    {
+      "profile": {
+        "type": "asphere",
+        "curvature": -0.02238257732079445,
+        "conic": 0.0,
+        "coefficients": []
+      },
+      "thickness_mm": 2,
+      "material_after": {
+        "type": "SellmeierMaterial",
+        "parameters": {
+          "name": "N-F2",
+          "b": [
+            1.39757037,
+            0.159201403,
+            1.2686543
+          ],
+          "c": [
+            0.00995906143,
+            0.0546931752,
+            119.248346
+          ],
+          "catalog_nd": 1.62005,
+          "metadata": {
+            "source": "https://media.schott.com/api/public/content/061f3156c83a44ed9220770b0f65a869?v=d69b35e0",
+            "wavelength_range_um": [
+              0.4047,
+              2.3254
+            ],
+            "reference_temperature_c": null,
+            "index_reference": "relative to air",
+            "notes": "Supported interval bounded by tabulated refractive-index wavelengths; no absorption or thermal model."
+          }
+        }
+      },
+      "kind": "refractive",
+      "semidiameter_mm": 5,
+      "aperture": null,
+      "is_stop": false,
+      "placement": {
+        "origin_mm": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "comment": ""
+    },
+    {
+      "profile": {
+        "type": "asphere",
+        "curvature": -0.0011995000096942376,
+        "conic": 0.0,
+        "coefficients": []
+      },
+      "thickness_mm": 95.4236293533987,
+      "material_after": {
+        "type": "ConstantIndex",
+        "parameters": {
+          "name": "AIR",
+          "n": 1.0,
+          "metadata": {
+            "source": "",
+            "wavelength_range_um": null,
+            "reference_temperature_c": null,
+            "index_reference": "unspecified",
+            "notes": ""
+          }
+        }
+      },
+      "kind": "refractive",
+      "semidiameter_mm": 5,
+      "aperture": null,
+      "is_stop": false,
+      "placement": {
+        "origin_mm": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "comment": ""
+    }
+  ]
+}

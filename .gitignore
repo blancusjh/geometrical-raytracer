@@ -4,3 +4,7 @@ __pycache__/
 *.egg-info/
 examples/notebooks/outputs_us7557996/
 examples/notebooks/US7557996_*.csv
+
+# Local package build products
+build/
+dist/

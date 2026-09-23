@@ -45,8 +45,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from raytracer.analysis import stigmatism_report
-from raytracer.optics.materials import AIR, ConstantIndex
 from raytracer.design import OpticalSystem, SurfaceRow
+from raytracer.optics.materials import AIR, ConstantIndex
 from raytracer.propagation import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
 from raytracer.viz.gl3d import Viewer3D, spectral_rgb
 
@@ -63,8 +63,14 @@ BEAM_ENERGY = 12.0
 def build_system() -> OpticalSystem:
     glass = ConstantIndex("DENSE_GLASS", NI)
     row = SurfaceRow.cartesian_oval(
-        n0=N0, z0=Z0, ni=NI, zi=ZI, thickness=ZI, material=glass,
-        semidiameter=SEMIDIAMETER, comment="GOTS Cartesian oval",
+        n0=N0,
+        z0=Z0,
+        ni=NI,
+        zi=ZI,
+        thickness=ZI,
+        material=glass,
+        semidiameter=SEMIDIAMETER,
+        comment="GOTS Cartesian oval",
     )
     return OpticalSystem([row], object_space=AIR, object_z=Z0)
 
@@ -73,27 +79,39 @@ def _bundle_paths(tracer: SequentialTracer, sampling: dict) -> tuple[np.ndarray,
     """Trace an on-axis pupil bundle (surface = its own stop: chief slope 0)."""
 
     pupil = trace_pupil(
-        tracer, FieldPoint(y=0.0), na_object_sine=NA_OBJECT,
+        tracer,
+        FieldPoint(y=0.0),
+        na_object_sine=NA_OBJECT,
         sampling=PupilSampling(kind="rings", **sampling),
-        chief_slope=0.0, keep_paths=True,
+        chief_slope=0.0,
+        keep_paths=True,
     )
     return pupil.batch.paths[pupil.valid], int(pupil.valid.sum())
 
 
 def main() -> None:
     system = build_system()
-    tracer = SequentialTracer(system, restart_offset=0.0)
+    tracer = SequentialTracer(system)
 
     print("3-D Cartesian oval refractor: stigmatic imaging")
     print(f"  object: z0={Z0} (air, n={N0}); image: zi={ZI} (glass, n={NI})")
-    print(f"  max usable height for this conjugate pair: "
-          f"{system.rows[0].profile.max_usable_height:.4f} (aperture = {SEMIDIAMETER})")
+    print(
+        f"  max usable height for this conjugate pair: "
+        f"{system.rows[0].profile.max_usable_height:.4f} (aperture = {SEMIDIAMETER})"
+    )
 
     report = stigmatism_report(
-        trace_pupil(tracer, FieldPoint(y=0.0), na_object_sine=NA_OBJECT,
-                    sampling=PupilSampling(kind="rings", radial=10, azimuth=32),
-                    slope_model="sine", chief_slope=0.0),
-        wavelength_mm=WAVELENGTH_NM * 1e-6, na_image=0.3, reference_radius=5.0,
+        trace_pupil(
+            tracer,
+            FieldPoint(y=0.0),
+            na_object_sine=NA_OBJECT,
+            sampling=PupilSampling(kind="rings", radial=10, azimuth=32),
+            slope_model="sine",
+            chief_slope=0.0,
+        ),
+        wavelength_mm=WAVELENGTH_NM * 1e-6,
+        na_image=0.3,
+        reference_radius=5.0,
     )
     print(report.summary())
     assert report.is_stigmatic(), "expected a stigmatic conjugate pair"
@@ -108,8 +126,7 @@ def main() -> None:
 
     beam_paths, n_beam = _bundle_paths(tracer, BEAM_SAMPLING)
     rgb = spectral_rgb(WAVELENGTH_NM) * (BEAM_ENERGY / max(n_beam, 1))
-    viewer.add_paths(beam_paths, color=(*rgb.tolist(), 1.0), width=1.0,
-                     group="beam", additive=True)
+    viewer.add_paths(beam_paths, color=(*rgb.tolist(), 1.0), width=1.0, group="beam", additive=True)
 
     viewer.add_marker([0.0, 0.0, ZI])  # design image point (pixel-sized at any zoom)
     viewer.add_axes()

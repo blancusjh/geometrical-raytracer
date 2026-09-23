@@ -494,6 +494,7 @@ class Viewer3D:
         solids by default; ``section='half'`` gives a cutaway."""
         from ..design.rows import SurfaceKind
 
+        system.require_axial_coordinates()
         covered: set[int] = set()
         for i, j, material in system.solid_elements():
             ri, rj = system.rows[i], system.rows[j]

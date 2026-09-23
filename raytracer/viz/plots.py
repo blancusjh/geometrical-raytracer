@@ -11,16 +11,15 @@ from typing import Iterable, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..propagation.fields import FieldPoint, chief_ray_slopes, trace_from_object
-from ..design.rows import SurfaceKind
-from ..design.system import OpticalSystem
-from ..propagation.sequential import SequentialTracer
 from ..analysis.aberrations.chromatic import AxialColor, ChromaticSpots, LateralColor
 from ..analysis.aberrations.distortion import DistortionGrid
 from ..analysis.aberrations.fans import FanData
 from ..analysis.aberrations.wavefront import WavefrontSamples
 from ..analysis.aberrations.zernike import ZernikeExpansion
 from ..analysis.imaging.spots import SpotData
+from ..design.rows import SurfaceKind
+from ..propagation.fields import FieldPoint, chief_ray_slopes, trace_from_object
+from ..propagation.sequential import SequentialTracer
 from .bodies import body_outlines, draw_system, index_color
 from .sag_drawing import beam_foci_from_paths, mirror_arcs_from_paths, sample_profile_curve
 
@@ -57,6 +56,7 @@ def layout_figure(
     """
 
     system = tracer.system
+    system.require_axial_coordinates()
     colors = dict(DEFAULT_MATERIAL_COLORS)
     if material_colors:
         colors.update(material_colors)
@@ -110,8 +110,12 @@ def layout_figure(
         last = system.rows[-1]
         semi = last.semidiameter if last.semidiameter is not None else 20.0
         ax.fill_betweenx(
-            [-semi, semi], system.vertices[-1], system.image_z,
-            color="#f6bd60", alpha=0.24, zorder=0,
+            [-semi, semi],
+            system.vertices[-1],
+            system.image_z,
+            color="#f6bd60",
+            alpha=0.24,
+            zorder=0,
         )
 
     if fields:
@@ -132,15 +136,17 @@ def layout_figure(
             # intermediate convergence points of the traced fan
             if bundle:
                 for z_f, y_f, _, _, _ in beam_foci_from_paths(np.stack(bundle)):
-                    ax.plot([z_f], [y_f], "o", ms=4.5, mfc="white", mec=color,
-                            mew=1.2, zorder=6)
+                    ax.plot([z_f], [y_f], "o", ms=4.5, mfc="white", mec=color, mew=1.2, zorder=6)
 
     if system.object_z is not None:
         ax.axvline(system.object_z, color="black", ls="--", lw=1, label="object plane")
     ax.axvline(system.image_z, color="black", ls="--", lw=1, label="image plane")
     if system.stop_index is not None:
         ax.axvline(
-            system.vertices[system.stop_index], color="#555555", ls=":", lw=1,
+            system.vertices[system.stop_index],
+            color="#555555",
+            ls=":",
+            lw=1,
             label="aperture stop",
         )
     ax.axhline(0, color="#aaaaaa", lw=0.6)
@@ -205,11 +211,15 @@ def fans_figure(fans: Iterable[FanData]) -> plt.Figure:
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
     for fan, color in zip(fans, FIELD_COLORS):
         axes[0].plot(
-            fan.tangential[:, 0], fan.tangential[:, 1], color=color,
+            fan.tangential[:, 0],
+            fan.tangential[:, 1],
+            color=color,
             label=f"y={fan.field_y:.0f} mm",
         )
         axes[1].plot(
-            fan.sagittal[:, 0], fan.sagittal[:, 1], color=color,
+            fan.sagittal[:, 0],
+            fan.sagittal[:, 1],
+            color=color,
             label=f"y={fan.field_y:.0f} mm",
         )
     axes[0].set(title="Tangential ray fan", ylabel="Δy′ (µm)")
@@ -229,11 +239,15 @@ def aberrations_figure(metrics: Sequence[dict], *, suptitle: str | None = None) 
     image_height = np.array([row["centroid_image_height_mm"] for row in metrics])
     fig, axes = plt.subplots(2, 2, figsize=(10, 7))
     axes[0, 0].plot(
-        image_height, [row["rms_spot_radius_um"] for row in metrics], "o-",
+        image_height,
+        [row["rms_spot_radius_um"] for row in metrics],
+        "o-",
         label="nominal plane",
     )
     axes[0, 0].plot(
-        image_height, [row["best_focus_rms_spot_um"] for row in metrics], "s-",
+        image_height,
+        [row["best_focus_rms_spot_um"] for row in metrics],
+        "s-",
         label="best focus",
     )
     axes[0, 0].set(ylabel="RMS radius (µm)", title="Transverse aberration")
@@ -242,18 +256,22 @@ def aberrations_figure(metrics: Sequence[dict], *, suptitle: str | None = None) 
     axes[0, 1].axhline(0, color="black", lw=0.7)
     axes[0, 1].set(ylabel="Chief-ray distortion (µm)", title="Distortion")
     axes[1, 0].plot(
-        image_height, [row["sagittal_focus_shift_mm"] for row in metrics], "o-",
+        image_height,
+        [row["parabasal_sagittal_shift_mm"] for row in metrics],
+        "o-",
         label="sagittal",
     )
     axes[1, 0].plot(
-        image_height, [row["tangential_focus_shift_mm"] for row in metrics], "s-",
+        image_height,
+        [row["parabasal_tangential_shift_mm"] for row in metrics],
+        "s-",
         label="tangential",
     )
     axes[1, 0].axhline(0, color="black", lw=0.7)
-    axes[1, 0].set(ylabel="Best-focus shift (mm)", title="Field curvature")
+    axes[1, 0].set(ylabel="Parabasal focus shift (mm)", title="Field curvature")
     axes[1, 0].legend()
     axes[1, 1].plot(
-        image_height, [row["astigmatic_separation_mm"] for row in metrics], "o-"
+        image_height, [row["parabasal_astigmatic_separation_mm"] for row in metrics], "o-"
     )
     axes[1, 1].axhline(0, color="black", lw=0.7)
     axes[1, 1].set(ylabel="T−S focus (mm)", title="Astigmatism")
@@ -288,8 +306,13 @@ def _draw_distortion_grid(
         dropped = ideal[~grid.valid]
         n_dropped = int((~grid.valid).sum())
         ax.scatter(
-            dropped[:, 0], dropped[:, 1], marker="x", color="#d62728", s=24,
-            zorder=3, label=f"vignetted ({n_dropped}/{grid.valid.size})",
+            dropped[:, 0],
+            dropped[:, 1],
+            marker="x",
+            color="#d62728",
+            s=24,
+            zorder=3,
+            label=f"vignetted ({n_dropped}/{grid.valid.size})",
         )
         ax.legend(loc="best", fontsize=8)
 
@@ -396,11 +419,11 @@ def dispersion_figure(
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for material in materials:
         index = [material.index(float(w)) for w in wavelengths_um]
-        ax.plot(wavelengths_um, index, "-", lw=1.6,
-                label=f"{material.name} ({type(material).__name__})")
+        ax.plot(
+            wavelengths_um, index, "-", lw=1.6, label=f"{material.name} ({type(material).__name__})"
+        )
     _mark_reference_lines(ax, reference_lines_um)
-    ax.set(xlabel="wavelength (µm)", ylabel="refractive index n",
-           title=title or "Glass dispersion")
+    ax.set(xlabel="wavelength (µm)", ylabel="refractive index n", title=title or "Glass dispersion")
     ax.legend()
     ax.grid(alpha=0.2)
     fig.tight_layout()
@@ -420,15 +443,16 @@ def chromatic_figure(
     fig, axes = plt.subplots(1, panels, figsize=(5.5 * panels, 4.2), squeeze=False)
     flat = axes[0]
 
-    flat[0].plot(axial.wavelengths_um, axial.focus_shift_mm * 1e3, "-",
-                 color="#b3421b", lw=1.6)
+    flat[0].plot(axial.wavelengths_um, axial.focus_shift_mm * 1e3, "-", color="#b3421b", lw=1.6)
     flat[0].set(xlabel="wavelength (µm)", ylabel="focus shift (µm)", title="Axial color")
 
     if lateral is not None:
-        flat[1].plot(lateral.wavelengths_um, lateral.lateral_color_um, "-",
-                     color="#2878b5", lw=1.6)
-        flat[1].set(xlabel="wavelength (µm)", ylabel="image height shift (µm)",
-                    title=f"Lateral color at y={lateral.field_height_mm:.4g} mm")
+        flat[1].plot(lateral.wavelengths_um, lateral.lateral_color_um, "-", color="#2878b5", lw=1.6)
+        flat[1].set(
+            xlabel="wavelength (µm)",
+            ylabel="image height shift (µm)",
+            title=f"Lateral color at y={lateral.field_height_mm:.4g} mm",
+        )
 
     for ax in flat:
         ax.axhline(0, color="black", lw=0.7)
@@ -466,7 +490,10 @@ def chromatic_spots_figure(
         # so the shortest wavelength must take the *low* end. Both ends are
         # squeezed inward off turbo's near-black extremes to stay legible.
         ax.scatter(
-            offsets[:, 0], offsets[:, 1], s=5, alpha=0.6,
+            offsets[:, 0],
+            offsets[:, 1],
+            s=5,
+            alpha=0.6,
             color=colormap(0.06 + 0.88 * fraction),
             label=f"{wavelength_um * 1e3:.0f} nm",
         )
@@ -474,8 +501,11 @@ def chromatic_spots_figure(
         ax.set_xlim(-limit_um, limit_um)
         ax.set_ylim(-limit_um, limit_um)
     ax.set_aspect("equal")
-    ax.set(xlabel="Δx (µm)", ylabel="Δy (µm)",
-           title=title or f"Polychromatic spot — RMS {spots.polychromatic_rms_um:.2f} µm")
+    ax.set(
+        xlabel="Δx (µm)",
+        ylabel="Δy (µm)",
+        title=title or f"Polychromatic spot — RMS {spots.polychromatic_rms_um:.2f} µm",
+    )
     ax.grid(alpha=0.2)
     ax.legend(fontsize=7, markerscale=2, loc="upper right")
     fig.tight_layout()
@@ -508,18 +538,24 @@ def zernike_figure(expansion: ZernikeExpansion) -> plt.Figure:
     ax0.grid(axis="y", alpha=0.2)
     for ax, data, title in (
         (
-            fig.add_subplot(grid_spec[1, 0]), nominal,
+            fig.add_subplot(grid_spec[1, 0]),
+            nominal,
             f"Nominal plane: {expansion.rms_no_tilt_nm:.2f} nm RMS",
         ),
         (
-            fig.add_subplot(grid_spec[1, 1]), refocused,
+            fig.add_subplot(grid_spec[1, 1]),
+            refocused,
             f"After tilt/defocus removal: {expansion.rms_refocused_nm:.2f} nm RMS",
         ),
     ):
         limit = max(np.nanmax(np.abs(data)), 1e-6)
         shown = ax.imshow(
-            data, extent=[-1, 1, -1, 1], origin="lower", cmap="RdBu_r",
-            vmin=-limit, vmax=limit,
+            data,
+            extent=[-1, 1, -1, 1],
+            origin="lower",
+            cmap="RdBu_r",
+            vmin=-limit,
+            vmax=limit,
         )
         ax.set(xlabel="u", ylabel="v", title=title, aspect="equal")
         fig.colorbar(shown, ax=ax, label="Wavefront (nm)")
@@ -550,17 +586,19 @@ def psf_figure(
     centre = size // 2
     coordinates_nm = (np.arange(size) - centre) * pixel_nm
     extent = [
-        coordinates_nm[centre - crop], coordinates_nm[centre + crop - 1],
-        coordinates_nm[centre - crop], coordinates_nm[centre + crop - 1],
+        coordinates_nm[centre - crop],
+        coordinates_nm[centre + crop - 1],
+        coordinates_nm[centre - crop],
+        coordinates_nm[centre + crop - 1],
     ]
     fig, ax = plt.subplots(figsize=(6, 5))
     shown = ax.imshow(
         psf[centre - crop : centre + crop, centre - crop : centre + crop],
-        extent=extent, origin="lower", cmap="inferno",
+        extent=extent,
+        origin="lower",
+        cmap="inferno",
     )
-    ax.set(
-        title=title or "Scalar PSF", xlabel="x at wafer (nm)", ylabel="y at wafer (nm)"
-    )
+    ax.set(title=title or "Scalar PSF", xlabel="x at wafer (nm)", ylabel="y at wafer (nm)")
     fig.colorbar(shown, ax=ax, label="Normalized intensity")
     fig.tight_layout()
     return fig
@@ -609,7 +647,10 @@ def contrast_figure(
         ax.axvline(cutoff_nm, color="#b3421b", ls="--")
         ax.annotate(
             f"cutoff λ/[2·NA·(1+σ)] = {cutoff_nm:.1f} nm",
-            (cutoff_nm, 0.66), color="#b3421b", ha="right", fontsize=9,
+            (cutoff_nm, 0.66),
+            color="#b3421b",
+            ha="right",
+            fontsize=9,
         )
     ax.axhline(0.30, color="#555", ls=":")
     hps = np.asarray(half_pitches_nm, dtype=float)

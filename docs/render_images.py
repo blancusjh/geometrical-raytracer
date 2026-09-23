@@ -56,7 +56,9 @@ def render_examples() -> None:
         path = OUT / f"{name}.png"
         subprocess.run(
             [sys.executable, "-m", module, *args, "--save", str(path)],
-            cwd=ROOT, check=True, capture_output=True,
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
         )
         shrink(path)
 
@@ -72,7 +74,11 @@ def render_newtonian() -> None:
     scene, *_ = build_scene(samples_per_strip=26)
     path = OUT / "newtonian.png"
     backend = show(
-        scene, backend="gl", interactive=False, size=(1400, 640), bgcolor="black",
+        scene,
+        backend="gl",
+        interactive=False,
+        size=(1400, 640),
+        bgcolor="black",
         render_config=RenderConfig(ray_width=0.035, min_pixels=1.0, use_solid_rays=True),
     )
     backend.save(path)
@@ -98,7 +104,7 @@ def render_analysis() -> None:
     system = OpticalSystem.from_prescription(
         ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
     )
-    tracer = SequentialTracer(system)
+    tracer = SequentialTracer(system, allow_virtual_segments=True)
     solve_object_plane(tracer)
     fields = [56.0, 62.0, 67.0]
 
@@ -135,19 +141,32 @@ def render_distortion_grids() -> None:
     print("distortion grids:")
     #: (prescription, panel title, object half-field in degrees, exaggeration)
     SYSTEMS = [
-        ("optical_systems/photographic/cooke_triplet_prescription.csv", "Cooke triplet, EFL 50 mm", 10.0, 25.0),
-        ("optical_systems/photographic/double_gauss_prescription.csv", "Double Gauss, EFL 99 mm", 20.6, 15.0),
+        (
+            "optical_systems/photographic/cooke_triplet_prescription.csv",
+            "Cooke triplet, EFL 50 mm",
+            10.0,
+            25.0,
+        ),
+        (
+            "optical_systems/photographic/double_gauss_prescription.csv",
+            "Double Gauss, EFL 99 mm",
+            20.6,
+            15.0,
+        ),
     ]
 
     grids, titles, exaggerations = [], [], []
     for csv, title, half_deg, exaggeration in SYSTEMS:
-        tracer = SequentialTracer(OpticalSystem.from_prescription(ROOT / "data" / csv))
+        # Cooke has a virtual object conjugate and an auxiliary stop transfer.
+        tracer = SequentialTracer(
+            OpticalSystem.from_prescription(ROOT / "data" / csv),
+            allow_virtual_segments=True,
+            allow_virtual_object=True,
+        )
         conjugate = solve_object_plane(tracer)
         half = abs(conjugate.object_z) * np.tan(np.deg2rad(half_deg))
         grids.append(
-            distortion_grid(
-                tracer, magnification=conjugate.magnification, half_field=half, n=11
-            )
+            distortion_grid(tracer, magnification=conjugate.magnification, half_field=half, n=11)
         )
         titles.append(f"{title}\n±{half_deg:g}° object half-field")
         exaggerations.append(exaggeration)
@@ -159,7 +178,8 @@ def render_distortion_grids() -> None:
     tracer = SequentialTracer(
         OpticalSystem.from_prescription(
             ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
-        )
+        ),
+        allow_virtual_segments=True,
     )
     solve_object_plane(tracer)
     grids.append(distortion_grid(tracer, magnification=0.25, half_field=50.0, n=11))
@@ -167,16 +187,20 @@ def render_distortion_grids() -> None:
     exaggerations.append(2000.0)
 
     fig = plots.distortion_grids_figure(
-        grids, titles=titles, exaggerations=exaggerations,
+        grids,
+        titles=titles,
+        exaggerations=exaggerations,
         suptitle="Chief-ray distortion grids — dashed: the ideal linear map; "
-                 "solid: where the traced chief rays actually land",
+        "solid: where the traced chief rays actually land",
     )
     fig.savefig(OUT / "distortion_grids.png", dpi=150, bbox_inches="tight", facecolor="white")
     shrink(OUT / "distortion_grids.png")
     for title, grid in zip(titles, grids):
-        print(f"    {title.splitlines()[0]}: max {grid.max_distortion_um:.4g} µm "
-              f"({grid.max_relative_distortion_percent:.3g} %), "
-              f"coverage {grid.valid_fraction:.1%}")
+        print(
+            f"    {title.splitlines()[0]}: max {grid.max_distortion_um:.4g} µm "
+            f"({grid.max_relative_distortion_percent:.3g} %), "
+            f"coverage {grid.valid_fraction:.1%}"
+        )
 
 
 def render_aplanatism() -> None:
@@ -226,39 +250,51 @@ def render_stigmatic_spots() -> None:
     def spot(row):
         tracer = SequentialTracer(OpticalSystem([row], object_space=AIR, object_z=z0))
         pupil = trace_pupil(
-            tracer, FieldPoint(y=0.0), na_object_sine=na,
-            sampling=PupilSampling(kind="rings", radial=14, azimuth=64), chief_slope=0.0,
+            tracer,
+            FieldPoint(y=0.0),
+            na_object_sine=na,
+            sampling=PupilSampling(kind="rings", radial=14, azimuth=64),
+            chief_slope=0.0,
         )
         return spot_data(pupil)
 
-    sphere = spot(SurfaceRow.refracting(radius=radius, thickness=zi, material=glass,
-                                        semidiameter=semi))
-    oval = spot(SurfaceRow.cartesian_oval(n0=n0, z0=z0, ni=ni, zi=zi, thickness=zi,
-                                          material=glass, semidiameter=semi))
+    sphere = spot(
+        SurfaceRow.refracting(radius=radius, thickness=zi, material=glass, semidiameter=semi)
+    )
+    oval = spot(
+        SurfaceRow.cartesian_oval(
+            n0=n0, z0=z0, ni=ni, zi=zi, thickness=zi, material=glass, semidiameter=semi
+        )
+    )
 
     fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.6))
     scale = 1.15 * np.abs(sphere.relative_um).max()
 
-    axes[0].scatter(sphere.relative_um[:, 0], sphere.relative_um[:, 1], s=5, alpha=0.5,
-                    color="#c1440e")
-    axes[0].set(xlim=(-scale, scale), ylim=(-scale, scale),
-                title=f"Sphere, R = {radius:.3f} mm\nRMS = {sphere.rms_radius_um:,.1f} µm")
+    axes[0].scatter(
+        sphere.relative_um[:, 0], sphere.relative_um[:, 1], s=5, alpha=0.5, color="#c1440e"
+    )
+    axes[0].set(
+        xlim=(-scale, scale),
+        ylim=(-scale, scale),
+        title=f"Sphere, R = {radius:.3f} mm\nRMS = {sphere.rms_radius_um:,.1f} µm",
+    )
 
-    axes[1].scatter(oval.relative_um[:, 0], oval.relative_um[:, 1], s=5, alpha=0.9,
-                    color="#2878b5")
-    axes[1].set(xlim=(-scale, scale), ylim=(-scale, scale),
-                title="Cartesian oval, same scale\n(every ray inside one pixel)")
+    axes[1].scatter(oval.relative_um[:, 0], oval.relative_um[:, 1], s=5, alpha=0.9, color="#2878b5")
+    axes[1].set(
+        xlim=(-scale, scale),
+        ylim=(-scale, scale),
+        title="Cartesian oval, same scale\n(every ray inside one pixel)",
+    )
 
     # Panel 3 is not a small spot -- it is the double-precision floor. The
     # scatter is round-off, so label it as such instead of dressing it up in a
     # physical unit it does not deserve.
     relative_to_conjugate = oval.rms_radius_um / (abs(z0) * 1e3)
-    axes[2].scatter(oval.relative_um[:, 0], oval.relative_um[:, 1], s=5, alpha=0.9,
-                    color="#2878b5")
+    axes[2].scatter(oval.relative_um[:, 0], oval.relative_um[:, 1], s=5, alpha=0.9, color="#2878b5")
     axes[2].ticklabel_format(style="sci", scilimits=(0, 0))
     axes[2].set(
         title=f"Cartesian oval, own scale\nRMS = {oval.rms_radius_um:.1e} µm "
-              f"= {relative_to_conjugate:.0e} of the object distance"
+        f"= {relative_to_conjugate:.0e} of the object distance"
     )
 
     for ax in axes:
@@ -274,8 +310,10 @@ def render_stigmatic_spots() -> None:
     fig.tight_layout()
     fig.savefig(OUT / "stigmatic_spots.png", dpi=150, bbox_inches="tight", facecolor="white")
     shrink(OUT / "stigmatic_spots.png")
-    print(f"    sphere {sphere.rms_radius_um:.4g} µm  vs  oval {oval.rms_radius_um:.4g} µm"
-          f"  ({sphere.rms_radius_um / oval.rms_radius_um:.2g}x)")
+    print(
+        f"    sphere {sphere.rms_radius_um:.4g} µm  vs  oval {oval.rms_radius_um:.4g} µm"
+        f"  ({sphere.rms_radius_um / oval.rms_radius_um:.2g}x)"
+    )
 
 
 if __name__ == "__main__":

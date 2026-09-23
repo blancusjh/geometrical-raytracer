@@ -1,343 +1,245 @@
-"""Axial and lateral color from tracing the same prescription at several
-wavelengths.
+"""Geometric color at a fixed detector, with explicit spectral and pupil weights."""
 
-``OpticalSystem.wavelength_um`` is a single fixed value — this package's
-tracer is fundamentally monochromatic per instance — so "chromatic
-aberration" here means literally rebuilding the system at each wavelength
-of interest (same surfaces, same fixed object plane) and comparing where
-rays land. That only produces something meaningful once a material's
-``index()`` actually varies with wavelength, i.e. an
-:class:`~raytracer.optics.materials.AbbeMaterial` rather than a
-:class:`~raytracer.optics.materials.ConstantIndex` — the DUV materials in
-this package are only ever evaluated at one wavelength and have no real
-dispersion to show.
-
-Three classical quantities:
-
-- **Axial (longitudinal) color**: the on-axis paraxial focus position
-  shifts along z with wavelength, since the system's optical power itself
-  is index-, hence wavelength-, dependent. Found from one differential ray
-  per wavelength — the same technique
-  :func:`~raytracer.propagation.paraxial.differential_conjugates` uses to
-  recover an object plane, but solving for the *image*-side focus instead
-  since here the object plane is fixed and known.
-- **Lateral color**: at the *reference* wavelength's paraxial image plane,
-  the chief ray's image height for an off-axis field point still shifts
-  slightly with wavelength (color-dependent magnification) — this is
-  measured at that fixed plane, not each wavelength's own shifted focus.
-- **Chromatic spots**: the geometric blur each wavelength forms at one
-  common image plane, all referred to one common origin so the colors can
-  be overlaid and compared (see :func:`chromatic_spots`).
-"""
-
-from __future__ import annotations
-
-import copy
 from dataclasses import dataclass
 
 import numpy as np
 
-from ...propagation.fields import (
-    FieldPoint,
-    PupilSampling,
-    chief_ray_slopes,
-    trace_from_object,
-    trace_pupil,
-)
-from ...propagation.paraxial import direction_from_slopes
 from ...design.system import OpticalSystem
+from ...propagation.fields import FieldPoint, PupilSampling, PupilTrace, trace_pupil
+from ...propagation.paraxial import ParaxialModel
 from ...propagation.sequential import SequentialTracer
 
 
-def _reference_index(wavelengths_um: np.ndarray, reference_wavelength_um: float) -> int:
-    """Index of the sample closest to *reference_wavelength_um*.
+def _wavelengths(values):
+    values = np.asarray(values, dtype=float)
+    if values.ndim != 1 or not len(values) or not np.all(np.isfinite(values) & (values > 0)):
+        raise ValueError("wavelengths must be a nonempty vector of finite positive values in um")
+    if len(np.unique(values)) != len(values):
+        raise ValueError("wavelengths must be distinct")
+    return values
 
-    Raises if the nearest sample is not actually close, rather than
-    silently snapping to whichever end of the sweep happens to be nearest
-    and reporting shifts against a reference the caller never chose.
+
+def _reference_index(wavelengths_um, reference_wavelength_um):
+    wavelengths_um = _wavelengths(wavelengths_um)
+    matches = np.flatnonzero(
+        np.isclose(wavelengths_um, reference_wavelength_um, atol=1e-12, rtol=0)
+    )
+    if len(matches) != 1:
+        raise ValueError("reference_wavelength_um must occur exactly once in wavelengths_um")
+    return int(matches[0])
+
+
+def spectral_weights(values, count):
+    """Normalize relative incident powers, including detector response if desired.
+
+    These are discrete band weights, not a sampled spectral density. For a
+    density the caller must include the wavelength integration widths.
     """
+    weights = np.ones(count) if values is None else np.array(values, dtype=float, copy=True)
+    if weights.shape != (count,) or not np.all(np.isfinite(weights) & (weights >= 0)):
+        raise ValueError("spectral weights must match wavelengths and be finite and nonnegative")
+    if not np.any(weights > 0):
+        raise ValueError("at least one spectral weight must be positive")
+    weights /= weights.max()
+    return weights / weights.sum()
 
-    wavelengths_um = np.asarray(wavelengths_um, dtype=float)
-    index = int(np.argmin(np.abs(wavelengths_um - reference_wavelength_um)))
-    nearest = wavelengths_um[index]
-    spacing = np.diff(np.sort(wavelengths_um))
-    tolerance = float(spacing.min()) if spacing.size else 0.0
-    if abs(nearest - reference_wavelength_um) > max(tolerance, 1e-9):
-        raise ValueError(
-            f"reference_wavelength_um={reference_wavelength_um} is not among the "
-            f"sampled wavelengths (nearest is {nearest}); include it so shifts are "
-            "measured against the reference you actually asked for"
-        )
-    return index
+
+def _tracer(source):
+    return source if isinstance(source, SequentialTracer) else SequentialTracer(source)
 
 
 @dataclass
 class AxialColor:
-    """Paraxial on-axis focus position vs. wavelength."""
-
     wavelengths_um: np.ndarray
     focus_z_mm: np.ndarray
     reference_wavelength_um: float
 
     @property
-    def focus_shift_mm(self) -> np.ndarray:
-        """Focus position relative to the reference wavelength's own focus."""
-
+    def focus_shift_mm(self):
         index = _reference_index(self.wavelengths_um, self.reference_wavelength_um)
         return self.focus_z_mm - self.focus_z_mm[index]
 
 
+def axial_color(system: OpticalSystem, wavelengths_um, *, reference_wavelength_um: float):
+    """Gaussian image conjugate versus wavelength in system coordinates (mm).
+
+    The object stays fixed; +/- infinity denotes a collimated axial input.
+    Analytic ABCD avoids mixing finite-aperture spherical aberration into color.
+    Undefined/afocal image positions are rejected, not plotted as finite foci.
+    """
+    wavelengths_um = _wavelengths(wavelengths_um)
+    _reference_index(wavelengths_um, reference_wavelength_um)
+    if system.object_z is None or np.isnan(system.object_z):
+        raise ValueError(
+            "axial color requires object_z, including infinity for a collimated object"
+        )
+    foci = np.array(
+        [
+            ParaxialModel(system.at_wavelength(wl)).image_conjugate_z(system.object_z)
+            for wl in wavelengths_um
+        ]
+    )
+    if not np.all(np.isfinite(foci)):
+        raise ValueError("axial color is undefined for an afocal image conjugate")
+    return AxialColor(wavelengths_um, foci, reference_wavelength_um)
+
+
 @dataclass
 class LateralColor:
-    """Chief-ray image height vs. wavelength, at the reference focal plane."""
-
     wavelengths_um: np.ndarray
     field_height_mm: float
     image_height_mm: np.ndarray
     reference_wavelength_um: float
 
     @property
-    def lateral_color_um(self) -> np.ndarray:
-        """Image-height deviation from the reference wavelength, in µm."""
-
+    def lateral_color_um(self):
         index = _reference_index(self.wavelengths_um, self.reference_wavelength_um)
         return (self.image_height_mm - self.image_height_mm[index]) * 1e3
 
 
-def _system_at_wavelength(system: OpticalSystem, wavelength_um: float) -> OpticalSystem:
-    """A same-prescription copy of *system*, rebuilt at a different wavelength.
-
-    The surface rows are deep-copied: ``OpticalSystem`` keeps a shallow
-    ``list(rows)``, so sharing them would let a later ``set_thickness`` on
-    one wavelength's copy silently mutate the caller's own system.
-    """
-
-    return OpticalSystem(
-        copy.deepcopy(system.rows), wavelength_um=wavelength_um,
-        object_space=system.object_space, object_z=system.object_z, name=system.name,
-    )
-
-
-def _paraxial_focus_z(tracer: SequentialTracer, *, probe_height_mm: float | None = None) -> float:
-    """On-axis paraxial focus z, from one differential (near-axial) ray.
-
-    The axial ray (zero height, zero slope) stays exactly on-axis; a second
-    ray launched at a small slope reaches the tabulated image plane at some
-    height and local direction — extrapolating that ray's straight line
-    back to the axis (y=0) gives the paraxial focus, which may sit in front
-    of or behind the nominal image plane once the wavelength no longer
-    matches the design wavelength.
-
-    The probe ray is specified by the *height* it reaches at the first
-    surface rather than by its launch slope, because the slope that keeps a
-    ray paraxial depends entirely on how far away the object is: a fixed
-    slope that is safely paraxial for an object 80 mm away overflows the
-    aperture outright for one 100 m away. ``probe_height_mm`` defaults to
-    0.5% of the smallest defined clear semidiameter — well inside the
-    paraxial region, and far enough from zero to stay numerically
-    well-conditioned — or, for a system that defines no semidiameters at
-    all, to a small fraction of the object distance.
-    """
-
-    system = tracer.system
-    object_z = system.object_z
-    if object_z is None:
-        raise ValueError("system.object_z is unset")
-
-    first_vertex = float(system.vertices[0])
-    reach = first_vertex - object_z
-    if probe_height_mm is None:
-        semidiameters = [r.semidiameter for r in system.rows if r.semidiameter is not None]
-        probe_height_mm = (
-            0.005 * min(semidiameters) if semidiameters else 1e-4 * abs(reach)
-        )
-
-    origin = np.array([0.0, 0.0, object_z])
-    angled = tracer.trace(
-        origin, direction_from_slopes(0.0, probe_height_mm / reach), keep_path=False
-    )
-    if not angled.ok:
-        raise RuntimeError(
-            f"Differential ray (probe height {probe_height_mm:.4g} mm at the first "
-            "surface) did not survive the system; pass an explicit probe_height_mm"
-        )
-    y2 = angled.image_point[1]
-    slope = angled.direction[1] / angled.direction[2]
-    if abs(slope) < 1e-12:
-        raise RuntimeError(
-            "The differential ray leaves the system parallel to the axis, so it "
-            "has no finite focus; an afocal system has no axial-color curve"
-        )
-    return float(system.image_z - y2 / slope)
-
-
-def axial_color(
-    system: OpticalSystem,
-    wavelengths_um,
-    *,
-    reference_wavelength_um: float,
-) -> AxialColor:
-    """Paraxial focus position vs. wavelength, object plane held fixed.
-
-    ``system.object_z`` must already be set (e.g. via
-    :func:`~raytracer.propagation.paraxial.solve_object_plane` at the
-    reference wavelength) — the same physical object plane is reused for
-    every wavelength; only the resulting focus position changes.
-    """
-
-    wavelengths_um = np.asarray(wavelengths_um, dtype=float)
-    focus_z = []
-    for wl in wavelengths_um:
-        wl_tracer = SequentialTracer(_system_at_wavelength(system, float(wl)))
-        focus_z.append(_paraxial_focus_z(wl_tracer))
-
-    return AxialColor(
-        wavelengths_um=wavelengths_um,
-        focus_z_mm=np.asarray(focus_z),
-        reference_wavelength_um=reference_wavelength_um,
-    )
-
-
-def lateral_color(
-    system: OpticalSystem,
-    wavelengths_um,
-    *,
-    field_height_mm: float,
-    reference_wavelength_um: float,
-    stop_index: int | None = None,
-) -> LateralColor:
-    """Chief-ray image height vs. wavelength, at the fixed nominal image plane.
-
-    Traces the chief ray for the same object field height at each
-    wavelength (warm-started from the previous wavelength's solution,
-    since they're close together) and reads its height at the system's
-    tabulated image plane — deliberately *not* each wavelength's own
-    shifted focus (see :func:`axial_color`), since lateral color is a
-    statement about magnification differing by wavelength at one common
-    plane, not about focus.
-    """
-
-    wavelengths_um = np.asarray(wavelengths_um, dtype=float)
-    image_heights = []
-    guess = None
-    field = FieldPoint(y=float(field_height_mm))
-    for wl in wavelengths_um:
-        wl_system = _system_at_wavelength(system, float(wl))
-        wl_tracer = SequentialTracer(wl_system)
-        _, chief_slope = chief_ray_slopes(
-            wl_tracer, field, stop_index=stop_index, initial_guess=guess
-        )
-        guess = (0.0, chief_slope)
-        result = trace_from_object(wl_tracer, (0.0, field.y), (0.0, chief_slope))
-        image_heights.append(float(result.image_point[1]))
-
-    return LateralColor(
-        wavelengths_um=wavelengths_um,
-        field_height_mm=field_height_mm,
-        image_height_mm=np.asarray(image_heights),
-        reference_wavelength_um=reference_wavelength_um,
-    )
-
-
 @dataclass
 class ChromaticSpots:
-    """Per-wavelength geometric spots sharing one common reference frame.
+    """All colors expressed in the same local detector frame.
 
-    ``offsets_um[i]`` is the ``(M_i, 2)`` array of image-plane ray
-    intersections for ``wavelengths_um[i]``, in µm, measured from a single
-    common origin (the reference wavelength's chief-ray image point) on a
-    single common image plane. Both "commons" matter: recentring each
-    wavelength on *its own* centroid — what
-    :func:`~raytracer.analysis.imaging.spots.spot_data` does, correctly,
-    for a monochromatic spot — would subtract out exactly the color
-    separation this class exists to show.
-
-    Ray counts differ between wavelengths when vignetting does, so this is
-    a list of arrays rather than one rectangular array.
+    Offsets are in um about the reference-wavelength chief ray. Pupil weights
+    retain their pre-vignetting normalization. ``rms_radius_um`` and
+    ``polychromatic_rms_um`` measure about that common reference;
+    ``centroid_rms_um`` instead measures about the combined centroid.
+    Geometric throughput excludes absorption and Fresnel losses.
     """
 
     wavelengths_um: np.ndarray
     offsets_um: list[np.ndarray]
     reference_wavelength_um: float
     field: FieldPoint
+    pupil_weights: list[np.ndarray]
+    spectral_weights: np.ndarray
+    chief_offsets_um: np.ndarray
+    pupils: tuple[PupilTrace, ...]
 
     @property
-    def rms_radius_um(self) -> np.ndarray:
-        """Per-wavelength RMS radius about the *common* origin."""
+    def wavelength_throughput(self):
+        return np.array([weights.sum() for weights in self.pupil_weights])
 
+    @property
+    def geometric_throughput(self):
+        return float(self.spectral_weights @ self.wavelength_throughput)
+
+    @property
+    def detected_spectral_weights(self):
+        power = self.spectral_weights * self.wavelength_throughput
+        return power / power.sum()
+
+    @property
+    def rms_radius_um(self):
         return np.array(
-            [float(np.sqrt(np.mean(np.sum(o**2, axis=1)))) for o in self.offsets_um]
+            [
+                np.sqrt(np.sum(weights * np.sum(offsets**2, axis=1)) / weights.sum())
+                if weights.sum() > 0
+                else np.nan
+                for offsets, weights in zip(self.offsets_um, self.pupil_weights)
+            ]
         )
 
+    def _pooled(self):
+        weights = np.concatenate(
+            [spectrum * pupil for spectrum, pupil in zip(self.spectral_weights, self.pupil_weights)]
+        )
+        return np.vstack(self.offsets_um), weights / weights.sum()
+
     @property
-    def polychromatic_rms_um(self) -> float:
-        """RMS radius of every wavelength's rays pooled together.
+    def polychromatic_rms_um(self):
+        points, weights = self._pooled()
+        return float(np.sqrt(weights @ np.sum(points**2, axis=1)))
 
-        The single number that answers "how big is the white-light blur",
-        as opposed to the per-wavelength figures, which each ignore the
-        others' displacement.
-        """
+    @property
+    def centroid_offset_um(self):
+        points, weights = self._pooled()
+        return weights @ points
 
-        pooled = np.vstack(self.offsets_um)
-        return float(np.sqrt(np.mean(np.sum(pooled**2, axis=1))))
+    @property
+    def centroid_rms_um(self):
+        points, weights = self._pooled()
+        centered = points - weights @ points
+        return float(np.sqrt(weights @ np.sum(centered**2, axis=1)))
 
 
 def chromatic_spots(
-    system: OpticalSystem,
+    system: OpticalSystem | SequentialTracer,
     wavelengths_um,
     *,
-    na_object_sine: float,
     reference_wavelength_um: float,
+    na_object_sine: float | None = None,
     field: FieldPoint | float = 0.0,
     sampling: PupilSampling | None = None,
     stop_index: int | None = None,
+    wavelength_weights=None,
 ) -> ChromaticSpots:
-    """Trace one pupil bundle per wavelength onto a shared image plane.
+    """Polychromatic spots on one fixed detector, including placed 3-D systems.
 
-    Every wavelength is traced through the *same* prescription — including
-    the same tabulated image plane — so a system with axial color puts each
-    color's best focus somewhere else and only one of them lands sharp.
-    That defocus blur is the point: it is what axial color looks like on a
-    detector, and it is why the reference wavelength's spot can be tight
-    while the rest are not.
-
-    The common transverse origin is the reference wavelength's chief-ray
-    image point, so on axis the offsets are simply image heights, and off
-    axis any bodily displacement of one color's bundle relative to another
-    is lateral color.
+    Accept a tracer to preserve virtual-path and intersection options. The
+    pupil is aimed separately at each wavelength; its declared measure is
+    uniform stop area (or the legacy launch-cone measure if explicitly set).
+    Spectral weights represent incident power in that measure, not ray counts.
     """
-
-    if not isinstance(field, FieldPoint):
-        field = FieldPoint(y=float(field))
-    wavelengths_um = np.asarray(wavelengths_um, dtype=float)
-    _reference_index(wavelengths_um, reference_wavelength_um)  # validate early
-    sampling = sampling or PupilSampling(kind="rings", radial=8, azimuth=32)
-
-    def bundle(wavelength_um: float, guess):
-        tracer = SequentialTracer(_system_at_wavelength(system, wavelength_um))
-        slopes = chief_ray_slopes(
-            tracer, field, stop_index=stop_index, initial_guess=guess
+    wavelengths_um = _wavelengths(wavelengths_um)
+    reference = _reference_index(wavelengths_um, reference_wavelength_um)
+    spectrum = spectral_weights(wavelength_weights, len(wavelengths_um))
+    template = _tracer(system)
+    field = field if isinstance(field, FieldPoint) else FieldPoint(y=float(field))
+    sampling = sampling or PupilSampling(kind="gauss", radial=8, azimuth=32)
+    pupils = tuple(
+        trace_pupil(
+            template.with_system(template.system.at_wavelength(wl)),
+            field,
+            na_object_sine=na_object_sine,
+            sampling=sampling,
+            stop_index=stop_index,
         )
-        pupil = trace_pupil(
-            tracer, field, na_object_sine=na_object_sine, sampling=sampling,
-            chief_slope=slopes, stop_index=stop_index,
-        )
-        return pupil, slopes
-
-    reference_pupil, guess = bundle(float(reference_wavelength_um), None)
-    origin = reference_pupil.chief.image_point[:2]
-
-    offsets = []
-    for wavelength_um in wavelengths_um:
-        pupil, _ = bundle(float(wavelength_um), guess)
-        offsets.append((pupil.image_points[:, :2] - origin) * 1e3)
-
-    return ChromaticSpots(
-        wavelengths_um=wavelengths_um,
-        offsets_um=offsets,
-        reference_wavelength_um=float(reference_wavelength_um),
-        field=field,
+        for wl in wavelengths_um
     )
+    frame = template.system.image_frame
+    chief_points = np.array([frame.to_local(pupil.chief.image_point)[:2] for pupil in pupils])
+    if not np.all(np.isfinite(chief_points)):
+        raise ValueError("chromatic reference requires a finite chief-ray image at each wavelength")
+    origin = chief_points[reference]
+    offsets = [(frame.to_local(p.image_points)[:, :2] - origin) * 1e3 for p in pupils]
+    weights = [p.sample_weights[p.valid].copy() for p in pupils]
+    report = ChromaticSpots(
+        wavelengths_um,
+        offsets,
+        reference_wavelength_um,
+        field,
+        weights,
+        spectrum,
+        (chief_points - origin) * 1e3,
+        pupils,
+    )
+    if report.geometric_throughput <= 0:
+        raise ValueError("no weighted ray reaches the detector")
+    return report
+
+
+def lateral_color(
+    system: OpticalSystem | SequentialTracer,
+    wavelengths_um,
+    *,
+    field_height_mm: float,
+    reference_wavelength_um: float,
+    stop_index: int | None = None,
+) -> LateralColor:
+    """Finite-field chief-ray y at the fixed detector, in local detector axes."""
+    report = chromatic_spots(
+        system,
+        wavelengths_um,
+        field=FieldPoint(y=field_height_mm),
+        reference_wavelength_um=reference_wavelength_um,
+        stop_index=stop_index,
+        sampling=PupilSampling(kind="gauss", radial=2, azimuth=4),
+    )
+    frame = _tracer(system).system.image_frame
+    heights = np.array([frame.to_local(p.chief.image_point)[1] for p in report.pupils])
+    return LateralColor(report.wavelengths_um, field_height_mm, heights, reference_wavelength_um)
 
 
 __all__ = [
