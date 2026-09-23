@@ -36,13 +36,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from examples.telescopes._afocal import solve_afocal_gap
 from raytracer import BranchingTracer, ParallelSource, RenderConfig, TraceConfig
 from raytracer.design import OpticalSystem, SurfaceRow
 from raytracer.optics import Lens
 from raytracer.optics.materials import AIR, ConstantIndex
 from raytracer.propagation import SequentialTracer
 from raytracer.viz import Scene, show
-from examples.telescopes._afocal import solve_afocal_gap
 
 GLASS_N = 1.5168  # BK7
 GLASS = ConstantIndex("BK7", GLASS_N)
@@ -73,9 +73,13 @@ def build_sequential(gap: float) -> OpticalSystem:
     """Exact on-axis model used for the afocal solve and verification."""
 
     rows = [
-        SurfaceRow.refracting(radius=R_OBJ, thickness=OBJ_THICKNESS, material=GLASS, semidiameter=OBJ_SEMI),
+        SurfaceRow.refracting(
+            radius=R_OBJ, thickness=OBJ_THICKNESS, material=GLASS, semidiameter=OBJ_SEMI
+        ),
         SurfaceRow.refracting(radius=-R_OBJ, thickness=gap, material=AIR, semidiameter=OBJ_SEMI),
-        SurfaceRow.refracting(radius=R_EYE, thickness=EYE_THICKNESS, material=GLASS, semidiameter=EYE_SEMI),
+        SurfaceRow.refracting(
+            radius=R_EYE, thickness=EYE_THICKNESS, material=GLASS, semidiameter=EYE_SEMI
+        ),
         SurfaceRow.refracting(radius=-R_EYE, thickness=30.0, material=AIR, semidiameter=EYE_SEMI),
     ]
     return OpticalSystem(rows, object_space=AIR)
@@ -84,7 +88,7 @@ def build_sequential(gap: float) -> OpticalSystem:
 def angular_magnification(system: OpticalSystem, theta_in: float = 0.01) -> tuple[float, float]:
     """Trace two parallel rays at field angle *theta_in*; return (M, parallelism residual in rad)."""
 
-    tracer = SequentialTracer(system, restart_offset=0.0)
+    tracer = SequentialTracer(system)
     d = np.array([0.0, np.sin(theta_in), np.cos(theta_in)])
     origins = np.array([[0.0, -5.0, -20.0], [0.0, 5.0, -20.0]])
     result = tracer.trace_batch(origins, np.tile(d, (2, 1)))
@@ -94,24 +98,37 @@ def angular_magnification(system: OpticalSystem, theta_in: float = 0.01) -> tupl
 
 def build_scene(gap: float) -> Scene:
     objective = Lens.spherical(
-        R1=R_OBJ, R2=-R_OBJ, thickness=OBJ_THICKNESS, semidiameter=OBJ_SEMI,
-        n=GLASS_N, vertex=(0.0, 0.0), name="objective",
+        R1=R_OBJ,
+        R2=-R_OBJ,
+        thickness=OBJ_THICKNESS,
+        semidiameter=OBJ_SEMI,
+        n=GLASS_N,
+        vertex=(0.0, 0.0),
+        name="objective",
     )
     eyepiece = Lens.spherical(
-        R1=R_EYE, R2=-R_EYE, thickness=EYE_THICKNESS, semidiameter=EYE_SEMI,
-        n=GLASS_N, vertex=(OBJ_THICKNESS + gap, 0.0), name="eyepiece",
+        R1=R_EYE,
+        R2=-R_EYE,
+        thickness=EYE_THICKNESS,
+        semidiameter=EYE_SEMI,
+        n=GLASS_N,
+        vertex=(OBJ_THICKNESS + gap, 0.0),
+        name="eyepiece",
     )
     surfaces = [*objective.surfaces(), *eyepiece.surfaces()]
     tracer = BranchingTracer(surfaces, TraceConfig(max_generations=8, fresnel_split=False))
 
     on_axis = ParallelSource(
-        origin=np.array([-25.0, 0.0]), direction=np.array([1.0, 0.0]),
-        width=2.0 * BEAM_HALF_WIDTH, samples=17,
+        origin=np.array([-25.0, 0.0]),
+        direction=np.array([1.0, 0.0]),
+        width=2.0 * BEAM_HALF_WIDTH,
+        samples=17,
     )
     off_axis = ParallelSource(
         origin=np.array([-25.0, -25.0 * np.tan(FIELD_ANGLE)]),
         direction=np.array([np.cos(FIELD_ANGLE), np.sin(FIELD_ANGLE)]),
-        width=2.0 * BEAM_HALF_WIDTH, samples=17,
+        width=2.0 * BEAM_HALF_WIDTH,
+        samples=17,
     )
 
     exit_x = OBJ_THICKNESS + gap + EYE_THICKNESS
@@ -129,10 +146,14 @@ def main() -> None:
     print("Galilean telescope")
     print(f"  objective f={F_OBJECTIVE} mm, eyepiece f={F_EYEPIECE} mm")
     print(f"  objective-eyepiece air gap (solved, exact afocal): {gap:.4f} mm")
-    print(f"  angular magnification: {magnification:.3f}x "
-          f"({'upright' if magnification > 0 else 'inverted'})")
-    print(f"  parallelism residual between two field rays: {residual:.2e} rad "
-          "(should be ~0: confirms afocal)")
+    print(
+        f"  angular magnification: {magnification:.3f}x "
+        f"({'upright' if magnification > 0 else 'inverted'})"
+    )
+    print(
+        f"  parallelism residual between two field rays: {residual:.2e} rad "
+        "(should be ~0: confirms afocal)"
+    )
 
     scene = build_scene(gap)
     render_config = RenderConfig(ray_width=0.25, min_pixels=1.0, use_solid_rays=True)
@@ -141,8 +162,12 @@ def main() -> None:
     if "--save" in sys.argv:
         save_path = Path(sys.argv[sys.argv.index("--save") + 1])
     backend = show(
-        scene, backend="gl", interactive=save_path is None,
-        size=(1500, 620), bgcolor="black", render_config=render_config,
+        scene,
+        backend="gl",
+        interactive=save_path is None,
+        size=(1500, 620),
+        bgcolor="black",
+        render_config=render_config,
         title="Galilean telescope — raytracer",
     )
     if save_path is not None:

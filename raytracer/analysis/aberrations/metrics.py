@@ -38,13 +38,18 @@ def field_metrics(
     which centroid distortion is measured.
     """
 
+    tracer.system.require_axial_coordinates()
+
     sampling = sampling or PupilSampling(kind="rings", radial=10, azimuth=48)
     results = []
     for field in fields:
         if not isinstance(field, FieldPoint):
             field = FieldPoint(y=float(field))
         pupil = trace_pupil(
-            tracer, field, na_object_sine=na_object_sine, sampling=sampling,
+            tracer,
+            field,
+            na_object_sine=na_object_sine,
+            sampling=sampling,
             stop_index=stop_index,
         )
         points = pupil.image_points[:, :2]
@@ -76,9 +81,7 @@ def field_metrics(
         best_points = points + best_image_focus * slopes
         best_centroid = np.sum(best_points * weights[:, None], axis=0)
         best_relative_um = (best_points - best_centroid) * 1e3
-        best_focus_rms_um = float(
-            np.sqrt(np.sum(weights * np.sum(best_relative_um**2, axis=1)))
-        )
+        best_focus_rms_um = float(np.sqrt(np.sum(weights * np.sum(best_relative_um**2, axis=1))))
 
         ideal_y = field.y * magnification
         chief_y = float(pupil.chief.image_point[1])

@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+import numpy as np
+
+from ..math.transforms import RigidTransform
 from ..optics.materials import AIR, Material
+from ..surfaces.apertures import Aperture, CircularAperture
 from ..surfaces.cartesian_oval import CartesianOvalProfile
 from ..surfaces.profile import AsphereProfile
 
@@ -23,8 +27,10 @@ class SurfaceRow:
     ``thickness`` is the signed axial distance to the next vertex (negative
     on the folded return path after an odd number of mirrors).
     ``material_after`` names the medium following the surface and is ignored
-    for mirrors (the ray stays in its current medium).
-    ``semidiameter`` is the clear aperture; ``None`` disables clipping.
+    for mirrors and stops (the ray stays in its current medium).
+    ``aperture`` takes precedence over the circular ``semidiameter``;
+    leaving both unset disables clipping. ``is_stop`` marks an interface as
+    the reference stop without changing its optical interaction.
     """
 
     profile: AsphereProfile | CartesianOvalProfile
@@ -33,6 +39,25 @@ class SurfaceRow:
     kind: SurfaceKind = SurfaceKind.REFRACT
     semidiameter: float | None = None
     comment: str = ""
+    placement: RigidTransform = field(default_factory=RigidTransform.identity)
+    aperture: Aperture | None = None
+    is_stop: bool = False
+
+    def __post_init__(self):
+        if self.placement.origin.shape != (3,):
+            raise ValueError("a sequential surface needs a three-dimensional placement")
+        if not np.isfinite(self.thickness):
+            raise ValueError("surface thickness must be finite")
+        if self.semidiameter is not None and (
+            not np.isfinite(self.semidiameter) or self.semidiameter <= 0
+        ):
+            raise ValueError("semidiameter must be finite and positive")
+
+    @property
+    def clear_aperture(self) -> Aperture | None:
+        if self.aperture is not None:
+            return self.aperture
+        return None if self.semidiameter is None else CircularAperture(self.semidiameter)
 
     @classmethod
     def refracting(
@@ -45,6 +70,9 @@ class SurfaceRow:
         conic: float = 0.0,
         coefficients: tuple[float, ...] | list[float] = (),
         comment: str = "",
+        placement: RigidTransform | None = None,
+        aperture: Aperture | None = None,
+        is_stop: bool = False,
     ) -> "SurfaceRow":
         return cls(
             profile=AsphereProfile.from_radius(radius, conic, coefficients),
@@ -53,6 +81,9 @@ class SurfaceRow:
             kind=SurfaceKind.REFRACT,
             semidiameter=semidiameter,
             comment=comment,
+            placement=placement or RigidTransform.identity(),
+            aperture=aperture,
+            is_stop=is_stop,
         )
 
     @classmethod
@@ -67,6 +98,9 @@ class SurfaceRow:
         material: Material,
         semidiameter: float | None = None,
         comment: str = "",
+        placement: RigidTransform | None = None,
+        aperture: Aperture | None = None,
+        is_stop: bool = False,
     ) -> "SurfaceRow":
         """Stigmatic refracting surface between object (n0, z0) and image (ni, zi).
 
@@ -82,6 +116,9 @@ class SurfaceRow:
             kind=SurfaceKind.REFRACT,
             semidiameter=semidiameter,
             comment=comment,
+            placement=placement or RigidTransform.identity(),
+            aperture=aperture,
+            is_stop=is_stop,
         )
 
     @classmethod
@@ -94,6 +131,9 @@ class SurfaceRow:
         conic: float = 0.0,
         coefficients: tuple[float, ...] | list[float] = (),
         comment: str = "",
+        placement: RigidTransform | None = None,
+        aperture: Aperture | None = None,
+        is_stop: bool = False,
     ) -> "SurfaceRow":
         return cls(
             profile=AsphereProfile.from_radius(radius, conic, coefficients),
@@ -101,6 +141,9 @@ class SurfaceRow:
             kind=SurfaceKind.MIRROR,
             semidiameter=semidiameter,
             comment=comment,
+            placement=placement or RigidTransform.identity(),
+            aperture=aperture,
+            is_stop=is_stop,
         )
 
     @classmethod
@@ -110,6 +153,9 @@ class SurfaceRow:
         thickness: float = 0.0,
         semidiameter: float | None = None,
         comment: str = "",
+        placement: RigidTransform | None = None,
+        aperture: Aperture | None = None,
+        is_stop: bool = False,
     ) -> "SurfaceRow":
         return cls(
             profile=AsphereProfile.plane(),
@@ -117,6 +163,9 @@ class SurfaceRow:
             kind=SurfaceKind.STOP,
             semidiameter=semidiameter,
             comment=comment,
+            placement=placement or RigidTransform.identity(),
+            aperture=aperture,
+            is_stop=is_stop,
         )
 
     @property

@@ -91,6 +91,7 @@ def dense_gaps(system: OpticalSystem) -> list[tuple[int, int, float, str]]:
     :meth:`OpticalSystem.solid_elements`.
     """
 
+    system.require_axial_coordinates()
     gaps = []
     signatures = set()
     for i in range(len(system.rows) - 1):

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import Literal
 
 import numpy as np
@@ -14,17 +15,31 @@ from .sequential import BatchTraceResult, SequentialTracer, TraceResult, TraceSt
 
 @dataclass(frozen=True)
 class FieldPoint:
-    """Object-plane transverse coordinates (mm)."""
+    """Finite object coordinates (mm), or component field angles (degrees)."""
 
     x: float = 0.0
     y: float = 0.0
+    kind: Literal["height", "angle"] = "height"
+
+    def __post_init__(self):
+        if self.kind not in ("height", "angle") or not np.all(np.isfinite([self.x, self.y])):
+            raise ValueError("field coordinates must be finite and kind must be height or angle")
+        if self.kind == "angle" and max(abs(self.x), abs(self.y)) >= 90:
+            raise ValueError("field angles must lie strictly between -90 and 90 degrees")
+
+    @classmethod
+    def angle(cls, x_deg=0.0, y_deg=0.0):
+        """Collimated field; component angles in the system frame, in degrees."""
+        if max(abs(x_deg), abs(y_deg)) >= 90:
+            raise ValueError("field angles must lie strictly between -90 and 90 degrees")
+        return cls(float(x_deg), float(y_deg), "angle")
 
 
 def _object_z(tracer: SequentialTracer) -> float:
     z = tracer.system.object_z
-    if z is None:
+    if z is None or not np.isfinite(z):
         raise ValueError(
-            "system.object_z is unset; call sequential.solve_object_plane(tracer) "
+            "system.object_z must be finite; call paraxial.solve_object_plane(tracer) "
             "or assign it explicitly"
         )
     return z
@@ -42,8 +57,8 @@ def trace_from_object(
 
     origin = np.array([xy[0], xy[1], _object_z(tracer)])
     return tracer.trace(
-        origin,
-        direction_from_slopes(slopes[0], slopes[1]),
+        tracer.system.frame.to_world(origin),
+        tracer.system.frame.direction_to_world(direction_from_slopes(slopes[0], slopes[1])),
         keep_path=keep_path,
         keep_aoi=keep_aoi,
     )
@@ -74,7 +89,9 @@ def chief_ray_slope(
     samples = np.linspace(bracket[0], bracket[1], scan)
     origins = np.repeat([[field.x, field.y, object_z]], scan, axis=0)
     directions = np.array([direction_from_slopes(0.0, s) for s in samples])
-    batch = tracer.trace_batch(origins, directions, keep_paths=True)
+    batch = tracer.trace_batch(
+        system.frame.to_world(origins), system.frame.direction_to_world(directions), keep_paths=True
+    )
 
     def height_at_stop(slope: float) -> float:
         result = trace_from_object(tracer, (field.x, field.y), (0.0, float(slope)), keep_path=True)
@@ -82,13 +99,13 @@ def chief_ray_slope(
             result.failed_surface is not None and result.failed_surface <= stop_index
         ):
             raise RuntimeError("Ray vignetted before the stop")
-        return float(result.path[stop_index + 1, 1])
+        return float(system.surface_frame(stop_index).to_local(result.path[stop_index + 1])[1])
 
     valid: list[tuple[float, float]] = []
     for j in range(scan):
         # A ray is usable if it survived at least up to the stop surface.
         if batch.status[j] == TraceStatus.OK or batch.failed_surface[j] > stop_index:
-            y_stop = batch.paths[j, stop_index + 1, 1]
+            y_stop = system.surface_frame(stop_index).to_local(batch.paths[j, stop_index + 1])[1]
             if np.isfinite(y_stop):
                 valid.append((float(samples[j]), float(y_stop)))
 
@@ -152,9 +169,13 @@ def chief_ray_slopes(
     def stop_position(slopes: np.ndarray) -> np.ndarray:
         origin = np.array([[field.x, field.y, object_z]])
         direction = direction_from_slopes(float(slopes[0]), float(slopes[1]))[None, :]
-        batch = tracer.trace_batch(origin, direction, keep_paths=True)
+        batch = tracer.trace_batch(
+            system.frame.to_world(origin),
+            system.frame.direction_to_world(direction),
+            keep_paths=True,
+        )
         ok = batch.status[0] == TraceStatus.OK or batch.failed_surface[0] > stop_index
-        position = batch.paths[0, stop_index + 1, :2]
+        position = system.surface_frame(stop_index).to_local(batch.paths[0, stop_index + 1])[:2]
         if not ok or not np.all(np.isfinite(position)):
             raise _RayVignetted
         return position
@@ -165,9 +186,7 @@ def chief_ray_slopes(
         try:
             return stop_position(slopes)
         except _RayVignetted as exc:
-            raise RuntimeError(
-                f"No unvignetted chief ray found for field {field}"
-            ) from exc
+            raise RuntimeError(f"No unvignetted chief ray found for field {field}") from exc
 
     s = np.asarray(initial_guess, dtype=float)
     residual = probe(s)
@@ -218,19 +237,36 @@ def chief_ray_slopes(
 class PupilSampling:
     """Normalized pupil sample layout.
 
+    ``gauss``: Gauss-Legendre quadrature in squared radius, uniform azimuth.
     ``rings``: concentric rings (reference layout — the axial sample plus
     ``azimuth`` points per ring). ``grid``: Cartesian grid clipped to the
     unit disk. ``fan_t``/``fan_s``: 1-D meridional/sagittal fans.
     """
 
-    kind: Literal["rings", "grid", "fan_t", "fan_s"] = "rings"
+    kind: Literal["rings", "gauss", "grid", "fan_t", "fan_s"] = "rings"
     radial: int = 10
     azimuth: int = 48
     n: int = 81
     rmax: float = 1.0
     adaptive: bool = False  # azimuth count proportional to ring radius (EUV layout)
 
+    def __post_init__(self):
+        if self.radial < 2 or self.azimuth < 4 or self.n < 2:
+            raise ValueError("sampling requires radial >= 2, azimuth >= 4 and n >= 2")
+        if not np.isfinite(self.rmax) or not 0 < self.rmax <= 1:
+            raise ValueError("rmax must lie in (0, 1]")
+
     def points(self) -> np.ndarray:
+        if self.kind == "gauss":
+            nodes, _ = np.polynomial.legendre.leggauss(self.radial)
+            radii = self.rmax * np.sqrt((nodes + 1) / 2)
+            angles = np.arange(self.azimuth) * (2 * np.pi / self.azimuth)
+            return np.column_stack(
+                [
+                    (radii[:, None] * np.cos(angles)).ravel(),
+                    (radii[:, None] * np.sin(angles)).ravel(),
+                ]
+            )
         if self.kind == "rings":
             pts = []
             for r in np.linspace(0.0, self.rmax, self.radial):
@@ -242,15 +278,15 @@ class PupilSampling:
                     pts.append((r * np.cos(az), r * np.sin(az)))
             return np.asarray(pts)
         if self.kind == "grid":
-            axis = np.linspace(-1.0, 1.0, self.n)
+            axis = np.linspace(-self.rmax, self.rmax, self.n)
             xx, yy = np.meshgrid(axis, axis)
-            keep = xx**2 + yy**2 <= 1.0
+            keep = xx**2 + yy**2 <= self.rmax**2
             return np.column_stack([xx[keep], yy[keep]])
         if self.kind == "fan_t":
-            axis = np.linspace(-1.0, 1.0, self.n)
+            axis = np.linspace(-self.rmax, self.rmax, self.n)
             return np.column_stack([np.zeros_like(axis), axis])
         if self.kind == "fan_s":
-            axis = np.linspace(-1.0, 1.0, self.n)
+            axis = np.linspace(-self.rmax, self.rmax, self.n)
             return np.column_stack([axis, np.zeros_like(axis)])
         raise ValueError(f"Unknown sampling kind {self.kind!r}")
 
@@ -258,12 +294,24 @@ class PupilSampling:
         """Per-sample pupil-area weights (normalized to unit sum)."""
 
         points = self.points() if points is None else points
-        if self.kind == "rings" and not self.adaptive:
-            r = np.hypot(points[:, 0], points[:, 1])
-            weights = np.maximum(r, 0.5 / (self.radial - 1))
+        if self.kind == "gauss":
+            nodes, weights = np.polynomial.legendre.leggauss(self.radial)
+            radii_squared = self.rmax**2 * (nodes + 1) / 2
+            ring = np.argmin(abs(np.sum(points**2, axis=1)[:, None] - radii_squared), axis=1)
+            weights = weights[ring] / self.azimuth
+        elif self.kind == "rings":
+            # Integrate in u = rho²: dA = (1/2) du dphi. Divide each ring's
+            # trapezoidal weight among its own samples, including the center.
+            u = np.linspace(0.0, self.rmax, self.radial) ** 2
+            intervals = np.diff(u)
+            ring_weights = np.r_[intervals[0], intervals[:-1] + intervals[1:], intervals[-1]] / 2
+            ring = np.rint(np.linalg.norm(points, axis=1) * (self.radial - 1) / self.rmax).astype(
+                int
+            )
+            counts = np.bincount(ring, minlength=self.radial)
+            weights = ring_weights[ring] / counts[ring]
         else:
-            # Adaptive rings sample the disk near-uniformly; grids are uniform.
-            weights = np.ones(points.shape[0])
+            weights = np.ones(len(points))
         return weights / weights.sum()
 
 
@@ -278,6 +326,16 @@ class PupilTrace:
     chief: TraceResult
     na_object_sine: float
     sampling: PupilSampling = dataclass_field(default_factory=PupilSampling)
+    sample_weights: np.ndarray | None = None
+    aiming_residual_mm: np.ndarray | None = None
+
+    @property
+    def geometric_throughput(self) -> float:
+        """Transmitted fraction of the specified sampling measure, without Fresnel."""
+        weights = self.sample_weights
+        if weights is None:
+            weights = self.sampling.area_weights(self.pupil_uv)
+        return float(np.sum(weights[self.valid]))
 
     @property
     def valid(self) -> np.ndarray:
@@ -306,7 +364,7 @@ def trace_pupil(
     tracer: SequentialTracer,
     field: FieldPoint,
     *,
-    na_object_sine: float,
+    na_object_sine: float | None = None,
     sampling: PupilSampling | None = None,
     slope_model: Literal["tangent", "sine"] = "tangent",
     chief_slope: float | tuple[float, float] | None = None,
@@ -317,8 +375,8 @@ def trace_pupil(
 
     ``slope_model="tangent"`` maps the normalized pupil radius to transverse
     slopes via s = p * sine / sqrt(1 - sine^2) added around the chief slope
-    (the DUV reference convention). ``"sine"`` offsets direction cosines
-    directly (the EUV notebook convention).
+    (the legacy DUV convention). ``"sine"`` samples equal transverse direction
+    cosine offsets in an orthonormal frame about the chief ray.
 
     ``chief_slope`` accepts either a meridional slope ``s_y`` or a full
     ``(s_x, s_y)`` pair, so a chief ray solved by :func:`chief_ray_slopes`
@@ -330,10 +388,21 @@ def trace_pupil(
     occupies a needle-thin slice of it (any large finite-object stand-in
     for infinity, such as the Cooke triplet and double-Gauss examples).
 
-    The ``"sine"`` model is meridional-only and rejects a non-zero ``s_x``
-    rather than silently applying a convention it was never defined for.
+    The ``"sine"`` model samples a circular cone about the chief direction,
+    using an orthonormal transverse frame. With ``na_object_sine=None``, rays
+    are instead aimed at the physical stop, for finite or angular fields.
     """
 
+    if na_object_sine is None:
+        from .aiming import trace_stop_pupil
+
+        return trace_stop_pupil(
+            tracer, field, sampling=sampling, stop_index=stop_index, keep_paths=keep_paths
+        )
+    if field.kind != "height":
+        raise ValueError("angular fields use stop aiming; omit na_object_sine")
+    if not 0 < na_object_sine < 1:
+        raise ValueError("na_object_sine is sin(angle), and must lie in (0, 1)")
     sampling = sampling or PupilSampling()
     if chief_slope is None:
         chief_slope = chief_ray_slopes(tracer, field, stop_index=stop_index)
@@ -354,24 +423,27 @@ def trace_pupil(
         norm = np.sqrt(1.0 + sx**2 + sy**2)
         directions = np.column_stack([sx / norm, sy / norm, 1.0 / norm])
     elif slope_model == "sine":
-        if chief_sx != 0.0:
-            raise ValueError(
-                "slope_model='sine' is a meridional convention and has no defined "
-                f"treatment of a sagittal chief slope (got s_x={chief_sx!r}); use "
-                "slope_model='tangent' for a genuinely off-axis field point"
-            )
-        theta = np.arctan(chief_sy)
-        dx = points[:, 0] * na_object_sine
-        a = theta + points[:, 1] * na_object_sine
-        dz2 = 1.0 - dx**2 - np.sin(a) ** 2
-        directions = np.column_stack([dx, np.sin(a), np.sqrt(np.maximum(dz2, 0.0))])
+        axis = direction_from_slopes(chief_sx, chief_sy)
+        transverse_x = np.array([1.0, 0.0, 0.0])
+        transverse_x -= (transverse_x @ axis) * axis
+        transverse_x /= np.linalg.norm(transverse_x)
+        transverse_y = np.cross(axis, transverse_x)
+        transverse = points * na_object_sine
+        axial = np.sqrt(1 - np.sum(transverse**2, axis=1))
+        directions = (
+            transverse[:, :1] * transverse_x
+            + transverse[:, 1:] * transverse_y
+            + axial[:, None] * axis
+        )
     else:
         raise ValueError(f"Unknown slope model {slope_model!r}")
 
-    batch = tracer.trace_batch(origins, directions, keep_paths=keep_paths)
-    chief = trace_from_object(
-        tracer, (field.x, field.y), (chief_sx, chief_sy), keep_path=True
+    batch = tracer.trace_batch(
+        tracer.system.frame.to_world(origins),
+        tracer.system.frame.direction_to_world(directions),
+        keep_paths=keep_paths,
     )
+    chief = trace_from_object(tracer, (field.x, field.y), (chief_sx, chief_sy), keep_path=True)
 
     weights_all = sampling.area_weights(points)
     weights = weights_all[batch.valid]
@@ -387,6 +459,7 @@ def trace_pupil(
         chief=chief,
         na_object_sine=na_object_sine,
         sampling=sampling,
+        sample_weights=weights_all,
     )
 
 

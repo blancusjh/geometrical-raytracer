@@ -1,0 +1,13 @@
+{
+  "reference": "RayOptics 0.9.8",
+  "reference_rays": 45,
+  "max_surface_coordinate_error_mm": 1.1540768340978502e-13,
+  "max_direction_component_error": 9.992007221626409e-16,
+  "max_optical_path_error_mm": 1.4210854715202004e-13,
+  "mirror_radius_mm": 100.0,
+  "mirror_semidiameter_mm": 8,
+  "mirror_paraxial_plane_rms_mm": 0.012949126972751631,
+  "mirror_best_focus_shift_mm": 0.10722529825091946,
+  "mirror_best_focus_rms_mm": 0.0043135561545479964,
+  "mirror_geometric_throughput": 1.0
+}

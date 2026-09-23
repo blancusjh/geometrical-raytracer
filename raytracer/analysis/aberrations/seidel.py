@@ -130,6 +130,8 @@ def seidel_coefficients(
     ray sits in a needle-thin slice of that bracket.
     """
 
+    tracer.system.require_axial_coordinates()
+
     field_heights_mm = np.asarray(field_heights_mm, dtype=float)
     if field_heights_mm.size < 3 or np.unique(field_heights_mm**2).size < 2:
         raise ValueError(
@@ -139,9 +141,7 @@ def seidel_coefficients(
         )
     if wavelength_mm is None:
         if tracer.system.wavelength_um is None:
-            raise ValueError(
-                "system.wavelength_um is unset; pass wavelength_mm explicitly"
-            )
+            raise ValueError("system.wavelength_um is unset; pass wavelength_mm explicitly")
         wavelength_mm = tracer.system.wavelength_um * 1e-3
     sampling = sampling or PupilSampling(kind="rings", radial=10, azimuth=48)
 
@@ -150,12 +150,19 @@ def seidel_coefficients(
         field = FieldPoint(y=float(y))
         chief_slopes = chief_ray_slopes(tracer, field, stop_index=stop_index)
         pupil = trace_pupil(
-            tracer, field, na_object_sine=na_object_sine, sampling=sampling,
-            chief_slope=chief_slopes, stop_index=stop_index,
+            tracer,
+            field,
+            na_object_sine=na_object_sine,
+            sampling=sampling,
+            chief_slope=chief_slopes,
+            stop_index=stop_index,
         )
         expansion = fit_transverse(
-            pupil, na_image=na_image, n_image=n_image,
-            wavelength_mm=wavelength_mm, max_order=4,
+            pupil,
+            na_image=na_image,
+            n_image=n_image,
+            wavelength_mm=wavelength_mm,
+            max_order=4,
         )
         to_waves = 1.0 / wavelength_mm
         spherical.append(6.0 * np.sqrt(5.0) * _mode_coefficient(expansion, 4, 0) * to_waves)

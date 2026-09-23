@@ -44,38 +44,33 @@ def differential_conjugates(
     vertex; the object distance follows from the ray-transfer coefficients.
     """
 
+    if not tracer.system.is_centered:
+        raise ValueError("axial conjugates require a centered system")
+    frame = tracer.system.frame
     base = np.array([0.0, 0.0, start_z])
-    height = tracer.trace(base + [0.0, eps, 0.0], direction_from_slopes(0.0, 0.0), keep_path=False)
-    angle = tracer.trace(base, direction_from_slopes(0.0, eps), keep_path=False)
+    height = tracer.trace(
+        frame.to_world(base + [0.0, eps, 0.0]),
+        frame.direction_to_world(direction_from_slopes(0.0, 0.0)),
+        keep_path=False,
+    )
+    angle = tracer.trace(
+        frame.to_world(base),
+        frame.direction_to_world(direction_from_slopes(0.0, eps)),
+        keep_path=False,
+    )
     if not (height.ok and angle.ok):
         raise RuntimeError("Differential rays did not survive the system")
-    a = height.image_point[1] / eps
-    b = angle.image_point[1] / eps
-    distance = -b / a
-    return ConjugateSolution(object_z=float(-distance), magnification=float(a))
+    a = frame.to_local(height.image_point)[1] / eps
+    b = frame.to_local(angle.image_point)[1] / eps
+    if abs(a) < 1e-14:
+        return ConjugateSolution(object_z=-np.inf, magnification=0.0)
+    return ConjugateSolution(object_z=float(start_z + b / a), magnification=float(a))
 
 
 def solve_object_plane(tracer: SequentialTracer, *, assign: bool = True) -> ConjugateSolution:
-    """Recover the object plane and store it on the system.
-
-    For all-refractive systems focused near infinity the B = 0 condition
-    is degenerate: the sign of the recovered ``object_z`` hinges on
-    whether the tabulated image plane sits a fraction of a millimetre
-    before or after the back focal plane. This wrapper enforces the
-    physical convention — object in front, ``object_z < 0`` — whenever
-    the raw solution places a virtual object far behind the system.
-    """
+    """Recover a finite real or virtual conjugate without changing its sign."""
 
     solution = differential_conjugates(tracer)
-    system = tracer.system
-    system_length = system.image_z - float(system.vertices[0])
-    if (not system.mirror_indices
-            and abs(solution.object_z) > 50 * max(system_length, 1.0)
-            and solution.object_z > system.image_z):
-        solution = ConjugateSolution(
-            object_z=-abs(solution.object_z),
-            magnification=-abs(solution.magnification),
-        )
     if assign:
         tracer.system.object_z = solution.object_z
     return solution
@@ -85,6 +80,9 @@ class ParaxialModel:
     """Analytic ABCD model with the signed-index convention for mirrors."""
 
     def __init__(self, system: OpticalSystem) -> None:
+        if not system.is_centered:
+            raise ValueError("the scalar ABCD model requires centered surfaces and image plane")
+        system._rebuild()
         self.system = system
         self._build()
 
@@ -107,12 +105,15 @@ class ParaxialModel:
         # State is (y, n*u); the final translation lands on the image plane.
         self.matrix_first_vertex_to_image = matrix
         self.n_object = float(n1)
+        self.n_image_signed = float(sign * system.n_after[-1])
 
     def solve_object_plane(self) -> ConjugateSolution:
         """Impose B = 0 at the image plane; returns object z and magnification."""
 
         A, B = self.matrix_first_vertex_to_image[0]
         # Adding an object-space translation L: B' = A*L/n_obj + B = 0.
+        if abs(A) < 1e-14:
+            return ConjugateSolution(object_z=-np.inf, magnification=0.0)
         L = -B * self.n_object / A
         return ConjugateSolution(object_z=float(-L), magnification=float(A))
 
@@ -120,7 +121,24 @@ class ParaxialModel:
         C = self.matrix_first_vertex_to_image[1, 0]
         if C == 0.0:
             return np.inf
-        return float(-1.0 / C)
+        return float(-self.n_image_signed / C)
+
+    def back_focal_z(self) -> float:
+        """Axial image of a collimated input, in system coordinates (mm)."""
+
+        A = self.matrix_first_vertex_to_image[0, 0]
+        C = self.matrix_first_vertex_to_image[1, 0]
+        return np.inf if C == 0 else float(self.system.image_z - self.n_image_signed * A / C)
+
+    def image_conjugate_z(self, object_z: float) -> float:
+        """Paraxial image for a finite axial object, without a sign heuristic."""
+
+        if np.isinf(object_z):
+            return self.back_focal_z()
+        transfer = np.array([[1.0, -object_z / self.n_object], [0.0, 1.0]])
+        matrix = self.matrix_first_vertex_to_image @ transfer
+        B, D = matrix[:, 1]
+        return np.inf if D == 0 else float(self.system.image_z - self.n_image_signed * B / D)
 
 
 __all__ = [

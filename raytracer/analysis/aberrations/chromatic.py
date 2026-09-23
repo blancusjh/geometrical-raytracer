@@ -32,11 +32,11 @@ Three classical quantities:
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass
 
 import numpy as np
 
+from ...design.system import OpticalSystem
 from ...propagation.fields import (
     FieldPoint,
     PupilSampling,
@@ -45,7 +45,6 @@ from ...propagation.fields import (
     trace_pupil,
 )
 from ...propagation.paraxial import direction_from_slopes
-from ...design.system import OpticalSystem
 from ...propagation.sequential import SequentialTracer
 
 
@@ -112,10 +111,7 @@ def _system_at_wavelength(system: OpticalSystem, wavelength_um: float) -> Optica
     one wavelength's copy silently mutate the caller's own system.
     """
 
-    return OpticalSystem(
-        copy.deepcopy(system.rows), wavelength_um=wavelength_um,
-        object_space=system.object_space, object_z=system.object_z, name=system.name,
-    )
+    return system.at_wavelength(wavelength_um)
 
 
 def _paraxial_focus_z(tracer: SequentialTracer, *, probe_height_mm: float | None = None) -> float:
@@ -148,9 +144,7 @@ def _paraxial_focus_z(tracer: SequentialTracer, *, probe_height_mm: float | None
     reach = first_vertex - object_z
     if probe_height_mm is None:
         semidiameters = [r.semidiameter for r in system.rows if r.semidiameter is not None]
-        probe_height_mm = (
-            0.005 * min(semidiameters) if semidiameters else 1e-4 * abs(reach)
-        )
+        probe_height_mm = 0.005 * min(semidiameters) if semidiameters else 1e-4 * abs(reach)
 
     origin = np.array([0.0, 0.0, object_z])
     angled = tracer.trace(
@@ -185,6 +179,8 @@ def axial_color(
     every wavelength; only the resulting focus position changes.
     """
 
+    system.require_axial_coordinates()
+
     wavelengths_um = np.asarray(wavelengths_um, dtype=float)
     focus_z = []
     for wl in wavelengths_um:
@@ -216,6 +212,8 @@ def lateral_color(
     statement about magnification differing by wavelength at one common
     plane, not about focus.
     """
+
+    system.require_axial_coordinates()
 
     wavelengths_um = np.asarray(wavelengths_um, dtype=float)
     image_heights = []
@@ -265,9 +263,7 @@ class ChromaticSpots:
     def rms_radius_um(self) -> np.ndarray:
         """Per-wavelength RMS radius about the *common* origin."""
 
-        return np.array(
-            [float(np.sqrt(np.mean(np.sum(o**2, axis=1)))) for o in self.offsets_um]
-        )
+        return np.array([float(np.sqrt(np.mean(np.sum(o**2, axis=1)))) for o in self.offsets_um])
 
     @property
     def polychromatic_rms_um(self) -> float:
@@ -307,6 +303,8 @@ def chromatic_spots(
     is lateral color.
     """
 
+    system.require_axial_coordinates()
+
     if not isinstance(field, FieldPoint):
         field = FieldPoint(y=float(field))
     wavelengths_um = np.asarray(wavelengths_um, dtype=float)
@@ -315,12 +313,14 @@ def chromatic_spots(
 
     def bundle(wavelength_um: float, guess):
         tracer = SequentialTracer(_system_at_wavelength(system, wavelength_um))
-        slopes = chief_ray_slopes(
-            tracer, field, stop_index=stop_index, initial_guess=guess
-        )
+        slopes = chief_ray_slopes(tracer, field, stop_index=stop_index, initial_guess=guess)
         pupil = trace_pupil(
-            tracer, field, na_object_sine=na_object_sine, sampling=sampling,
-            chief_slope=slopes, stop_index=stop_index,
+            tracer,
+            field,
+            na_object_sine=na_object_sine,
+            sampling=sampling,
+            chief_slope=slopes,
+            stop_index=stop_index,
         )
         return pupil, slopes
 

@@ -57,6 +57,7 @@ def layout_figure(
     """
 
     system = tracer.system
+    system.require_axial_coordinates()
     colors = dict(DEFAULT_MATERIAL_COLORS)
     if material_colors:
         colors.update(material_colors)

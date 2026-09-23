@@ -35,6 +35,8 @@ def ray_fans(
     convention for a meridional field point).
     """
 
+    tracer.system.require_axial_coordinates()
+
     ideal_y = field.y * magnification
 
     tangential_trace = trace_pupil(

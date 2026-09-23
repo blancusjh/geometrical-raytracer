@@ -18,6 +18,7 @@ from .chromatic import (
 )
 from .distortion import DistortionGrid, chief_ray_distortion, distortion_grid
 from .fans import FanData, ray_fans
+from .geometric import GeometricAberrations, axial_intercepts, geometric_aberrations
 from .metrics import export_metrics_csv, field_metrics
 from .seidel import SeidelCoefficients, seidel_coefficients
 from .stigmatism import (
@@ -37,6 +38,9 @@ from .zernike import (
 )
 
 __all__ = [
+    "GeometricAberrations",
+    "axial_intercepts",
+    "geometric_aberrations",
     "AplanatismReport",
     "ImageSurface",
     "aplanatic_image_surface",

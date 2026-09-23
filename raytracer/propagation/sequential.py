@@ -31,6 +31,8 @@ class TraceStatus(IntEnum):
     TIR = 2
     DIVERGED = 3
     PARALLEL = 4
+    NO_INTERSECTION = 5
+    BACKWARD = 6
 
 
 @dataclass
@@ -82,44 +84,45 @@ class BatchTraceResult:
 
 
 class SequentialTracer:
-    """Exact tracer for a :class:`OpticalSystem`."""
+    """Vectorized sequential tracing in local surface frames.
+
+    Origins, directions and returned paths use world coordinates. Geometric
+    distances and optical paths are in mm. Virtual extensions contribute signed
+    optical path; the object and internal legs require explicit opt-in.
+    """
 
     def __init__(
         self,
         system: OpticalSystem,
         *,
         newton_tol: float = 2e-11,
-        max_newton: int = 15,
+        max_newton: int = 30,
         clip_apertures: bool = True,
         aperture_slack: float = 1e-7,
-        restart_offset: float = 1e-8,
+        allow_virtual_object: bool = False,
+        allow_virtual_image: bool = True,
+        allow_virtual_segments: bool = False,
     ) -> None:
         self.system = system
         self.newton_tol = newton_tol
         self.max_newton = max_newton
         self.clip_apertures = clip_apertures
         self.aperture_slack = aperture_slack
-        self.restart_offset = restart_offset
+        self.allow_virtual_object = allow_virtual_object
+        self.allow_virtual_image = allow_virtual_image
+        self.allow_virtual_segments = allow_virtual_segments
+        if newton_tol <= 0 or max_newton < 1 or aperture_slack < 0:
+            raise ValueError("invalid intersection tolerance or iteration limit")
 
-    # -- public API ------------------------------------------------------
+    def trace(self, origin, direction, *, keep_path=True, keep_aoi=False) -> TraceResult:
+        """Trace one ray in world coordinates."""
 
-    def trace(
-        self,
-        origin: ArrayLike,
-        direction: ArrayLike,
-        *,
-        keep_path: bool = True,
-        keep_aoi: bool = False,
-    ) -> TraceResult:
-        """Trace one ray; convenience wrapper around :meth:`trace_batch`."""
-
-        batch = self.trace_batch(
+        return self.trace_batch(
             np.asarray(origin, dtype=float)[None, :],
             np.asarray(direction, dtype=float)[None, :],
             keep_paths=keep_path,
             keep_aoi=keep_aoi,
-        )
-        return batch[0]
+        )[0]
 
     def trace_batch(
         self,
@@ -128,118 +131,130 @@ class SequentialTracer:
         *,
         keep_paths: bool = False,
         keep_aoi: bool = False,
+        stop_at: int | None = None,
     ) -> BatchTraceResult:
-        """Trace N rays through every surface with a masked, vectorized Newton loop."""
+        """Trace a bundle in world coordinates; local frames place every surface.
+
+        OPL is the signed sum of n times segment length. Backward propagation
+        is allowed only for an explicitly enabled virtual object (first leg)
+        or virtual image (last leg). ``allow_virtual_segments`` explicitly
+        permits algebraic backward transfers inside a prescription, e.g. a
+        dummy stop plane coinciding with a curved surface's vertex plane.
+        No restart displacement is needed in an ordered surface sequence.
+        ``stop_at`` terminates on that surface without an image-plane transfer.
+        """
 
         system = self.system
-        p = np.array(origins, dtype=float, copy=True)
-        d = np.array(directions, dtype=float, copy=True)
-        if p.ndim != 2 or p.shape[1] != 3:
-            raise ValueError("origins must have shape (N, 3)")
-        if d.shape != p.shape:
-            raise ValueError("directions must match origins in shape")
-        d /= np.linalg.norm(d, axis=1, keepdims=True)
+        system._rebuild()
+        points = np.array(origins, dtype=float, copy=True)
+        directions = np.array(directions, dtype=float, copy=True)
+        if points.ndim != 2 or points.shape[1] != 3 or directions.shape != points.shape:
+            raise ValueError("origins and directions must have matching shape (N, 3)")
+        lengths = np.linalg.norm(directions, axis=1)
+        if not np.all(np.isfinite(points)) or not np.all(np.isfinite(directions)):
+            raise ValueError("ray coordinates must be finite")
+        if np.any(lengths == 0):
+            raise ValueError("ray directions must be nonzero")
+        directions /= lengths[:, None]
+        if stop_at is not None and not 0 <= stop_at < len(system.rows):
+            raise ValueError("stop_at must identify a surface in the system")
 
-        n_rays = p.shape[0]
-        n_surfaces = len(system.rows)
-        status = np.zeros(n_rays, dtype=np.int64)
-        failed = np.full(n_rays, -1, dtype=np.int64)
-        opl = np.zeros(n_rays)
-        alive = np.ones(n_rays, dtype=bool)
+        count = len(points)
+        surface_count = len(system.rows) if stop_at is None else stop_at + 1
+        status = np.full(count, TraceStatus.OK, dtype=np.int64)
+        failed = np.full(count, -1, dtype=np.int64)
+        alive = np.ones(count, dtype=bool)
+        opl = np.zeros(count)
+        paths = np.full((count, surface_count + 2, 3), np.nan) if keep_paths else None
+        aoi = np.full((count, surface_count), np.nan) if keep_aoi else None
+        if paths is not None:
+            paths[:, 0] = points
 
-        paths = None
-        if keep_paths:
-            paths = np.full((n_rays, n_surfaces + 2, 3), np.nan)
-            paths[:, 0, :] = p
-        aoi = np.full((n_rays, n_surfaces), np.nan) if keep_aoi else None
+        def fail(mask, reason, surface):
+            mask = alive & mask
+            status[mask] = reason
+            failed[mask] = surface
+            alive[mask] = False
 
-        for i, row in enumerate(system.rows):
+        for index, row in enumerate(system.rows[:surface_count]):
             if not alive.any():
                 break
-            vz = system.vertices[i]
-            profile = row.profile
-
-            t, h, slope, parallel, diverged = intersect_rays_with_profile_surface(
-                p, d, vz, profile, alive,
-                max_newton=self.max_newton, newton_tol=self.newton_tol,
+            frame = system.surface_frame(index)
+            local_points = frame.to_local(points)
+            local_directions = frame.direction_to_local(directions)
+            hit = intersect_rays_with_profile_surface(
+                local_points,
+                local_directions,
+                0.0,
+                row.profile,
+                alive,
+                max_newton=self.max_newton,
+                newton_tol=self.newton_tol,
             )
-            if parallel.any():
-                status[parallel] = TraceStatus.PARALLEL
-                failed[parallel] = i
-                alive &= ~parallel
-            if diverged.any():
-                status[diverged] = TraceStatus.DIVERGED
-                failed[diverged] = i
-                alive &= ~diverged
-
-            q = p + t[:, None] * d
-
-            if self.clip_apertures and row.semidiameter is not None:
-                clipped = alive & (h > row.semidiameter + self.aperture_slack)
-                if clipped.any():
-                    status[clipped] = TraceStatus.VIGNETTED
-                    failed[clipped] = i
-                    alive &= ~clipped
-
-            segment = np.linalg.norm(q - p, axis=1)
-            opl = np.where(alive, opl + system.n_before[i] * segment, opl)
-            if keep_paths:
-                paths[alive, i + 1, :] = q[alive]
-
-            # Surface normal from the sag gradient, oriented against the ray.
-            safe_h = np.where(h == 0.0, 1.0, h)
-            normal = np.column_stack(
-                [
-                    np.where(h > 0.0, -slope * q[:, 0] / safe_h, 0.0),
-                    np.where(h > 0.0, -slope * q[:, 1] / safe_h, 0.0),
-                    np.ones(n_rays),
-                ]
+            fail(hit.parallel, TraceStatus.PARALLEL, index)
+            fail(hit.outside_domain, TraceStatus.NO_INTERSECTION, index)
+            fail(hit.diverged, TraceStatus.DIVERGED, index)
+            allow_backward = (index == 0 and self.allow_virtual_object) or (
+                index > 0 and self.allow_virtual_segments
             )
-            normal /= np.linalg.norm(normal, axis=1, keepdims=True)
-            facing = np.einsum("ij,ij->i", d, normal) > 0.0
-            normal[facing] *= -1.0
+            if not allow_backward:
+                fail(hit.distance < -self.newton_tol, TraceStatus.BACKWARD, index)
 
-            cos_i = -np.einsum("ij,ij->i", d, normal)
-            if keep_aoi:
-                aoi[alive, i] = np.degrees(np.arccos(np.clip(np.abs(cos_i[alive]), 0.0, 1.0)))
+            # Replace failed geometry before vector arithmetic; dead rays stay masked.
+            distance = np.where(alive, hit.distance, 0.0)
+            local_hits = local_points + distance[:, None] * local_directions
+            aperture = row.clear_aperture
+            if self.clip_apertures and aperture is not None:
+                fail(
+                    ~aperture.contains(local_hits[:, :2], self.aperture_slack),
+                    TraceStatus.VIGNETTED,
+                    index,
+                )
+            world_hits = frame.to_world(local_hits)
+            opl += np.where(alive, system.n_before[index] * distance, 0.0)
+            if paths is not None:
+                paths[alive, index + 1] = world_hits[alive]
+
+            normal = frame.direction_to_world(hit.normals)
+            normal[~alive] = [0.0, 0.0, 1.0]
+            facing = np.einsum("ij,ij->i", directions, normal) > 0
+            normal[facing] *= -1
+            if aoi is not None:
+                cosine = -np.einsum("ij,ij->i", directions, normal)
+                aoi[alive, index] = np.rad2deg(np.arccos(np.clip(cosine[alive], -1, 1)))
 
             if row.kind is SurfaceKind.MIRROR:
-                d_new = reflect_batch(d, normal)
+                outgoing = reflect_batch(directions, normal)
+            elif row.kind is SurfaceKind.STOP or system.n_before[index] == system.n_after[index]:
+                outgoing = directions.copy()
             else:
-                n1 = system.n_before[i]
-                n2 = system.n_after[i]
-                if n1 == n2:
-                    d_new = d.copy()
-                else:
-                    d_new, tir = refract_batch(d, normal, n1, n2)
-                    tir = alive & tir
-                    if tir.any():
-                        status[tir] = TraceStatus.TIR
-                        failed[tir] = i
-                        alive &= ~tir
-            d_new /= np.linalg.norm(d_new, axis=1, keepdims=True)
+                outgoing, tir = refract_batch(
+                    directions, normal, system.n_before[index], system.n_after[index]
+                )
+                fail(tir, TraceStatus.TIR, index)
+            points[alive] = world_hits[alive]
+            directions[alive] = outgoing[alive]
 
-            d = np.where(alive[:, None], d_new, d)
-            p = np.where(alive[:, None], q + d * self.restart_offset, p)
-
-        # Final transfer to the image plane.
-        with np.errstate(divide="ignore", invalid="ignore"):
-            t_img = (system.image_z - p[:, 2]) / d[:, 2]
-        image = p + t_img[:, None] * d
-        opl = np.where(alive, opl + system.n_after[-1] * np.abs(t_img), opl)
+        image = points.copy()
+        if stop_at is None:
+            image_frame = system.image_frame
+            local_points = image_frame.to_local(points)
+            local_directions = image_frame.direction_to_local(directions)
+            fail(np.abs(local_directions[:, 2]) < 1e-14, TraceStatus.PARALLEL, surface_count)
+            distance = np.divide(
+                -local_points[:, 2],
+                local_directions[:, 2],
+                out=np.zeros(count),
+                where=alive,
+            )
+            if not self.allow_virtual_image:
+                fail(distance < -self.newton_tol, TraceStatus.BACKWARD, surface_count)
+            image = points + distance[:, None] * directions
+            opl += np.where(alive, system.n_image * distance, 0.0)
         image[~alive] = np.nan
-        if keep_paths:
-            paths[alive, -1, :] = image[alive]
-
-        return BatchTraceResult(
-            image_points=image,
-            directions=d,
-            opl=opl,
-            status=status,
-            failed_surface=failed,
-            paths=paths,
-            aoi_deg=aoi,
-        )
+        if paths is not None:
+            paths[alive, -1] = image[alive]
+        return BatchTraceResult(image, directions, opl, status, failed, paths, aoi)
 
 
 __all__ = ["TraceStatus", "TraceResult", "BatchTraceResult", "SequentialTracer"]

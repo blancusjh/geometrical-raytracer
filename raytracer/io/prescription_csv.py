@@ -19,6 +19,7 @@ from ..design.rows import SurfaceKind, SurfaceRow
 from ..design.system import OpticalSystem
 from ..optics.materials import MaterialLibrary, default_materials
 from ..surfaces.profile import AsphereProfile
+from .system_json import read_system, write_system
 
 logger = logging.getLogger("raytracer.prescription")
 
@@ -47,7 +48,7 @@ def read_csv(
         reader = csv.DictReader(stream)
         fieldnames = reader.fieldnames or []
         wavelength_um = None
-        index_column = None
+        index_column = "index_nm" if "index_nm" in fieldnames else None
         for column in fieldnames:
             match = _INDEX_COLUMN.match(column)
             if match:
@@ -62,22 +63,16 @@ def read_csv(
             radius = _parse_float(record.get("radius_mm"))
             thickness = _parse_float(record.get("thickness_to_next_mm"))
             semidiameter_token = record.get("clear_semidiameter_mm", "")
-            semidiameter = (
-                None if semidiameter_token.strip() == "" else float(semidiameter_token)
-            )
+            semidiameter = None if semidiameter_token.strip() == "" else float(semidiameter_token)
             conic = _parse_float(record.get("K"))
-            coefficients = tuple(
-                _parse_float(record.get(column)) for column in _COEFF_COLUMNS
-            )
+            coefficients = tuple(_parse_float(record.get(column)) for column in _COEFF_COLUMNS)
             if not any(coefficients):
                 coefficients = ()
             profile = AsphereProfile.from_radius(radius, conic, coefficients)
 
             material_token = record.get("material_after", "AIR").strip()
             index_hint = (
-                _parse_float(record.get(index_column), default=1.0)
-                if index_column
-                else None
+                _parse_float(record.get(index_column), default=1.0) if index_column else None
             )
 
             if surface_type == "mirror" or material_token.upper() == "REFL":
@@ -105,13 +100,9 @@ def read_csv(
                 )
             rows.append(row)
             vertex_token = record.get("vertex_z_mm", "")
-            expected_vertices.append(
-                None if vertex_token.strip() == "" else float(vertex_token)
-            )
+            expected_vertices.append(None if vertex_token.strip() == "" else float(vertex_token))
 
-    system = OpticalSystem(
-        rows, wavelength_um=wavelength_um, name=name or path.stem
-    )
+    system = OpticalSystem(rows, wavelength_um=wavelength_um, name=name or path.stem)
 
     # The vertex column is redundant with the thickness accumulation; use it
     # as a consistency check rather than trusting it.
@@ -129,11 +120,28 @@ def read_csv(
 
 
 def write_csv(system: OpticalSystem, path: str | Path) -> None:
-    """Export *system* in the native CSV dialect."""
+    """Export the limited axial CSV table; use JSON for complete prescriptions."""
 
+    import numpy as np
+
+    if (
+        not system.is_centered
+        or not np.array_equal(system.frame.rotation, np.eye(3))
+        or np.any(system.frame.origin)
+    ):
+        raise ValueError("CSV cannot preserve placed systems; use fmt='json'")
+    for row in system.rows:
+        if not isinstance(row.profile, AsphereProfile) or len(row.profile.coefficients) > 6:
+            raise ValueError("CSV supports conics and six asphere terms; use fmt='json'")
+        if row.aperture is not None or row.is_stop:
+            raise ValueError(
+                "CSV cannot preserve an independent aperture or stop flag; use fmt='json'"
+            )
+
+    system._rebuild()
     path = Path(path)
     nm = (system.wavelength_um or 0.0) * 1e3
-    index_column = f"index_{nm:g}_nm" if nm else "index_nm"
+    index_column = f"index_{nm:.17g}_nm" if nm else "index_nm"
     fields = [
         "surface",
         "surface_type",
@@ -171,22 +179,25 @@ def write_csv(system: OpticalSystem, path: str | Path) -> None:
                 {
                     "surface": i + 1,
                     "surface_type": kind,
-                    "radius_mm": f"{row.radius:.9f}",
-                    "thickness_to_next_mm": f"{row.thickness:.9f}",
+                    "radius_mm": f"{row.radius:.17g}",
+                    "thickness_to_next_mm": f"{row.thickness:.17g}",
                     "material_after": material,
-                    index_column: f"{system.n_after[i]:.8f}",
+                    index_column: f"{system.n_after[i]:.17g}",
                     "clear_semidiameter_mm": (
-                        "" if row.semidiameter is None else f"{row.semidiameter:.3f}"
+                        "" if row.semidiameter is None else f"{row.semidiameter:.17g}"
                     ),
                     "aspheric": aspheric,
                     "K": row.profile.conic if aspheric else "",
                     **dict(zip(_COEFF_COLUMNS, coefficients)),
-                    "vertex_z_mm": f"{system.vertices[i]:.9f}",
+                    "vertex_z_mm": f"{system.vertices[i]:.17g}",
                 }
             )
 
 
-FORMAT_READERS: dict[str, Callable[..., OpticalSystem]] = {"csv": read_csv}
-FORMAT_WRITERS: dict[str, Callable[[OpticalSystem, str | Path], None]] = {"csv": write_csv}
+FORMAT_READERS: dict[str, Callable[..., OpticalSystem]] = {"csv": read_csv, "json": read_system}
+FORMAT_WRITERS: dict[str, Callable[[OpticalSystem, str | Path], None]] = {
+    "csv": write_csv,
+    "json": write_system,
+}
 
 __all__ = ["read_csv", "write_csv", "FORMAT_READERS", "FORMAT_WRITERS"]

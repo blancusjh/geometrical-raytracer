@@ -52,9 +52,7 @@ def _solve_chief_ray(
 
     for guess in (None, *fallback_guesses):
         try:
-            slopes = chief_ray_slopes(
-                tracer, field, stop_index=stop_index, initial_guess=guess
-            )
+            slopes = chief_ray_slopes(tracer, field, stop_index=stop_index, initial_guess=guess)
         except RuntimeError:
             continue
         if trace_from_object(tracer, (field.x, field.y), slopes).ok:
@@ -85,6 +83,8 @@ def chief_ray_distortion(
     size, focus shifts, and astigmatism.
     """
 
+    tracer.system.require_axial_coordinates()
+
     if field_unit not in ("mm", "deg"):
         raise ValueError(f"field_unit must be 'mm' or 'deg', got {field_unit!r}")
     object_z = tracer.system.object_z
@@ -97,14 +97,10 @@ def chief_ray_distortion(
     rows = []
     previous = None
     for value in np.asarray(fields, dtype=float):
-        height = (
-            abs(object_z) * np.tan(np.deg2rad(value)) if field_unit == "deg" else value
-        )
+        height = abs(object_z) * np.tan(np.deg2rad(value)) if field_unit == "deg" else value
         field = FieldPoint(y=float(height))
         fallbacks = (previous,) if previous is not None else ()
-        slopes = _solve_chief_ray(
-            tracer, field, stop_index=stop_index, fallback_guesses=fallbacks
-        )
+        slopes = _solve_chief_ray(tracer, field, stop_index=stop_index, fallback_guesses=fallbacks)
         if slopes is None:
             raise RuntimeError(
                 f"No unvignetted chief ray at field {value:g} {field_unit} "
@@ -112,9 +108,7 @@ def chief_ray_distortion(
             )
         previous = slopes
         ideal = height * magnification
-        actual = float(
-            trace_from_object(tracer, (0.0, field.y), slopes).image_point[1]
-        )
+        actual = float(trace_from_object(tracer, (0.0, field.y), slopes).image_point[1])
         rows.append(
             {
                 "field": float(value),
@@ -215,6 +209,8 @@ def distortion_grid(
     dropped rather than assuming full coverage.
     """
 
+    tracer.system.require_axial_coordinates()
+
     if isinstance(half_field, (int, float)):
         half_x = half_y = float(half_field)
     else:
@@ -244,9 +240,9 @@ def distortion_grid(
             )
             if slopes is None:
                 continue
-            actual_points[i, j] = trace_from_object(
-                tracer, (field.x, field.y), slopes
-            ).image_point[:2]
+            actual_points[i, j] = trace_from_object(tracer, (field.x, field.y), slopes).image_point[
+                :2
+            ]
             valid[i, j] = True
             guesses[(i, j)] = slopes
 
