@@ -13,7 +13,15 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
+from raytracer.analysis.aberrations.chromatic import axial_color, chromatic_spots
 from raytracer.analysis.aberrations.geometric import axial_intercepts, geometric_aberrations
+from raytracer.analysis.tolerancing import (
+    GeometricEvaluator,
+    Perturbation,
+    Tolerance,
+    monte_carlo,
+    sensitivity,
+)
 from raytracer.design import OpticalSystem, SurfaceRow, to_branching_surfaces
 from raytracer.math.transforms import RigidTransform
 from raytracer.optics.laws import reflect, refract
@@ -133,6 +141,67 @@ def test_03_gaussian_optics_virtual_conjugates_and_dispersion():
     red = ParaxialModel(singlet(material=glass, wavelength_um=0.65627)).back_focal_z()
     assert blue < red
 
+    # Independent manufacturer values, rounded to five decimal places.
+    reference_wavelengths = [0.48613, 0.58756, 0.65627, 1.014]
+    for name, expected in [
+        ("N-BK7", [1.52238, 1.51680, 1.51432, 1.50731]),
+        ("N-F2", [1.63208, 1.62005, 1.61506, 1.60261]),
+    ]:
+        material = sellmeier_glass(name)
+        assert_allclose(
+            [material.index(wl) for wl in reference_wavelengths], expected, atol=6e-6, rtol=0
+        )
+        with pytest.raises(ValueError, match="outside supported"):
+            material.index(0.2)
+        with pytest.raises(ValueError):
+            material.index(np.inf)
+    infinite_object = singlet(material=glass, wavelength_um=0.58756)
+    infinite_object.object_z = -np.inf
+    color = axial_color(infinite_object, reference_wavelengths[:3], reference_wavelength_um=0.58756)
+    assert_allclose(
+        color.focus_z_mm,
+        [
+            ParaxialModel(infinite_object.at_wavelength(wl)).back_focal_z()
+            for wl in reference_wavelengths[:3]
+        ],
+    )
+    with pytest.raises(ValueError, match="exactly once"):
+        axial_color(infinite_object, [0.48613, 0.65627], reference_wavelength_um=0.58756)
+
+    # Oblique plane-parallel plate: exact Snell displacement and disk moments.
+    plate = OpticalSystem(
+        [
+            SurfaceRow.refracting(
+                radius=0, thickness=5, material=glass, semidiameter=1, is_stop=True
+            ),
+            SurfaceRow.refracting(radius=0, thickness=10, material=AIR),
+        ],
+        wavelength_um=0.58756,
+    )
+    wavelengths = np.array(reference_wavelengths[:3])
+    spectrum = np.array([0.2, 0.5, 0.3])
+    spots = chromatic_spots(
+        plate,
+        wavelengths,
+        reference_wavelength_um=0.58756,
+        field=FieldPoint.angle(x_deg=20),
+        wavelength_weights=spectrum,
+        sampling=PupilSampling(kind="rings", radial=5, azimuth=24),
+    )
+    theta = np.deg2rad(20)
+    offsets = np.array(
+        [5 * np.tan(np.arcsin(np.sin(theta) / glass.index(wl))) for wl in wavelengths]
+    )
+    offsets -= offsets[1]
+    assert_allclose(spots.chief_offsets_um[:, 0], offsets * 1000, atol=1e-9)
+    assert_allclose(spots.rms_radius_um, np.sqrt(0.5 + offsets**2) * 1000, atol=1e-8)
+    assert_allclose(
+        spots.polychromatic_rms_um, np.sqrt(0.5 + spectrum @ offsets**2) * 1000, atol=1e-8
+    )
+    variance = spectrum @ (offsets - spectrum @ offsets) ** 2
+    assert_allclose(spots.centroid_rms_um, np.sqrt(0.5 + variance) * 1000, atol=1e-8)
+    assert_allclose(spots.detected_spectral_weights, spectrum, atol=1e-14)
+
 
 def test_04_exact_conic_foci_and_cartesian_optical_path():
     """Parabola/ellipse focus and Cartesian oval constant eikonal are analytic."""
@@ -246,6 +315,47 @@ def test_06_three_dimensional_covariance_and_folded_mirror():
     assert_allclose(ray.direction, [-1, 0, 0], atol=1e-14)
     assert_allclose(ray.opl, 20, atol=1e-12)
 
+    # A flat mirror tilt alpha sends its centroid to -L*tan(2*alpha).
+    plane = OpticalSystem(
+        [SurfaceRow.mirror(radius=0, thickness=-100, semidiameter=2, is_stop=True)]
+    )
+    evaluator = GeometricEvaluator(
+        SequentialTracer(plane),
+        [FieldPoint.angle()],
+        [0.55],
+        sampling=PupilSampling(kind="gauss", radial=3, azimuth=12),
+    )
+    parameter = Perturbation("tilt_y", (0,), label="mirror tilt")
+    derivative = sensitivity(evaluator, parameter, 0.001)
+    key = "field_0.centroid_x_mm"
+    assert_allclose(derivative.derivative[key], -200 * np.pi / 180, rtol=2e-9)
+    assert derivative.derivative_step_difference[key] < 1e-8
+    assert not derivative.changed_ray_membership
+    assert_allclose(plane.rows[0].placement.rotation, np.eye(3), atol=0)
+    tolerance = Tolerance(parameter, 0.01)
+    draws = monte_carlo(evaluator, [tolerance], samples=12, seed=41)
+    expected = -100 * np.tan(2 * np.deg2rad(draws.draws[:, 0]))
+    assert_allclose(draws.metrics[key], expected, atol=1e-11)
+    repeated = monte_carlo(evaluator, [tolerance], samples=12, seed=41)
+    assert np.array_equal(draws.draws, repeated.draws)
+    assert draws.successful_fraction == 1
+    # Complete beam loss remains a recorded failure, never a zero-RMS success.
+    losses = monte_carlo(
+        evaluator,
+        [Tolerance(Perturbation("decenter_x", (0,)), 100)],
+        samples=8,
+        seed=41,
+    )
+    assert losses.failures
+    assert np.isnan(losses.metrics[key][list(losses.failures)]).all()
+    # A changed last thickness must not silently translate the fixed detector.
+    changed = Perturbation("thickness", (0,)).apply(plane, 10)
+    assert_allclose(
+        evaluator.evaluate(changed).fields[0].rms_radius_mm,
+        evaluator.nominal.fields[0].rms_radius_mm,
+        atol=1e-12,
+    )
+
 
 def test_07_finite_infinite_aiming_and_cone_symmetry():
     """Every ray reaches its prescribed stop coordinate, not just the chief."""
@@ -296,6 +406,34 @@ def test_08_geometric_spherical_aberration_and_best_focus():
     assert report.best_focus_shift_mm > 0
     assert report.geometric_throughput == pytest.approx(1)
 
+    # Check analytic refocus against an actual trace to the displaced detector.
+    sampling = PupilSampling(kind="gauss", radial=5, azimuth=16)
+    evaluator = GeometricEvaluator(
+        SequentialTracer(system),
+        [FieldPoint.angle()],
+        [0.55],
+        sampling=sampling,
+        focus_policy="refocus",
+    )
+    result = evaluator.nominal.fields[0]
+    focused = copy.deepcopy(system)
+    focused.image_placement = RigidTransform.from_euler_xyz(origin=[0, 0, result.focus_shift_mm])
+    focused_pupil = trace_pupil(SequentialTracer(focused), FieldPoint.angle(), sampling=sampling)
+    measured = geometric_aberrations(focused_pupil, image_frame=focused.image_frame)
+    assert_allclose(result.rms_radius_mm, measured.rms_radius_mm, atol=2e-12)
+    with pytest.raises(RuntimeError, match="parallel"):
+        GeometricEvaluator(
+            SequentialTracer(
+                OpticalSystem(
+                    [SurfaceRow.mirror(radius=0, thickness=-100, semidiameter=2, is_stop=True)]
+                )
+            ),
+            [FieldPoint.angle()],
+            [0.55],
+            sampling=sampling,
+            focus_policy="refocus",
+        )
+
 
 def test_09_prescription_roundtrip_preserves_the_complete_system(tmp_path):
     """Reopening a project preserves geometry, materials, frames and ray results."""
@@ -320,6 +458,41 @@ def test_09_prescription_roundtrip_preserves_the_complete_system(tmp_path):
     assert before.valid.all()
     assert_allclose(after.paths, before.paths, atol=1e-12)
     assert_allclose(after.opl, before.opl, atol=1e-12)
+
+    from raytracer.io import read_materials, write_analysis
+    from raytracer.optics.materials import IndexOffsetMaterial
+
+    catalog = tmp_path / "materials.csv"
+    catalog.write_text(
+        "name,model,c1,c2,source,wavelength_min_um,wavelength_max_um\n"
+        "Measured,cauchy,1.5,.005,independent calibration,.4,.7\n",
+        encoding="utf-8",
+    )
+    measured = read_materials(catalog)["MEASURED"]
+    assert measured.metadata.source == "independent calibration"
+    assert measured.metadata.wavelength_range_um == (0.4, 0.7)
+    with pytest.raises(ValueError, match="outside supported"):
+        measured.index(0.8)
+    system.rows[0].material_after = IndexOffsetMaterial("offset", measured, 1e-4)
+    system.to_prescription(path, fmt="json")
+    restored = OpticalSystem.from_prescription(path, fmt="json")
+    assert_allclose(restored.rows[0].material_after.index(0.55), measured.index(0.55) + 1e-4)
+    assert restored.rows[0].material_after.base.metadata == measured.metadata
+    record = write_analysis(
+        tmp_path / "analysis.json",
+        system=system,
+        settings={"focus_policy": "fixed"},
+        results={"not_defined": np.nan, "known": np.array([1.0, 2.0])},
+    )
+    reopened = json.loads((tmp_path / "analysis.json").read_text(encoding="utf-8"))
+    assert reopened["results"]["not_defined"] is None
+    assert reopened["system_sha256"] == record["system_sha256"]
+    assert (
+        reopened["system"]["surfaces"][0]["material_after"]["parameters"]["base"]["parameters"][
+            "metadata"
+        ]["source"]
+        == "independent calibration"
+    )
     oval = OpticalSystem(
         [
             SurfaceRow.cartesian_oval(
@@ -346,7 +519,10 @@ def test_10_independent_rayoptics_cooke_reference():
     prescription = ROOT / "data/optical_systems/photographic/cooke_triplet_prescription.csv"
     reference = json.loads((Path(__file__).parent / "reference/rayoptics_cooke.json").read_text())
     assert reference["version"] == "0.9.8"
-    assert hashlib.sha256(prescription.read_bytes()).hexdigest() == reference["prescription_sha256"]
+    assert (
+        hashlib.sha256(prescription.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+        == reference["prescription_sha256"]
+    )
     assert len(reference["cases"]) == 45
     for case in reference["cases"]:
         system = OpticalSystem.from_prescription(prescription)

@@ -66,6 +66,8 @@ class OpticalSystem:
             n_after.append(n_next)
             n_current = n_next
             z += row.thickness
+        if not np.all(np.isfinite(n_before + n_after)) or min(n_before + n_after) <= 0:
+            raise ValueError("all material indices must be finite and positive")
         self.vertices = np.asarray(vertices, dtype=float)
         self.n_before = np.asarray(n_before, dtype=float)
         self.n_after = np.asarray(n_after, dtype=float)

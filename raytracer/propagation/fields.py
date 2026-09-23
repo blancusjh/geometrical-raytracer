@@ -328,6 +328,8 @@ class PupilTrace:
     sampling: PupilSampling = dataclass_field(default_factory=PupilSampling)
     sample_weights: np.ndarray | None = None
     aiming_residual_mm: np.ndarray | None = None
+    launch_origins: np.ndarray | None = None
+    launch_directions: np.ndarray | None = None
 
     @property
     def geometric_throughput(self) -> float:
@@ -460,6 +462,8 @@ def trace_pupil(
         na_object_sine=na_object_sine,
         sampling=sampling,
         sample_weights=weights_all,
+        launch_origins=tracer.system.frame.to_world(origins),
+        launch_directions=tracer.system.frame.direction_to_world(directions),
     )
 
 

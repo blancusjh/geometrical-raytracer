@@ -1,4 +1,4 @@
-# Fundamentos y validación geométrica (0.4)
+# Fundamentos y validación geométrica (0.4–0.5)
 
 ## Qué se considera validado
 
@@ -213,10 +213,12 @@ Esta etapa no certifica la extracción existente de Seidel ni su separación por
 superficie. Sigue siendo prioritario contrastar sus convenciones y coeficientes
 con teoría independiente, junto con curvatura de campo, astigmatismo, coma y
 distorsión para varios campos y aperturas. También faltan pupilas de entrada y
-salida completas, sensibilidad geométrica a desalineaciones y validación del
-catálogo en sus rangos espectrales.
+salida completas y ampliar la validación del catálogo en sus rangos espectrales.
+La etapa 0.5 incorpora [cromática y sensibilidad geométrica](chromatic_sensitivity.md),
+con sus propios oráculos analíticos, materiales contrastados y límites explícitos.
 
-Los layouts y visores de sólidos conservan sus hipótesis axiales. El trazador
+Los layouts históricos y visores de sólidos conservan sus hipótesis axiales;
+el nuevo layout geométrico representa las colocaciones 3D reales. El trazador
 acepta aperturas rectangulares, pero el apuntado automático de pupila se limita
 a diafragmas circulares/anulares. El CSV es una tabla geométrica: no conserva el plano objeto, el medio objeto,
 los comentarios ni las leyes de dispersión completas; debe usarse JSON para

@@ -73,7 +73,9 @@ def main():
         "reference": "RayOptics",
         "version": rayoptics.__version__,
         "opticalglass_version": opticalglass.__version__,
-        "prescription_sha256": hashlib.sha256(PRESCRIPTION.read_bytes()).hexdigest(),
+        "prescription_sha256": hashlib.sha256(
+            PRESCRIPTION.read_text(encoding="utf-8").encode("utf-8")
+        ).hexdigest(),
         "description": "45 rays: 3 wavelengths, 3 finite fields, 5 launch directions; apertures disabled",
         "conventions": "mm; object_z=-100; signed paths; dummy stop may require a backward transfer",
         "cases": cases,

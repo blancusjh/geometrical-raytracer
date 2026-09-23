@@ -9,7 +9,14 @@ import numpy as np
 from ..design.rows import SurfaceKind, SurfaceRow
 from ..design.system import OpticalSystem
 from ..math.transforms import RigidTransform
-from ..optics.materials import AbbeMaterial, CauchyMaterial, ConstantIndex, SellmeierMaterial
+from ..optics.materials import (
+    AbbeMaterial,
+    CauchyMaterial,
+    ConstantIndex,
+    IndexOffsetMaterial,
+    MaterialMetadata,
+    SellmeierMaterial,
+)
 from ..surfaces.apertures import CircularAperture, RectangularAperture
 from ..surfaces.cartesian_oval import CartesianOvalProfile
 from ..surfaces.profile import AsphereProfile
@@ -51,6 +58,15 @@ def _read_frame(payload):
 
 
 def _material(material):
+    if isinstance(material, IndexOffsetMaterial):
+        return {
+            "type": "IndexOffsetMaterial",
+            "parameters": {
+                "name": material.name,
+                "offset": material.offset,
+                "base": _material(material.base),
+            },
+        }
     kind = type(material).__name__
     if kind not in MATERIAL_TYPES:
         raise TypeError(f"cannot serialize material type {kind}; register an explicit format first")
@@ -58,19 +74,24 @@ def _material(material):
 
 
 def _read_material(payload):
+    if payload.get("type") == "IndexOffsetMaterial":
+        values = payload["parameters"]
+        return IndexOffsetMaterial(values["name"], _read_material(values["base"]), values["offset"])
     try:
         cls = MATERIAL_TYPES[payload["type"]]
     except KeyError:
         raise ValueError(f"unsupported material type {payload.get('type')!r}") from None
     values = dict(payload["parameters"])
+    if "metadata" in values:
+        values["metadata"] = MaterialMetadata(**values["metadata"])
     for key in ("b", "c", "coefficients"):
         if key in values:
             values[key] = tuple(values[key])
     return cls(**values)
 
 
-def write_system(system: OpticalSystem, path) -> None:
-    """Save geometry, placements, apertures, media and conjugates at full precision."""
+def system_to_dict(system: OpticalSystem) -> dict:
+    """Encode all supported prescription data without writing a file."""
 
     rows = []
     for row in system.rows:
@@ -114,7 +135,12 @@ def write_system(system: OpticalSystem, path) -> None:
         "image_placement": _frame(system.image_placement),
         "surfaces": rows,
     }
-    text = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False)
+    return payload
+
+
+def write_system(system: OpticalSystem, path) -> None:
+    """Save geometry, placements, apertures, media and conjugates at full precision."""
+    text = json.dumps(system_to_dict(system), indent=2, ensure_ascii=False, allow_nan=False)
     Path(path).write_text(text + "\n", encoding="utf-8")
 
 

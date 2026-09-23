@@ -114,6 +114,14 @@ class SequentialTracer:
         if newton_tol <= 0 or max_newton < 1 or aperture_slack < 0:
             raise ValueError("invalid intersection tolerance or iteration limit")
 
+    def with_system(self, system: OpticalSystem) -> "SequentialTracer":
+        """Reuse numerical and virtual-path settings with another prescription."""
+        from copy import copy
+
+        tracer = copy(self)
+        tracer.system = system
+        return tracer
+
     def trace(self, origin, direction, *, keep_path=True, keep_aoi=False) -> TraceResult:
         """Trace one ray in world coordinates."""
 

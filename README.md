@@ -70,7 +70,11 @@ orden y 45 rayos de referencia calculados por RayOptics.
 | Pupilas | Apuntado por lotes al diafragma circular o anular; campos finitos y angulares; cuadratura de Gauss por área |
 | Aperturas | Circulares, anulares y rectangulares independientes de la forma refractora; diafragmas que conservan el medio |
 | Aberraciones | Error transversal, centroide y RMS ponderados, intersección axial y mejor foco geométrico en el marco del detector |
-| Análisis axiales existentes | Abanicos, distorsión, cromática y Seidel; requieren un sistema centrado en coordenadas axiales |
+| Cromática | Color axial paraxial; manchas 3D sobre detector común, pesos espectrales y de pupila, centroide y RMS policromáticos |
+| Materiales | Procedencia, límites espectrales declarados y modelos aproximados identificados; contraste N-BK7/N-F2 con SCHOTT |
+| Sensibilidad | Descentramientos, inclinaciones de grupos, espesor, radio e índice; diferencias a dos pasos y Monte Carlo reproducible |
+| Informes y layout | JSON con prescripción, ajustes, versiones y huellas SHA-256; superficies y rayos en sus marcos 3D reales |
+| Análisis axiales existentes | Abanicos, distorsión y Seidel; requieren un sistema centrado en coordenadas axiales |
 | Persistencia | JSON versionado con materiales y coeficientes completos, aperturas, marcos y conjugados; CSV restringido a lo que puede representar |
 | Motor ramificado | Propagación 2D existente; el puente desde sistemas secuenciales conserva los diafragmas circulares |
 
@@ -105,6 +109,29 @@ Los segmentos internos hacia atrás requieren `allow_virtual_segments=True`;
 auxiliares. El objeto virtual se habilita con `allow_virtual_object=True`.
 El detector permite prolongaciones virtuales mediante `allow_virtual_image=True`.
 
+## Cromática, sensibilidad y resultados reproducibles
+
+```bash
+python -m examples.aberrations.chromatic_sensitivity
+```
+
+El ejemplo construye un doblete N-BK7/N-F2 mediante ecuaciones analíticas,
+compara el foco F/d/C, analiza descentramiento, inclinación e índice y guarda
+128 realizaciones con semilla fija. Genera una prescripción reutilizable,
+figuras y un [informe numérico completo](docs/chromatic_sensitivity_results.json).
+La [guía de cromática y sensibilidad](docs/chromatic_sensitivity.md) especifica
+pesos, detector, iluminación, unidades y límites de interpretación.
+
+![Cromática y sensibilidad](docs/img/chromatic_sensitivity.png)
+
+![Geometría real del doblete inclinado](docs/img/placed_doublet.png)
+
+Los haces incidentes y el detector se mantienen fijos en sensibilidad. El
+reenfoque opcional es un diagnóstico por campo, no un detector único que se
+adapte simultáneamente a todos ellos. La transmisión es geométrica: no incluye
+Fresnel ni absorción. Los resultados Monte Carlo describen las distribuciones
+introducidas; no constituyen rendimiento de fabricación sin criterios de aceptación.
+
 ## Diez pruebas esenciales
 
 La batería anterior se ha sustituido por **exactamente diez pruebas**, sin
@@ -113,13 +140,13 @@ o de integridad del proyecto:
 
 1. Snell, reflexión, reciprocidad, TIR, Fresnel y camino óptico de una lámina.
 2. Intersecciones analíticas, dominio de una esfera y diagnósticos del recorrido.
-3. Lente gruesa, conjugados virtuales, inmersión y dispersión.
+3. Lente gruesa, conjugados, dispersión SCHOTT y cromática ponderada de una lámina.
 4. Focos exactos de parábola/elipse y camino óptico del óvalo de Descartes.
 5. Aperturas, conservación del medio, cuadratura y viñeteo ponderado.
-6. Invariancia ante movimientos rígidos y espejo plegado a 90°.
+6. Invariancia 3D, espejo plegado, sensibilidad analítica y Monte Carlo reproducible.
 7. Apuntado a pupila para campos finitos/infinitos y simetría del cono angular.
-8. Aberración esférica longitudinal/transversal y mejor foco geométrico.
-9. Guardado y lectura completos, con rechazo de formatos incompatibles.
+8. Aberración esférica y mejor foco contrastado con un nuevo trazado al detector.
+9. Persistencia de geometría y materiales; informes trazables y formatos incompatibles.
 10. Intersecciones, dirección de salida y camino óptico de 45 rayos de RayOptics.
 
 La [guía de validación](docs/geometrical_validation.md) explica ecuaciones,
@@ -138,7 +165,7 @@ Eso no sustituye la comprobación de los resultados de cada ejecución de CI.
 Para la siguiente etapa: definición y validación completa de coeficientes de
 Seidel por superficie; curvatura de campo tangencial/sagital y distorsión frente
 a referencias independientes; pupilas de entrada/salida y telecentricidad;
-visores compatibles con las colocaciones 3D; catálogo de materiales con rangos
-de validez y procedencia; análisis geométrico de sensibilidad a desalineaciones.
+ampliación del catálogo con datos primarios verificados; sensibilidad con
+correlaciones y criterios de aceptación; interfaz de edición y diagnóstico 3D.
 Los ejemplos y notebooks históricos se conservan como material de trabajo:
 sus cifras anteriores no se consideran revalidadas por estas diez pruebas.

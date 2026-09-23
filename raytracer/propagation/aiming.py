@@ -151,4 +151,6 @@ def trace_stop_pupil(
         sampling,
         sample_weights=all_weights,
         aiming_residual_mm=errors[1:],
+        launch_origins=origins[1:].copy(),
+        launch_directions=directions[1:].copy(),
     )
