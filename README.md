@@ -192,8 +192,10 @@ sus cifras anteriores no se consideran revalidadas por estas diez pruebas.
 
 La [galería reproducible](docs/feature_gallery.md) reúne trazado, huellas, manchas, abanicos, barridos de foco, energía geométrica encerrada, distorsión, viñeteo, aperturas y espejos, junto con los informes de Seidel, cromática y tolerancias. Distingue resultados actuales, ejemplos históricos y capacidades pendientes.
 
-### Lentes sólidas transparentes
+### Geometría 3D en Matplotlib
 
-El [visor 3D sólido](docs/solid_viewer.md) muestra volúmenes cerrados, transparencia por capas y azules según el índice de refracción. Incluye exportación PNG y cámara interactiva nativa; instalación opcional con `pip install '.[solid]'`.
+La figura existente `layout_3d_figure` añade relleno transparente azul según el índice, trayectorias completas y la pantalla con las intersecciones reales. No requiere dependencias adicionales. VisPy conserva su implementación anterior.
 
-![Triplete con lentes sólidas](docs/img/cooke_solid_detail.png)
+![Doblete en Matplotlib](docs/img/matplotlib_layout.png)
+
+Reproducción: `python -m examples.aberrations.matplotlib_layout`. Véanse las [convenciones de la figura](docs/matplotlib_layout.md).

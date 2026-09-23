@@ -86,18 +86,14 @@ el paraboloide esté libre de aberraciones fuera del eje.
 
 ## 7. Superficies y rayos tridimensionales
 
-La [nueva vista sólida transparente](solid_viewer.md) añade cuerpos cerrados y
-azules según el índice:
+La [figura de Matplotlib](matplotlib_layout.md) representa las lentes con
+relleno transparente y azules según el índice. Conserva el recorrido completo
+hasta la pantalla y muestra sus intersecciones en coordenadas locales.
 
-![Triplete sólido](img/cooke_solid_detail.png)
+![Doblete en Matplotlib](img/matplotlib_layout.png)
 
-La siguiente vista de contornos se conserva como diagnóstico geométrico.
-
-![Doblete inclinado](img/placed_doublet.png)
-
-Figura de la etapa de cromática y sensibilidad: inclinación de 0.5°, coordenadas
-reales y trazado sobre superficies colocadas en marcos locales.
-Se reproduce con `python -m examples.aberrations.chromatic_sensitivity`.
+La implementación VTK añadida inicialmente se retiró. No se modifica la
+prescripción para generar esta vista.
 
 ## 8. Seidel, focos parabásales y teoría
 
