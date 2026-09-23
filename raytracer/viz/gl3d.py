@@ -20,6 +20,7 @@ from vispy.color import Color
 
 from ..surfaces.profile import AsphereProfile
 from .plots import DEFAULT_MATERIAL_COLORS
+from .solid_geometry import glass_blue
 
 TWO_PI = 2.0 * np.pi
 MIRROR_COLOR = (0.62, 0.66, 0.72, 1.0)
@@ -501,7 +502,7 @@ class Viewer3D:
             semi = max(ri.semidiameter or 50.0, rj.semidiameter or 50.0)
             self.add_lens(ri.profile, rj.profile, semi,
                           z_front=float(system.vertices[i]), z_back=float(system.vertices[j]),
-                          color=_material_color(material), section=section)
+                          color=(*glass_blue(float(system.n_after[i])), 1.0), section=section)
             covered.update((i, j))
         for i in system.mirror_indices:
             row = system.rows[i]

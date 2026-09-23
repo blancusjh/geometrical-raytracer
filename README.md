@@ -187,3 +187,13 @@ ampliación del catálogo con datos primarios; convergencia de muestreo con viñ
 sensibilidad con correlaciones y una interfaz integrada de edición y diagnóstico.
 Los ejemplos y notebooks históricos se conservan como material de trabajo:
 sus cifras anteriores no se consideran revalidadas por estas diez pruebas.
+
+### Galería de vistas geométricas
+
+La [galería reproducible](docs/feature_gallery.md) reúne trazado, huellas, manchas, abanicos, barridos de foco, energía geométrica encerrada, distorsión, viñeteo, aperturas y espejos, junto con los informes de Seidel, cromática y tolerancias. Distingue resultados actuales, ejemplos históricos y capacidades pendientes.
+
+### Lentes sólidas transparentes
+
+El [visor 3D sólido](docs/solid_viewer.md) muestra volúmenes cerrados, transparencia por capas y azules según el índice de refracción. Incluye exportación PNG y cámara interactiva nativa; instalación opcional con `pip install '.[solid]'`.
+
+![Triplete con lentes sólidas](docs/img/cooke_solid_detail.png)

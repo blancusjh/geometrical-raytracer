@@ -282,9 +282,23 @@ def test_06_three_dimensional_covariance_and_folded_mirror():
     system = singlet()
     origins, directions = collimated_bundle(np.linspace(-5, 5, 15), start_z=-100)
     original = SequentialTracer(system).trace_batch(origins, directions, keep_paths=True)
+    from raytracer.viz.solid_geometry import lens_meshes
+
+    mesh = lens_meshes(system, radial_samples=8, angular_samples=32)[0]
+    edges = np.concatenate(
+        [mesh.triangles[:, [0, 1]], mesh.triangles[:, [1, 2]], mesh.triangles[:, [2, 0]]]
+    )
+    _, counts = np.unique(np.sort(edges, axis=1), axis=0, return_counts=True)
+    assert np.all(counts == 2)  # A closed body has exactly two faces at every edge.
+    triangles = mesh.vertices[mesh.triangles]
+    area_vectors = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+    assert np.all(np.linalg.norm(area_vectors, axis=1) > 0)
+    assert np.sum(np.einsum("ij,ij->i", triangles[:, 0], area_vectors)) > 0
     moved = copy.deepcopy(system)
     transform = RigidTransform.from_euler_xyz([10, -20, 30], [12, 23, 34])
     moved.frame = transform
+    transformed_mesh = lens_meshes(moved, radial_samples=8, angular_samples=32)[0]
+    assert_allclose(transformed_mesh.vertices, transform.to_world(mesh.vertices), atol=2e-13)
     result = SequentialTracer(moved).trace_batch(
         transform.to_world(origins), transform.direction_to_world(directions), keep_paths=True
     )

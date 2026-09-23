@@ -18,6 +18,7 @@ dependencies = [
 # vispy alone has no windowed backend: without one of these, it silently
 # falls back to the offscreen "_egl" backend and .run() never shows a window.
 gl = ["vispy>=0.14", "pyside6>=6.5"]
+solid = ["vtk>=9.4,<10"]
 dev = ["pytest>=8", "ruff>=0.11"]
 reference = ["rayoptics==0.9.8", "opticalglass==1.2.0"]
 
