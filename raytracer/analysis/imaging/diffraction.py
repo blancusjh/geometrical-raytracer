@@ -271,7 +271,9 @@ def contrast_curve(
     sources = _source_samples(sigma, source_points)
     half_pitches = np.asarray(half_pitches_nm, dtype=float)
     if half_pitches.ndim != 1 or not np.all(np.isfinite(half_pitches) & (half_pitches > 0)):
-        raise ValueError("half_pitches_nm must be a one-dimensional array of finite positive values")
+        raise ValueError(
+            "half_pitches_nm must be a one-dimensional array of finite positive values"
+        )
     pixel_mm = pixel_nm * 1e-6
     frequency = np.fft.fftfreq(size, pixel_mm)
     x_nm = (np.arange(size) - size // 2) * pixel_nm

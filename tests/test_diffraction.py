@@ -105,9 +105,7 @@ def test_source_sampling_and_small_grid_contrast():
     grid = pupil_function(None, na=0.5, wavelength_mm=0.0005, size=64, pixel_mm=0.0002)
     constant = np.ones((64, 64))
     assert_allclose(abbe_image(grid, constant, source_points=1, normalize=False), 1)
-    settings = dict(
-        na=0.5, wavelength_mm=0.0005, size=64, pixel_nm=200, source_points=1
-    )
+    settings = dict(na=0.5, wavelength_mm=0.0005, size=64, pixel_nm=200, source_points=1)
     on_axis = contrast_curve(None, [800], sigma=0, **settings)
     assert_allclose(contrast_curve(None, [800], sigma=0.7, **settings), on_axis)
     # A periodic grating provides the same 1-D contrast as its repeated 2-D
