@@ -20,7 +20,6 @@ implicit description is simply ``f_Sigma(x, y) = x - sag(|y|)``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -80,10 +79,14 @@ class AsphereProfile:
             slope = np.zeros_like(h)
         else:
             k = self.conic
-            q2 = np.maximum(1.0 - (1.0 + k) * c * c * h * h, 1e-30)
-            q = np.sqrt(q2)
-            base = c * h * h / (1.0 + q)
-            slope = c * h / q
+            q2 = 1.0 - (1.0 + k) * c * c * h * h
+            # Roundoff at the equator is admissible; a negative domain is not.
+            tolerance = 16 * np.finfo(float).eps
+            q2 = np.where(q2 >= -tolerance, np.maximum(q2, 0.0), np.nan)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                q = np.sqrt(q2)
+                base = c * h * h / (1.0 + q)
+                slope = c * h / q
         poly = np.zeros_like(h)
         dpoly = np.zeros_like(h)
         # coefficients[j] multiplies h^(2j+4)

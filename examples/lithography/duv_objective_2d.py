@@ -34,13 +34,19 @@ from vispy.color import Color
 from raytracer import OpenGLViewer, RenderConfig
 from raytracer.design import OpticalSystem
 from raytracer.propagation import (
-    FieldPoint, SequentialTracer, chief_ray_slope, solve_object_plane, trace_from_object,
+    FieldPoint,
+    SequentialTracer,
+    chief_ray_slope,
+    solve_object_plane,
+    trace_from_object,
 )
 from raytracer.viz.plots import DEFAULT_MATERIAL_COLORS
 from raytracer.viz.sag_drawing import (
     lens_fill_mesh,
     lens_outline,
     sample_profile_curve,
+)
+from raytracer.viz.sag_drawing import (
     surface_semidiameter as _semi,
 )
 
@@ -48,8 +54,8 @@ GLASS_ALPHA = 0.30
 
 FIELDS = [56.0, 62.0, 67.0]
 FIELD_RGB = [(0.35, 0.70, 1.0), (0.40, 1.0, 0.55), (1.0, 0.60, 0.30)]
-NA_OBJECT = 1.2 / 4.0            # object-space sine = 0.3
-FAN_HALF_SLOPE = 0.305          # ~asin(0.3) marginal slope -> full aperture
+NA_OBJECT = 1.2 / 4.0  # object-space sine = 0.3
+FAN_HALF_SLOPE = 0.305  # ~asin(0.3) marginal slope -> full aperture
 RAYS_PER_FIELD = 121
 
 
@@ -69,7 +75,8 @@ def build_viewer():
     print("[duv_objective_2d] Loading the prescription and tracing 363 exact rays...", flush=True)
     csv = ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
-    tracer = SequentialTracer(system)
+    # The tabulated stop uses a signed transfer to an auxiliary plane.
+    tracer = SequentialTracer(system, allow_virtual_segments=True)
     solve_object_plane(tracer)
 
     verts = np.asarray(system.vertices, dtype=float)
@@ -79,12 +86,16 @@ def build_viewer():
     pad = 0.03 * (z_hi - z_lo)
 
     viewer = OpenGLViewer(
-        x_lims=(z_lo - pad, z_hi + pad), y_lims=(-y_max, y_max),
+        x_lims=(z_lo - pad, z_hi + pad),
+        y_lims=(-y_max, y_max),
         size=(1600, 640),
         title="US7557996 DUV objective (2D) — raytracer",
         render_config=RenderConfig(
-            ray_width=0.7, sigma_factor=0.42, min_pixels=1.0,
-            use_solid_rays=False, background="black",
+            ray_width=0.7,
+            sigma_factor=0.42,
+            min_pixels=1.0,
+            use_solid_rays=False,
+            background="black",
         ),
     )
 
@@ -92,7 +103,7 @@ def build_viewer():
     landings = []
     for field_y, rgb in zip(FIELDS, FIELD_RGB):
         sy0 = chief_ray_slope(tracer, FieldPoint(y=field_y))
-        segs, cols = [], []
+        segs = []
         for delta in np.linspace(-FAN_HALF_SLOPE, FAN_HALF_SLOPE, RAYS_PER_FIELD):
             res = trace_from_object(tracer, (0.0, field_y), (0.0, sy0 + delta), keep_path=True)
             if res.path is None:
@@ -118,8 +129,9 @@ def build_viewer():
     for i, j, material in system.solid_elements():
         edge = DEFAULT_MATERIAL_COLORS.get(material, ("#c9c9c9", "#888888"))[1]
         er, eg, eb = Color(edge).rgb
-        viewer.draw_polyline(lens_outline(system, i, j),
-                             color=(float(er), float(eg), float(eb), 1.0), width=1.4)
+        viewer.draw_polyline(
+            lens_outline(system, i, j), color=(float(er), float(eg), float(eb), 1.0), width=1.4
+        )
     for i in system.mirror_indices:
         viewer.draw_polyline(surface_curve(system, i), color=(1.0, 0.82, 0.35, 1.0), width=3.4)
 
@@ -145,8 +157,7 @@ def main():
         mpimg.imsave(out, viewer.snapshot())
         print(f"wrote {out}")
         return
-    print("[duv_objective_2d] Opening window — drag to pan, wheel to zoom.",
-          flush=True)
+    print("[duv_objective_2d] Opening window — drag to pan, wheel to zoom.", flush=True)
     viewer.run()
 
 

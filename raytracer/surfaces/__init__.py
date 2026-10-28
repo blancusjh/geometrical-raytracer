@@ -9,6 +9,7 @@ Depends on :mod:`raytracer.math` alone; a surface knows nothing about the
 rays that hit it.
 """
 
+from .apertures import CircularAperture, RectangularAperture
 from .cartesian_oval import (
     CartesianOvalProfile,
     CartesianOvalSurface,
@@ -32,6 +33,8 @@ from .segment import LineSegment
 from .surface import Intersection, Surface
 
 __all__ = [
+    "CircularAperture",
+    "RectangularAperture",
     "Surface",
     "Intersection",
     "AsphereProfile",

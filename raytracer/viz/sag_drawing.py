@@ -27,6 +27,7 @@ def sample_profile_curve(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Open meridional ``(z, h)`` curve of ``system.rows[index]``, ``h`` in ``[-semi, semi]``."""
 
+    system.require_axial_coordinates()
     row = system.rows[index]
     semi = surface_semidiameter(row) if semidiameter is None else semidiameter
     h = np.linspace(-semi, semi, samples)

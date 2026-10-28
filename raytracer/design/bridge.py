@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..surfaces.apertures import CircularAperture
 from ..surfaces.profile import ProfileSurface
+from ..surfaces.stop import ApertureStopSurface
 from ..surfaces.surface import Surface
 from .rows import SurfaceKind
 
@@ -20,9 +22,9 @@ def to_branching_surfaces(system) -> list[Surface]:
 
     The sequential z axis maps to 2-D x. Every refractive row becomes a
     ``ProfileSurface`` carrying its before/after indices; mirrors become
-    reflective faces; stops are skipped (pure markers). Double-passed
+    reflective faces; stops become absorbing masks outside the clear opening. Double-passed
     surfaces on folded return paths (duplicated rows with matching vertex
-    and radius) collapse to a single physical face.
+    profile, aperture and unordered index pair) collapse to a single physical face.
 
     Caveat: this bridge is exact for dioptric (unfolded) systems. In a
     folded catadioptric, the branching propagation will let the forward
@@ -32,12 +34,37 @@ def to_branching_surfaces(system) -> list[Surface]:
     analyse folded systems with the sequential propagation instead.
     """
 
+    if (
+        not system.is_centered
+        or np.any(system.frame.origin)
+        or not np.allclose(system.frame.rotation, np.eye(3))
+    ):
+        raise ValueError("the 2-D bridge requires an untransformed centered system")
     surfaces: list[Surface] = []
-    seen: set[tuple[float, float]] = set()
+    seen = set()
     for i, row in enumerate(system.rows):
         if row.kind is SurfaceKind.STOP:
+            aperture = row.clear_aperture
+            if not isinstance(aperture, CircularAperture):
+                raise ValueError("the 2-D bridge requires circular stop apertures")
+            surfaces.append(
+                ApertureStopSurface(
+                    [system.vertices[i], 0.0],
+                    aperture.radius,
+                    inner_radius=aperture.inner_radius,
+                    surface_id=f"stop{i + 1}",
+                )
+            )
             continue
-        signature = (round(float(system.vertices[i]), 9), round(row.radius, 9))
+        if row.aperture is not None:
+            raise ValueError("independent apertures on interfaces require sequential tracing")
+        signature = (
+            float(system.vertices[i]),
+            row.profile,
+            row.kind,
+            row.semidiameter,
+            tuple(sorted((system.n_before[i], system.n_after[i]))),
+        )
         if signature in seen:
             continue  # double-passed surface: keep the first physical copy
         seen.add(signature)

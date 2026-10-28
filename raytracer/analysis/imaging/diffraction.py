@@ -1,7 +1,12 @@
 """Scalar Fourier imaging: pupil function, PSF, and Abbe partially-coherent images.
 
 The pupil grid maps FFT spatial frequencies to normalized pupil coordinates
-``u = f_x * lambda / NA``. Wavefronts can come from a fitted
+``u = f_x * lambda / NA``. Image columns increase with x and rows with y;
+image positions are ``(index - N // 2) * pixel_mm``. The coherent image field
+uses the inverse Fourier transform of ``P = exp(+i 2 pi W / lambda)``:
+a positive wavefront slope displaces the image towards negative coordinates,
+consistent with ``grad W = -NA * transverse_aberration``.
+Wavefronts can come from a fitted
 :class:`~raytracer.analysis.aberrations.zernike.ZernikeExpansion` (mm) or interpolated
 :class:`~raytracer.analysis.aberrations.wavefront.WavefrontSamples` (waves).
 """
@@ -31,6 +36,46 @@ class PupilGrid:
         return self.pupil.shape[0]
 
 
+def _positive_finite(name: str, value: float) -> None:
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be finite and positive")
+
+
+def _sample_count(name: str, value: int, *, minimum: int = 1) -> None:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{name} must be an integer >= {minimum}")
+    if value < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}")
+
+
+def _source_samples(sigma: float, source_points: int) -> list[tuple[float, float]]:
+    if not np.isfinite(sigma) or sigma < 0:
+        raise ValueError("sigma must be finite and nonnegative")
+    _sample_count("source_points", source_points)
+    # A one-point quadrature represents on-axis coherent illumination.
+    axis = np.array([0.0]) if source_points == 1 else np.linspace(-sigma, sigma, source_points)
+    sources = [(sx, sy) for sx in axis for sy in axis if sx * sx + sy * sy <= sigma * sigma]
+    if not sources:
+        raise ValueError("source_points does not sample the source disk; use 1 or at least 3")
+    return sources
+
+
+def _pupil_values(wavefront, u, v, inside, *, scale: float) -> np.ndarray:
+    pupil = np.zeros(u.shape, dtype=complex)
+    if not inside.any():
+        return pupil
+    if wavefront is None:
+        pupil[inside] = 1.0
+    else:
+        # Wavefronts need only be defined on the transmitting aperture.
+        values = np.asarray(wavefront(u[inside], v[inside]), dtype=float)
+        phase = values * scale
+        if not np.all(np.isfinite(phase)):
+            raise ValueError("Wavefront must be finite inside the pupil aperture")
+        pupil[inside] = np.exp(1j * phase)
+    return pupil
+
+
 def pupil_function(
     wavefront: Callable[[np.ndarray, np.ndarray], np.ndarray] | None,
     *,
@@ -43,21 +88,25 @@ def pupil_function(
     """Build the complex pupil ``P = 1_disk * exp(i 2 pi W / lambda)``.
 
     *wavefront* is any callable ``W(u, v)`` (``None`` for a perfect pupil);
-    pass ``wavefront_unit="waves"`` when W is already in waves.
+    pass ``wavefront_unit="waves"`` when W is already in waves. The callable
+    receives only coordinates inside the unit disk and may return a scalar.
+    Values within the aperture must be finite; values outside are never used.
     """
 
+    _sample_count("size", size, minimum=2)
+    _positive_finite("na", na)
+    _positive_finite("wavelength_mm", wavelength_mm)
+    _positive_finite("pixel_mm", pixel_mm)
+    if wavefront_unit not in ("mm", "waves"):
+        raise ValueError("wavefront_unit must be 'mm' or 'waves'")
     frequency = np.fft.fftfreq(size, pixel_mm)
     fx, fy = np.meshgrid(frequency, frequency)
     u = fx * wavelength_mm / na
     v = fy * wavelength_mm / na
     rho2 = u * u + v * v
     disk = rho2 <= 1.0
-    if wavefront is None:
-        phase = np.zeros_like(u)
-    else:
-        w = np.asarray(wavefront(u, v), dtype=float)
-        phase = 2.0 * np.pi * (w if wavefront_unit == "waves" else w / wavelength_mm)
-    pupil = disk * np.exp(1j * phase)
+    scale = 2.0 * np.pi * (1.0 if wavefront_unit == "waves" else 1.0 / wavelength_mm)
+    pupil = _pupil_values(wavefront, u, v, disk, scale=scale)
     return PupilGrid(
         pupil=pupil,
         frequency=frequency,
@@ -70,9 +119,13 @@ def pupil_function(
 
 
 def scalar_psf(grid: PupilGrid, *, normalize: bool = True) -> np.ndarray:
-    """Intensity PSF (centred) of the pupil function."""
+    """Intensity PSF, centred on the same x/y axes as an Abbe image.
 
-    amplitude = np.fft.fftshift(np.fft.fft2(grid.pupil))
+    Without normalization the intensity is the squared modulus of the discrete
+    coherent pupil sum (no pixel-area or radiometric scaling).
+    """
+
+    amplitude = np.fft.fftshift(np.fft.ifft2(grid.pupil, norm="forward"))
     psf = np.abs(amplitude) ** 2
     if normalize and psf.max() > 0:
         psf /= psf.max()
@@ -164,13 +217,20 @@ def abbe_image(
     """Partially coherent Abbe image of *mask* through the pupil.
 
     A conventional disc source of coherence factor *sigma* is integrated by
-    shifting the pupil in the frequency domain (integer-pixel roll).
+    shifting the pupil in the frequency domain (integer-pixel roll). A single
+    source point is on-axis; two points per axis cannot sample a nonzero disk.
+    Unnormalized intensity is the sum over source samples. Illumination samples
+    have equal weights; frequency shifts are quantized to the pupil grid.
     """
 
-    data = mask.data if isinstance(mask, BinaryMask) else np.asarray(mask, dtype=float)
+    sources = _source_samples(sigma, source_points)
+    data = np.asarray(mask.data if isinstance(mask, BinaryMask) else mask, dtype=float)
+    if not np.all(np.isfinite(data)):
+        raise ValueError("Mask values must be finite")
     if data.shape != grid.pupil.shape:
         raise ValueError("Mask and pupil grids must have the same shape")
     if isinstance(mask, BinaryMask):
+        _positive_finite("mask.pixel_nm", mask.pixel_nm)
         expected_pixel_nm = grid.pixel_mm * 1e6
         if abs(mask.pixel_nm - expected_pixel_nm) > 1e-9:
             raise ValueError(
@@ -181,14 +241,11 @@ def abbe_image(
     spectrum = np.fft.fft2(data)
     aerial = np.zeros_like(data)
     df = grid.frequency[1] - grid.frequency[0]
-    for sx in np.linspace(-sigma, sigma, source_points):
-        for sy in np.linspace(-sigma, sigma, source_points):
-            if sx * sx + sy * sy > sigma * sigma:
-                continue
-            shift_x = int(round(sx * grid.na / grid.wavelength_mm / df))
-            shift_y = int(round(sy * grid.na / grid.wavelength_mm / df))
-            shifted = np.roll(np.roll(grid.pupil, shift_y, axis=0), shift_x, axis=1)
-            aerial += np.abs(np.fft.ifft2(spectrum * shifted)) ** 2
+    for sx, sy in sources:
+        shift_x = int(round(sx * grid.na / grid.wavelength_mm / df))
+        shift_y = int(round(sy * grid.na / grid.wavelength_mm / df))
+        shifted = np.roll(np.roll(grid.pupil, shift_y, axis=0), shift_x, axis=1)
+        aerial += np.abs(np.fft.ifft2(spectrum * shifted)) ** 2
     if normalize and aerial.max() > 0:
         aerial /= aerial.max()
     return aerial
@@ -207,29 +264,35 @@ def contrast_curve(
 ) -> np.ndarray:
     """Image contrast of 1-D equal line/space gratings vs half-pitch (nm)."""
 
+    _sample_count("size", size, minimum=2)
+    _positive_finite("na", na)
+    _positive_finite("wavelength_mm", wavelength_mm)
+    _positive_finite("pixel_nm", pixel_nm)
+    sources = _source_samples(sigma, source_points)
+    half_pitches = np.asarray(half_pitches_nm, dtype=float)
+    if half_pitches.ndim != 1 or not np.all(np.isfinite(half_pitches) & (half_pitches > 0)):
+        raise ValueError(
+            "half_pitches_nm must be a one-dimensional array of finite positive values"
+        )
     pixel_mm = pixel_nm * 1e-6
     frequency = np.fft.fftfreq(size, pixel_mm)
     x_nm = (np.arange(size) - size // 2) * pixel_nm
-    sources = np.linspace(-sigma, sigma, source_points)
     contrasts = []
-    for hp in np.asarray(half_pitches_nm, dtype=float):
+    for hp in half_pitches:
         grating = (np.mod(x_nm, 2 * hp) < hp).astype(float)
         spectrum = np.fft.fft(grating)
         intensity = np.zeros(size)
-        for sx in sources:
-            for sy in sources:
-                if sx * sx + sy * sy > sigma * sigma:
-                    continue
-                u = frequency * wavelength_mm / na + sx
-                v = np.full_like(u, sy)
-                inside = (u * u + v * v) <= 1.0
-                phase = np.zeros_like(u)
-                if wavefront_waves is not None and inside.any():
-                    phase[inside] = np.asarray(wavefront_waves(u[inside], v[inside]))
-                pupil_line = inside * np.exp(1j * 2 * np.pi * phase)
-                intensity += np.abs(np.fft.ifft(spectrum * pupil_line)) ** 2
-        window = slice(size // 2 - 800, size // 2 + 800)
+        for sx, sy in sources:
+            u = frequency * wavelength_mm / na + sx
+            v = np.full_like(u, sy)
+            inside = (u * u + v * v) <= 1.0
+            pupil_line = _pupil_values(wavefront_waves, u, v, inside, scale=2 * np.pi)
+            intensity += np.abs(np.fft.ifft(spectrum * pupil_line)) ** 2
+        half_window = min(800, size // 2)
+        window = slice(size // 2 - half_window, size // 2 + half_window + size % 2)
         peak, valley = intensity[window].max(), intensity[window].min()
+        if peak + valley == 0:
+            raise ValueError("No transmitted intensity; contrast is undefined")
         contrasts.append((peak - valley) / (peak + valley))
     return np.asarray(contrasts)
 

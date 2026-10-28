@@ -13,8 +13,9 @@ subpackages' own ``__all__`` rather than hand-listed, so the two cannot
 drift apart.
 """
 
-from . import aberrations, imaging
+from . import aberrations, imaging, tolerancing
 from .aberrations import *  # noqa: F401,F403
 from .imaging import *  # noqa: F401,F403
+from .tolerancing import *  # noqa: F401,F403
 
-__all__ = [*aberrations.__all__, *imaging.__all__]
+__all__ = [*aberrations.__all__, *imaging.__all__, *tolerancing.__all__]

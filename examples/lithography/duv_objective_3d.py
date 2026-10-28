@@ -51,8 +51,7 @@ def _bundle(viewer, tracer, label, sampling, **kw):
     if n_est > 200_000:
         print("(huge sampling, this may take minutes)", end=" ", flush=True)
     t0 = time.time()
-    viewer.add_field_bundles(tracer, fields=FIELDS, na_object_sine=NA_OBJECT,
-                             **sampling, **kw)
+    viewer.add_field_bundles(tracer, fields=FIELDS, na_object_sine=NA_OBJECT, **sampling, **kw)
     print(f"{time.time() - t0:.1f}s", flush=True)
 
 
@@ -60,7 +59,8 @@ def main() -> None:
     print("[duv_objective_3d] Loading the US7557996 prescription (48 surfaces)...", flush=True)
     csv = ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
     system = OpticalSystem.from_prescription(csv)
-    tracer = SequentialTracer(system)
+    # The tabulated stop uses a signed transfer to an auxiliary plane.
+    tracer = SequentialTracer(system, allow_virtual_segments=True)
     solve_object_plane(tracer)
 
     viewer = Viewer3D(title="US7557996 — 3D   [m] lines/beam/spectrum  [a] axes  [w] wireframe")
@@ -68,10 +68,11 @@ def main() -> None:
     viewer.add_axes()
     _bundle(viewer, tracer, "lines mode", LINES_SAMPLING)
     _bundle(viewer, tracer, "beam mode (additive, violet)", BEAM_SAMPLING, mode="beam")
-    _bundle(viewer, tracer, "spectrum mode (colorimetric)", BEAM_SAMPLING,
-            mode="spectrum")
-    print("[duv_objective_3d] Opening window — [m] cycles ray mode, [w] wireframe,"
-          " drag to orbit.", flush=True)
+    _bundle(viewer, tracer, "spectrum mode (colorimetric)", BEAM_SAMPLING, mode="spectrum")
+    print(
+        "[duv_objective_3d] Opening window — [m] cycles ray mode, [w] wireframe, drag to orbit.",
+        flush=True,
+    )
     if "--beam" in sys.argv:
         viewer.set_ray_mode("beam")
     elif "--spectrum" in sys.argv:
