@@ -1,22 +1,24 @@
 """Newtonian telescope: parabolic primary + flat 45° secondary fold mirror.
 
-A parabola is exactly stigmatic for the on-axis collimated-to-focus
+A paraboloid is exactly stigmatic for the on-axis collimated-to-focus
 conjugate — the primary mirror here reuses that same property. The flat
 secondary, tilted 45°, intercepts the converging cone before it reaches that
-focus and folds it 90° out through the side of the tube, onto a small
-observation screen at the eyepiece's focal plane. The incoming beam is
-annular, as in a real Newtonian: the secondary's silhouette (the central
-obstruction) carries no light.
+focus and folds it 90° out through the side of the tube, onto a small sensor
+at the eyepiece's focal plane. The incoming beam is annular, as in a real
+Newtonian: the secondary's silhouette (the central obstruction) carries no
+light.
 
-Built on the 2-D branching propagation, because the sequential propagation is
-on-axis only and cannot represent a tilted fold mirror. The primary is drawn
-exactly over its used clear aperture (the same ``semidiameter`` that clips
-the rays), so the drawn surface and the ray reflection points coincide.
+The mirrors are placed elements traced non-sequentially: the light finds the
+tilted fold on its own, no sequential path is stated. The figure is the
+meridional section, traced with meridional (``fan="y"``) strips of the
+annulus; the primary is drawn exactly over its clear aperture (the same
+``aperture`` that clips the rays), so the drawn surface and the ray
+reflection points coincide.
 
 The folded focus is checked quantitatively: an exact 90° flat fold preserves
 the remaining path length, so the new focus must sit at
-``(secondary_x, secondary_x)`` given the primary's focus at the origin. The
-RMS distance from every folded ray's line to that point
+``(y, z) = (secondary_z, secondary_z)`` given the primary's focus at the
+origin. The RMS distance from every folded ray's line to that point
 (:func:`raytracer.analysis.point_line_distances`) is printed and reads ~0.
 
 Usage:
@@ -35,102 +37,83 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer import BranchingTracer, ParabolaSurface, ParallelSource, RenderConfig, TraceConfig
+from raytracer import OpticalSystem
 from raytracer.analysis import point_line_distances, rays_by_generation
-from raytracer.optics import Mirror, Screen
-from raytracer.viz import Scene, show
-from raytracer.viz.scene import MarkerItem, SurfaceItem
+from raytracer.elements import Mirror, Sensor
+from raytracer.geometry.apertures import Rectangle
+from raytracer.geometry.surfaces import Paraboloid, Plane
+from raytracer.sources import CollimatedSource
+from raytracer.tracing import NonSequentialTracer
+from raytracer.viz import Drawing, MarkerItem, SurfaceItem, show
+from raytracer.viz.gl.viewer import RenderConfig
 
-F_PRIMARY = 20.0
-SEMI_LATUS = 2.0 * F_PRIMARY  # polar parabola: r = p / (1 + cos theta), focus at origin
+F_PRIMARY = 20.0  # the primary's vertex sits at z = F_PRIMARY, its focus at the origin
 PRIMARY_SEMI = 4.5
-SECONDARY_X = 5.0  # fold distance in front of the primary's focus
+SECONDARY_Z = 5.0  # fold distance in front of the primary's focus
 # The 45-degree tilt makes the intercepted cone asymmetric (the far-side
 # marginal ray needs the most mirror — why real Newtonian secondaries are
 # elliptical): the lower marginal ray here lands 2.0 from the vertex.
 SECONDARY_SEMI = 2.1
 ANNULUS = (1.7, 4.4)  # radial extent of the incoming beam (clears the obstruction)
+FOLDED_FOCUS = np.array([0.0, SECONDARY_Z, SECONDARY_Z])
 
 BEAM_COLOR = (1.0, 1.0, 1.0, 0.9)
+MIRROR_COLORS = {"primary": (1.0, 1.0, 1.0, 1.0), "secondary": (1.0, 0.82, 0.35, 1.0)}
 
 
-def primary_arc(samples: int = 400) -> np.ndarray:
-    """The primary's meridional curve over exactly its clear aperture.
-
-    For the polar parabola, height y = p*tan(theta/2), so the aperture edge
-    |y| = PRIMARY_SEMI maps to theta = 2*atan(PRIMARY_SEMI / p).
-    """
-
-    theta_max = 2.0 * np.arctan(PRIMARY_SEMI / SEMI_LATUS)
-    parabola = ParabolaSurface(p=SEMI_LATUS, focus=np.array([0.0, 0.0]))
-    return parabola.as_points(samples=samples, theta_span=(-theta_max, theta_max))
+def build_telescope() -> OpticalSystem:
+    return OpticalSystem([
+        Mirror("primary", surface=Paraboloid(f=-F_PRIMARY), aperture=PRIMARY_SEMI, z=F_PRIMARY),
+        # Light returning along -z leaves along +y: the normal bisects the two directions.
+        Mirror("secondary", surface=Plane(), aperture=SECONDARY_SEMI, z=SECONDARY_Z, normal=(0.0, 1.0, 1.0)),
+        Sensor("focal_plane", aperture=Rectangle(2.8, 2.8), pos=FOLDED_FOCUS, normal=(0.0, 1.0, 0.0)),
+    ])
 
 
-def build_scene(samples_per_strip: int = 10):
-    primary = ParabolaSurface(
-        p=SEMI_LATUS, focus=np.array([0.0, 0.0]), surface_id="primary",
-        semidiameter=PRIMARY_SEMI,
-    )
-    secondary = Mirror.from_radius(
-        radius=0.0, semidiameter=SECONDARY_SEMI, vertex=(SECONDARY_X, 0.0),
-        angle=np.deg2rad(45.0), name="secondary",
-    ).face
-    folded_focus = np.array([SECONDARY_X, SECONDARY_X])
-    screen = Screen(
-        p0=folded_focus + np.array([-1.4, 0.0]), p1=folded_focus + np.array([1.4, 0.0]),
-        surface_id="focal_screen",
-    )
+def trace(rays_per_strip: int = 10):
+    """The annulus in the meridional plane: one strip above the obstruction, one below."""
 
     inner, outer = ANNULUS
-    mid, width = 0.5 * (inner + outer), outer - inner
     strips = [
-        ParallelSource(origin=np.array([-10.0, sign * mid]), direction=np.array([1.0, 0.0]),
-                         width=width, samples=samples_per_strip)
+        CollimatedSource((0.0, sign * 0.5 * (inner + outer), -10.0), beam_radius=0.5 * (outer - inner),
+                         rays=rays_per_strip, fan="y")
         for sign in (+1.0, -1.0)
     ]
-
-    tracer = BranchingTracer(
-        [primary, secondary, screen],
-        TraceConfig(max_generations=4, allow_reflection=True, fresnel_split=False),
-    )
-    tree = tracer.trace(strips)
-
-    scene = Scene(x_lims=(-11.0, 23.0), y_lims=(-6.5, 8.5))
-    scene.add(SurfaceItem(polyline=primary_arc(), color=(1.0, 1.0, 1.0, 1.0), width=2.5))
-    scene.add(SurfaceItem(polyline=secondary.polyline(), color=(1.0, 0.82, 0.35, 1.0), width=3.0))
-    scene.add_screen(screen)
-    scene.add_tree(tree, default_color=BEAM_COLOR)
-    scene.add(MarkerItem(points=folded_focus[None, :], color=(0.3, 1.0, 0.4, 1.0), size=7.0))
-    return scene, tree, folded_focus, 2 * samples_per_strip
+    return NonSequentialTracer(build_telescope(), max_interactions=4, split=False).trace(strips)
 
 
-def main() -> None:
-    scene, tree, folded_focus, n_rays = build_scene()
+def build_drawing(tree) -> Drawing:
+    drawing = Drawing(x_lims=(-11.0, 23.0), y_lims=(-6.5, 8.5)).add_system(build_telescope())
+    for item in drawing.items:
+        if isinstance(item, SurfaceItem):  # light mirrors on the black background
+            item.color = MIRROR_COLORS[item.name]
+    drawing.add_tree(tree, default_color=BEAM_COLOR, intensities=1.0)
+    return drawing.add(MarkerItem(np.array([[FOLDED_FOCUS[2], FOLDED_FOCUS[1]]]), color=(0.3, 1.0, 0.4, 1.0), size=7.0))
 
-    origins, directions = rays_by_generation(tree, generation=3)
-    distances = point_line_distances(origins, directions, folded_focus)
+
+def main(rays_per_strip: int = 10) -> None:
+    tree = trace(rays_per_strip)
+    origins, directions = rays_by_generation(tree, generation=3)  # source -> primary -> secondary -> focus
+    distances = point_line_distances(origins, directions, FOLDED_FOCUS)
     rms = float(np.sqrt(np.mean(distances**2))) if len(distances) else float("nan")
 
     print("Newtonian telescope")
-    print(f"  primary: parabola, f={F_PRIMARY}, clear aperture semidiameter={PRIMARY_SEMI}")
-    print(f"  secondary: flat, 45 deg fold at x={SECONDARY_X}, semidiameter={SECONDARY_SEMI}")
-    print(f"  annular beam: {n_rays} rays, radii {ANNULUS[0]}-{ANNULUS[1]} (central obstruction dark)")
-    print(f"  folded focus (predicted): ({folded_focus[0]:.4f}, {folded_focus[1]:.4f})")
-    print(f"  rays reaching the fold: {len(origins)}/{n_rays}")
+    print(f"  primary: paraboloid, f={F_PRIMARY}, clear aperture semidiameter={PRIMARY_SEMI}")
+    print(f"  secondary: flat, 45 deg fold at z={SECONDARY_Z}, semidiameter={SECONDARY_SEMI}")
+    print(f"  annular beam: {2 * rays_per_strip} rays, radii {ANNULUS[0]}-{ANNULUS[1]} (central obstruction dark)")
+    print(f"  folded focus (predicted): (y, z) = ({FOLDED_FOCUS[1]:.4f}, {FOLDED_FOCUS[2]:.4f})")
+    print(f"  rays reaching the fold: {len(origins)}/{2 * rays_per_strip}")
     print(f"  RMS distance to the predicted focus: {rms:.4g}  (stigmatic primary + exact 90 deg fold)")
 
-    render_config = RenderConfig(ray_width=0.035, min_pixels=1.0, use_solid_rays=True)
-    save_path = None
-    if "--save" in sys.argv:
-        save_path = Path(sys.argv[sys.argv.index("--save") + 1])
+    save = Path(sys.argv[sys.argv.index("--save") + 1]) if "--save" in sys.argv else None
     backend = show(
-        scene, backend="gl", interactive=save_path is None,
-        size=(1400, 640), bgcolor="black", render_config=render_config,
-        title="Newtonian telescope — raytracer",
+        build_drawing(tree), backend="gl", interactive=save is None,
+        size=(1400, 640), bgcolor="black", title="Newtonian telescope — raytracer",
+        render_config=RenderConfig(ray_width=0.035, min_pixels=1.0, use_solid_rays=True),
     )
-    if save_path is not None:
-        backend.save(save_path)
-        print(f"wrote {save_path}")
+    if save is not None:
+        backend.save(save)
+        print(f"wrote {save}")
 
 
 if __name__ == "__main__":

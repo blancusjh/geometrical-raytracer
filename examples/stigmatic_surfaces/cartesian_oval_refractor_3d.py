@@ -1,9 +1,9 @@
 """3-D Cartesian oval: a stigmatic refracting surface of revolution, in 3-D.
 
 The 3-D counterpart of ``cartesian_oval_refractor_2d.py``: the same GOTS
-closed-form surface (:class:`~raytracer.surfaces.cartesian_oval.
-CartesianOvalProfile`, ``SurfaceRow.cartesian_oval``), here revolved into its
-actual 3-D shape and traversed by a full 3-D pupil bundle traced with the
+closed-form surface (:class:`~raytracer.geometry.surfaces.CartesianSurface`),
+here the front face of a glass body that runs to the image plane, shown in
+its actual 3-D shape and traversed by a full 3-D pupil bundle traced with the
 exact sequential engine — the same viewer as
 ``examples/lithography/duv_objective_3d.py``.
 
@@ -44,11 +44,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from raytracer import OpticalSystem, TableRow
 from raytracer.analysis import stigmatism_report
-from raytracer.optics.materials import AIR, ConstantIndex
-from raytracer.design import OpticalSystem, SurfaceRow
-from raytracer.propagation import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
-from raytracer.viz.gl3d import Viewer3D, spectral_rgb
+from raytracer.geometry.surfaces import CartesianSurface
+from raytracer.materials import ConstantIndex
+from raytracer.tracing import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
+from raytracer.viz.color import spectral_rgb
+from raytracer.viz.gl3d import Viewer3D
 
 N0, Z0 = 1.0, -30.0  # object side: air, 30 mm in front of the vertex
 NI, ZI = 1.7, 10.0  # image side: dense glass, 10 mm behind the vertex
@@ -59,35 +61,29 @@ LINES_SAMPLING = dict(radial=3, azimuth=14)  # sparse: readable individual trace
 BEAM_SAMPLING = dict(radial=40, azimuth=240)
 BEAM_ENERGY = 12.0
 
+OVAL = CartesianSurface(N0, Z0, NI, ZI)
+
 
 def build_system() -> OpticalSystem:
-    glass = ConstantIndex("DENSE_GLASS", NI)
-    row = SurfaceRow.cartesian_oval(
-        n0=N0, z0=Z0, ni=NI, zi=ZI, thickness=ZI, material=glass,
-        semidiameter=SEMIDIAMETER, comment="GOTS Cartesian oval",
-    )
-    return OpticalSystem([row], object_space=AIR, object_z=Z0)
+    """One prescription row: the oval, then glass up to the image plane."""
+
+    return OpticalSystem.from_table([TableRow(OVAL, ZI, ConstantIndex("DENSE_GLASS", NI), SEMIDIAMETER)])
 
 
-def _bundle_paths(tracer: SequentialTracer, sampling: dict) -> tuple[np.ndarray, int]:
-    """Trace an on-axis pupil bundle (surface = its own stop: chief slope 0)."""
+def bundle(tracer: SequentialTracer, sampling: dict):
+    """An on-axis pupil bundle (the surface is its own stop: chief slope 0)."""
 
-    pupil = trace_pupil(
-        tracer, FieldPoint(y=0.0), na_object_sine=NA_OBJECT,
-        sampling=PupilSampling(kind="rings", **sampling),
-        chief_slope=0.0, keep_paths=True,
-    )
-    return pupil.batch.paths[pupil.valid], int(pupil.valid.sum())
+    return trace_pupil(tracer, FieldPoint(y=0.0), na_object_sine=NA_OBJECT,
+                       sampling=PupilSampling(kind="rings", **sampling), chief_slope=0.0, keep_paths=True)
 
 
 def main() -> None:
     system = build_system()
-    tracer = SequentialTracer(system, restart_offset=0.0)
+    tracer = SequentialTracer(system, object_z=Z0, restart_offset=0.0)
 
     print("3-D Cartesian oval refractor: stigmatic imaging")
     print(f"  object: z0={Z0} (air, n={N0}); image: zi={ZI} (glass, n={NI})")
-    print(f"  max usable height for this conjugate pair: "
-          f"{system.rows[0].profile.max_usable_height:.4f} (aperture = {SEMIDIAMETER})")
+    print(f"  max usable height for this conjugate pair: {OVAL.max_radius:.4f} (aperture = {SEMIDIAMETER})")
 
     report = stigmatism_report(
         trace_pupil(tracer, FieldPoint(y=0.0), na_object_sine=NA_OBJECT,
@@ -98,18 +94,15 @@ def main() -> None:
     print(report.summary())
     assert report.is_stigmatic(), "expected a stigmatic conjugate pair"
 
-    viewer = Viewer3D(
-        title="Cartesian oval (stigmatic) — 3D   [m] lines/beam  [a] axes  [w] wireframe"
-    )
+    viewer = Viewer3D(title="Cartesian oval (stigmatic) — 3D   [m] lines/beam  [a] axes  [w] wireframe")
     viewer.add_system(system)
 
-    lines_paths, _ = _bundle_paths(tracer, LINES_SAMPLING)
-    viewer.add_paths(lines_paths, color=(0.45, 0.80, 1.0, 0.55), group="lines")
+    lines = bundle(tracer, LINES_SAMPLING)
+    viewer.add_paths(lines.batch.paths[lines.valid], color=(0.45, 0.80, 1.0, 0.55), group="lines")
 
-    beam_paths, n_beam = _bundle_paths(tracer, BEAM_SAMPLING)
-    rgb = spectral_rgb(WAVELENGTH_NM) * (BEAM_ENERGY / max(n_beam, 1))
-    viewer.add_paths(beam_paths, color=(*rgb.tolist(), 1.0), width=1.0,
-                     group="beam", additive=True)
+    beam = bundle(tracer, BEAM_SAMPLING)
+    rgb = spectral_rgb(WAVELENGTH_NM) * (BEAM_ENERGY / max(int(beam.valid.sum()), 1))
+    viewer.add_paths(beam.batch.paths[beam.valid], color=(*rgb.tolist(), 1.0), width=1.0, group="beam", additive=True)
 
     viewer.add_marker([0.0, 0.0, ZI])  # design image point (pixel-sized at any zoom)
     viewer.add_axes()

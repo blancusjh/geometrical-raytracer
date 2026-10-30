@@ -6,10 +6,11 @@ giving an upright image in a short tube. Compare with the Keplerian design
 (``examples/telescopes/keplerian.py``), which forms a real intermediate image
 at the cost of a longer tube and an inverted view.
 
-Each lens is a real element (`Lens.spherical`): two spherical surfaces
-enclosing the glass, closed by absorbing rims at the clear aperture — drawn
-as a filled body, exactly like the lithography examples. The input beams are
-sized so the compressed output beam fits through the eyepiece aperture.
+Each lens is a real element (:class:`~raytracer.elements.Lens`): two
+spherical surfaces enclosing the glass, closed by an absorbing rim at the
+clear aperture — drawn as a filled body, exactly like the lithography
+examples. The input beams are sized so the compressed output beam fits
+through the eyepiece aperture.
 
 Being a telescope means being afocal, and that is checked, not assumed:
 
@@ -19,6 +20,9 @@ Being a telescope means being afocal, and that is checked, not assumed:
 * two parallel rays entering at the same field angle are traced through the
   exact sequential engine and confirmed to exit parallel, with the angular
   magnification measured as the output/input angle ratio (positive: upright).
+
+The figure traces the same lenses non-sequentially with two meridional
+beams, on axis and off axis.
 
 Usage:
     python -m examples.telescopes.galilean
@@ -36,12 +40,14 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer import BranchingTracer, ParallelSource, RenderConfig, TraceConfig
-from raytracer.design import OpticalSystem, SurfaceRow
-from raytracer.optics import Lens
-from raytracer.optics.materials import AIR, ConstantIndex
-from raytracer.propagation import SequentialTracer
-from raytracer.viz import Scene, show
+from raytracer import Gap, OpticalSystem
+from raytracer.elements import Lens, Sensor
+from raytracer.geometry.surfaces import Sphere
+from raytracer.materials import ConstantIndex
+from raytracer.sources import CollimatedSource
+from raytracer.tracing import NonSequentialTracer, SequentialTracer
+from raytracer.viz import Drawing, show
+from raytracer.viz.gl.viewer import RenderConfig
 from examples.telescopes._afocal import solve_afocal_gap
 
 GLASS_N = 1.5168  # BK7
@@ -57,28 +63,23 @@ ON_AXIS_COLOR = (0.5, 0.85, 1.0, 0.9)
 OFF_AXIS_COLOR = (1.0, 0.85, 0.4, 0.9)
 
 
-def _equiconvex_radius(f: float, n: float = GLASS_N) -> float:
-    """Radius of the two spherical faces of an equiconvex/equiconcave lens
-    with focal length *f* (thin-lens estimate; the gap solve absorbs the
-    thickness error)."""
+def equiconvex(name: str, f: float, thickness: float, semi_diameter: float) -> Lens:
+    """An equiconvex/equiconcave lens of focal length *f* (thin-lens radii;
+    the gap solve absorbs the thickness error)."""
 
-    return 2.0 * (n - 1.0) * f
+    radius = 2.0 * (GLASS_N - 1.0) * f
+    return Lens(name, front=Sphere(radius), back=Sphere(-radius), thickness=thickness,
+                material=GLASS, semi_diameter=semi_diameter)
 
 
-R_OBJ = _equiconvex_radius(F_OBJECTIVE)
-R_EYE = _equiconvex_radius(F_EYEPIECE)
+OBJECTIVE = equiconvex("objective", F_OBJECTIVE, OBJ_THICKNESS, OBJ_SEMI)
+EYEPIECE = equiconvex("eyepiece", F_EYEPIECE, EYE_THICKNESS, EYE_SEMI)
 
 
 def build_sequential(gap: float) -> OpticalSystem:
-    """Exact on-axis model used for the afocal solve and verification."""
+    """The two lenses *gap* apart, and a sensor behind them: the exact on-axis model."""
 
-    rows = [
-        SurfaceRow.refracting(radius=R_OBJ, thickness=OBJ_THICKNESS, material=GLASS, semidiameter=OBJ_SEMI),
-        SurfaceRow.refracting(radius=-R_OBJ, thickness=gap, material=AIR, semidiameter=OBJ_SEMI),
-        SurfaceRow.refracting(radius=R_EYE, thickness=EYE_THICKNESS, material=GLASS, semidiameter=EYE_SEMI),
-        SurfaceRow.refracting(radius=-R_EYE, thickness=30.0, material=AIR, semidiameter=EYE_SEMI),
-    ]
-    return OpticalSystem(rows, object_space=AIR)
+    return OpticalSystem.compose(OBJECTIVE, Gap(gap), EYEPIECE, Gap(30.0), Sensor("image"))
 
 
 def angular_magnification(system: OpticalSystem, theta_in: float = 0.01) -> tuple[float, float]:
@@ -92,34 +93,36 @@ def angular_magnification(system: OpticalSystem, theta_in: float = 0.01) -> tupl
     return float(np.mean(theta_out) / theta_in), float(np.ptp(theta_out))
 
 
-def build_scene(gap: float) -> Scene:
-    objective = Lens.spherical(
-        R1=R_OBJ, R2=-R_OBJ, thickness=OBJ_THICKNESS, semidiameter=OBJ_SEMI,
-        n=GLASS_N, vertex=(0.0, 0.0), name="objective",
-    )
-    eyepiece = Lens.spherical(
-        R1=R_EYE, R2=-R_EYE, thickness=EYE_THICKNESS, semidiameter=EYE_SEMI,
-        n=GLASS_N, vertex=(OBJ_THICKNESS + gap, 0.0), name="eyepiece",
-    )
-    surfaces = [*objective.surfaces(), *eyepiece.surfaces()]
-    tracer = BranchingTracer(surfaces, TraceConfig(max_generations=8, fresnel_split=False))
+def beams(half_width: float, field_angle: float) -> list[CollimatedSource]:
+    """Meridional beams 25 mm before the objective: on axis, and at *field_angle* (rad) aimed at its vertex."""
 
-    on_axis = ParallelSource(
-        origin=np.array([-25.0, 0.0]), direction=np.array([1.0, 0.0]),
-        width=2.0 * BEAM_HALF_WIDTH, samples=17,
-    )
-    off_axis = ParallelSource(
-        origin=np.array([-25.0, -25.0 * np.tan(FIELD_ANGLE)]),
-        direction=np.array([np.cos(FIELD_ANGLE), np.sin(FIELD_ANGLE)]),
-        width=2.0 * BEAM_HALF_WIDTH, samples=17,
-    )
+    tilted = (0.0, np.sin(field_angle), np.cos(field_angle))
+    return [
+        CollimatedSource((0.0, 0.0, -25.0), beam_radius=half_width, rays=17, fan="y"),
+        CollimatedSource((0.0, -25.0 * np.tan(field_angle), -25.0), direction=tilted, beam_radius=half_width,
+                         rays=17, fan="y"),
+    ]
 
-    exit_x = OBJ_THICKNESS + gap + EYE_THICKNESS
-    scene = Scene(x_lims=(-30.0, exit_x + 50.0), y_lims=(-30.0, 30.0))
-    scene.add_elements([objective, eyepiece])
-    scene.add_tree(tracer.trace([on_axis]), default_color=ON_AXIS_COLOR)
-    scene.add_tree(tracer.trace([off_axis]), default_color=OFF_AXIS_COLOR)
-    return scene
+
+def build_drawing(lenses: OpticalSystem, sources, *, x_lims, y_lims=(-30.0, 30.0)) -> Drawing:
+    """The lenses, and each source traced through them in its own colour."""
+
+    tracer = NonSequentialTracer(lenses, max_interactions=8, split=False)
+    drawing = Drawing(x_lims=x_lims, y_lims=y_lims).add_system(lenses)
+    for source, color in zip(sources, (ON_AXIS_COLOR, OFF_AXIS_COLOR)):
+        drawing.add_tree(tracer.trace(source), default_color=color, intensities=1.0)
+    return drawing
+
+
+def show_telescope(drawing: Drawing, title: str) -> None:
+    save = Path(sys.argv[sys.argv.index("--save") + 1]) if "--save" in sys.argv else None
+    backend = show(
+        drawing, backend="gl", interactive=save is None, size=(1500, 620), bgcolor="black", title=title,
+        render_config=RenderConfig(ray_width=0.25, min_pixels=1.0, use_solid_rays=True),
+    )
+    if save is not None:
+        backend.save(save)
+        print(f"wrote {save}")
 
 
 def main() -> None:
@@ -134,20 +137,10 @@ def main() -> None:
     print(f"  parallelism residual between two field rays: {residual:.2e} rad "
           "(should be ~0: confirms afocal)")
 
-    scene = build_scene(gap)
-    render_config = RenderConfig(ray_width=0.25, min_pixels=1.0, use_solid_rays=True)
-
-    save_path = None
-    if "--save" in sys.argv:
-        save_path = Path(sys.argv[sys.argv.index("--save") + 1])
-    backend = show(
-        scene, backend="gl", interactive=save_path is None,
-        size=(1500, 620), bgcolor="black", render_config=render_config,
-        title="Galilean telescope — raytracer",
-    )
-    if save_path is not None:
-        backend.save(save_path)
-        print(f"wrote {save_path}")
+    exit_z = OBJ_THICKNESS + gap + EYE_THICKNESS
+    lenses = OpticalSystem.compose(OBJECTIVE, Gap(gap), EYEPIECE)
+    drawing = build_drawing(lenses, beams(BEAM_HALF_WIDTH, FIELD_ANGLE), x_lims=(-30.0, exit_z + 50.0))
+    show_telescope(drawing, "Galilean telescope — raytracer")
 
 
 if __name__ == "__main__":

@@ -34,19 +34,24 @@ import warnings
 
 import numpy as np
 
+from raytracer import AIR, OpticalSystem, TableRow
 from raytracer.analysis import (
     aplanatic_image_surface,
     aplanatism_report,
     chief_ray_distortion,
     spot_data,
 )
-from raytracer.design import OpticalSystem, StigmaticTrain, SurfaceRow
-from raytracer.optics.materials import AIR, ConstantIndex
+from raytracer.analysis.aberrations.aplanatism import _closest_point_to_rays
+from raytracer.families import StigmaticTrain
+from raytracer.geometry.surfaces import Sphere
+from raytracer.materials import ConstantIndex
 from raytracer.optimize import optimize_aplanat
-from raytracer.propagation import (
+from raytracer.tracing import (
     FieldPoint,
     PupilSampling,
     SequentialTracer,
+    chief_ray_slopes,
+    trace_from_object,
     trace_pupil,
 )
 
@@ -57,7 +62,7 @@ FIELDS_MM = np.array([0.0, 0.05, 0.1, 0.2])
 
 
 def build_singlets():
-    """The three comparison singlets; the sphere copies the aplanat's vertex radii."""
+    """The three comparison singlets; the sphere (a tracer, object at D0) copies the aplanat's vertex radii."""
 
     aplanat = StigmaticTrain.symmetric_singlet(
         n=GLASS_INDEX, d0=D0, thickness=THICKNESS, semidiameter=SEMIDIAMETER
@@ -66,19 +71,13 @@ def build_singlets():
         n=GLASS_INDEX, d0=D0, d1=300.0, d2=D2, thickness=THICKNESS,
         semidiameter=SEMIDIAMETER,
     )
-    radius = 1.0 / aplanat.profiles[0].curvature
+    radius = 1.0 / aplanat.surfaces[0].curvature
     glass = ConstantIndex(f"N{GLASS_INDEX}", GLASS_INDEX)
-    sphere = OpticalSystem(
-        [
-            SurfaceRow.refracting(radius=radius, thickness=THICKNESS,
-                                  material=glass, semidiameter=SEMIDIAMETER),
-            SurfaceRow.refracting(radius=-radius, thickness=D2 - THICKNESS,
-                                  material=AIR, semidiameter=SEMIDIAMETER),
-        ],
-        object_space=AIR,
-        object_z=D0,
-    )
-    return sphere, stigmatic, aplanat
+    sphere = OpticalSystem.from_table([
+        TableRow(Sphere(radius), THICKNESS, glass, SEMIDIAMETER),
+        TableRow(Sphere(-radius), D2 - THICKNESS, AIR, SEMIDIAMETER),
+    ])
+    return SequentialTracer(sphere, object_z=D0), stigmatic, aplanat
 
 
 def _axial_rms_um(tracer: SequentialTracer) -> float:
@@ -89,18 +88,15 @@ def _axial_rms_um(tracer: SequentialTracer) -> float:
     return spot_data(pupil).rms_radius_um
 
 
-def _system_image_surface(system: OpticalSystem, heights) -> "np.ndarray":
+def _system_image_surface(tracer: SequentialTracer, heights) -> "np.ndarray":
     """Best-focus blur per field for a plain system (the sphere)."""
 
-    from raytracer.analysis.aberrations.aplanatism import _closest_point_to_rays
-
-    tracer = SequentialTracer(system)
     blur = np.full(len(heights), np.nan)
     for i, h in enumerate(heights):
         pupil = trace_pupil(
             tracer, FieldPoint(y=float(h)), na_object_sine=NA,
             sampling=PupilSampling(kind="rings", radial=6, azimuth=24),
-            chief_slope=(0.0 - h) / (0.0 - system.object_z),
+            chief_slope=(0.0 - h) / (0.0 - tracer.object_z),
         )
         if pupil.valid.sum() >= 3:
             _, blur_mm = _closest_point_to_rays(pupil.image_points, pupil.directions)
@@ -129,9 +125,9 @@ def part1_compare_singlets():
     sphere, stigmatic, aplanat = build_singlets()
 
     print(f"\naxial RMS spot ({D0:g} mm -> {D2:g} mm):")
-    print(f"  sphere      {_axial_rms_um(SequentialTracer(sphere)):12.1f} um")
-    print(f"  stigmatic   {_axial_rms_um(SequentialTracer(stigmatic.to_system())):12.3e} um")
-    print(f"  aplanat     {_axial_rms_um(SequentialTracer(aplanat.to_system())):12.3e} um")
+    print(f"  sphere      {_axial_rms_um(sphere):12.1f} um")
+    print(f"  stigmatic   {_axial_rms_um(stigmatic.tracer()):12.3e} um")
+    print(f"  aplanat     {_axial_rms_um(aplanat.tracer()):12.3e} um")
 
     print("\naplanatism map of the two stigmatic trains (M - 1, RMS over the fan):")
     reports = {}
@@ -153,15 +149,12 @@ def part1_compare_singlets():
 
     print("\nchief-ray distortion, stop at the front vertex, field 0 -> 2 mm:")
     heights = np.linspace(0.4, 2.0, 5)
-    for name, system, m in (
+    for name, tracer, m in (
         ("sphere", sphere, None),
-        ("stigmatic", stigmatic.to_system(), stigmatic.gt),
-        ("aplanat", aplanat.to_system(), aplanat.gt),
+        ("stigmatic", stigmatic.tracer(), stigmatic.gt),
+        ("aplanat", aplanat.tracer(), aplanat.gt),
     ):
-        tracer = SequentialTracer(system)
         if m is None:
-            from raytracer.propagation import chief_ray_slopes, trace_from_object
-
             slopes = chief_ray_slopes(tracer, FieldPoint(y=1e-4), stop_index=0)
             m = trace_from_object(tracer, (0.0, 1e-4), slopes).image_point[1] / 1e-4
         rows = chief_ray_distortion(tracer, heights, magnification=m, stop_index=0)
