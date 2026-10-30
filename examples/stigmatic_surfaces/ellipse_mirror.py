@@ -15,7 +15,9 @@ equator onto the right one.
 The convergence claim is checked, not just asserted: for every reflected ray
 we compute the perpendicular distance from the far focus to that ray's
 infinite line (:func:`raytracer.analysis.point_line_distances`) and report
-the RMS — near zero confirms stigmatism. A sensor at the focus would work
+the RMS — near zero confirms stigmatism (its ~1e-11 µm floor comes from the
+few rays that land next to the equator, where the surface normal is read
+from a sag slope that diverges there). A sensor at the focus would work
 too, but would clip the direct (unreflected) rays passing nearby on their
 way to the mirror; measuring against the ray's line avoids that.
 

@@ -1,16 +1,18 @@
-"""One scene, two interchangeable backends.
+"""One drawing, two interchangeable backends.
 
-A cemented doublet focuses a point source onto an observation screen. The
-same neutral Scene renders in matplotlib (publication diagram, few rays) or
+A biconvex singlet relays a point source onto a sensor at its paraxial
+conjugate plane. The same neutral :class:`~raytracer.viz.Drawing` — the
+meridional section of the 3-D system, traced non-sequentially with a
+``fan="y"`` source — renders in matplotlib (publication diagram, few rays) or
 OpenGL (HDR caustic accumulation, many rays). The matplotlib run also
-reports the RMS spot size on the screen — a doublet is not stigmatic for an
-off-axis point source, so this is a small but nonzero number, not a
-diagnostic failure.
+reports the irradiance peak and RMS spot size on the sensor — at this
+aperture a singlet's spherical aberration is large, so this is a nonzero
+number, not a diagnostic failure.
 
 Usage:
     python -m examples.imaging.single_lens_relay            # matplotlib
     python -m examples.imaging.single_lens_relay gl         # OpenGL viewer
-    python -m examples.imaging.single_lens_relay both --save out/  # PNGs only
+    python -m examples.imaging.single_lens_relay both --save out/  # PNGs only, into the directory out/
 """
 
 from __future__ import annotations
@@ -24,34 +26,39 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from raytracer import OpticalSystem
 from raytracer.analysis import spot_data_from_points
-from raytracer.optics import Lens, PointSource, Screen
-from raytracer.propagation import BranchingTracer, TraceConfig
-from raytracer.viz import Scene, show
+from raytracer.elements import Lens, Sensor
+from raytracer.geometry.apertures import Rectangle
+from raytracer.geometry.surfaces import Sphere
+from raytracer.materials import ConstantIndex
+from raytracer.sources import PointSource
+from raytracer.tracing import NonSequentialTracer
+from raytracer.viz import Drawing, show
+
+SCREEN_HALF = 12.0
 
 
-def build_scene(samples: int):
-    lens = Lens.from_radii(
-        r1=60.0, r2=-60.0, thickness=9.0, semidiameter=16.0, n=1.5168,
-        vertex=(0.0, 0.0), name="doublet",
-    )
-    screen = Screen([171.4, -12.0], [171.4, 12.0])  # conjugate of the source
-    source = PointSource(
-        origin=np.array([-90.0, 0.0]),
-        axis_direction=np.array([1.0, 0.0]),
-        aperture=np.deg2rad(18.0),
-        samples=samples,
-    )
-    tracer = BranchingTracer(
-        [*lens.surfaces(), screen],
-        TraceConfig(max_generations=4, fresnel_split=False),
-    )
-    tree = tracer.trace([source])
+def build_relay() -> OpticalSystem:
+    lens = Lens("singlet", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
+                material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0)
+    screen = Sensor("screen", aperture=Rectangle(2 * SCREEN_HALF, 2 * SCREEN_HALF), z=171.4)
+    return OpticalSystem([lens, screen])
 
-    scene = Scene()
-    scene.add_elements([lens, screen])
-    scene.add_tree(tree, intensity_resolver=lambda node: node.intensity)
-    return scene, screen
+
+def trace(system: OpticalSystem, rays: int):
+    source = PointSource((0.0, 0.0, -90.0), half_angle_deg=9.0, rays=rays, fan="y")
+    return NonSequentialTracer(system, max_interactions=4, split=False).trace(source)
+
+
+def render(rays: int, backend: str, save_dir: Path | None, name: str):
+    system = build_relay()
+    tree = trace(system, rays)
+    b = show(Drawing().add_system(system, tree=tree).add_tree(tree), backend=backend, interactive=save_dir is None)
+    if save_dir:
+        b.save(save_dir / name)
+        print(f"wrote {save_dir / name}")
+    return tree
 
 
 def main() -> None:
@@ -63,25 +70,15 @@ def main() -> None:
         save_dir.mkdir(parents=True, exist_ok=True)
 
     if backend in ("mpl", "both"):
-        scene, screen = build_scene(samples=41)  # few rays: readable diagram
-        b = show(scene, backend="mpl", interactive=save_dir is None)
-        if save_dir:
-            b.save(save_dir / "doublet_mpl.png")
-            print(f"wrote {save_dir / 'doublet_mpl.png'}")
-        edges, values = screen.irradiance(bins=100)
-        peak = edges[np.argmax(values)]
-        points = np.array([hit.point for hit in screen.hits])
-        spot = spot_data_from_points(points)
-        print(f"screen: {len(screen.hits)} hits, irradiance peak at s={peak:.2f} mm")
+        hits = render(41, "mpl", save_dir, "singlet_mpl.png").hits("screen")  # few rays: readable diagram
+        values, edges = hits.histogram(axis=1, bins=100, range=(-SCREEN_HALF, SCREEN_HALF))
+        spot = spot_data_from_points(hits.local_points[:, :2])
+        print(f"screen: {len(hits)} hits, irradiance peak at y={edges[np.argmax(values)]:.2f} mm")
         print(f"RMS spot radius: {spot.rms_radius_um:.4g} um "
-              "(nonzero: a doublet is not a stigmatic surface)")
+              "(nonzero: a spherical singlet is not stigmatic)")
 
     if backend in ("gl", "both"):
-        scene, _ = build_scene(samples=4000)  # dense: HDR caustics
-        b = show(scene, backend="gl", interactive=save_dir is None)
-        if save_dir:
-            b.save(save_dir / "doublet_gl.png")
-            print(f"wrote {save_dir / 'doublet_gl.png'}")
+        render(4000, "gl", save_dir, "singlet_gl.png")  # dense: HDR caustics
 
 
 if __name__ == "__main__":

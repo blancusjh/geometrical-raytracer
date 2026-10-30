@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 OUT = ROOT / "docs" / "img"
+DUV = ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
 MAX_WIDTH = 1400  # keep the repository light; still sharp on a README
 
 #: (module, extra CLI args, output name)
@@ -64,15 +65,14 @@ def render_examples() -> None:
 def render_newtonian() -> None:
     """The Newtonian, denser than the interactive demo's default sampling."""
 
-    from examples.telescopes.newtonian import build_scene
-    from raytracer import RenderConfig
+    from examples.telescopes.newtonian import build_drawing, trace
     from raytracer.viz import show
+    from raytracer.viz.gl.viewer import RenderConfig
 
     print("Newtonian (denser bundle):")
-    scene, *_ = build_scene(samples_per_strip=26)
     path = OUT / "newtonian.png"
     backend = show(
-        scene, backend="gl", interactive=False, size=(1400, 640), bgcolor="black",
+        build_drawing(trace(rays_per_strip=26)), backend="gl", interactive=False, size=(1400, 640), bgcolor="black",
         render_config=RenderConfig(ray_width=0.035, min_pixels=1.0, use_solid_rays=True),
     )
     backend.save(path)
@@ -84,21 +84,12 @@ def render_analysis() -> None:
 
     matplotlib.use("Agg")
     from raytracer.analysis import spot_data
-    from raytracer.design import OpticalSystem
-    from raytracer.propagation import (
-        FieldPoint,
-        PupilSampling,
-        SequentialTracer,
-        solve_object_plane,
-        trace_pupil,
-    )
+    from raytracer.io import read_prescription
+    from raytracer.tracing import FieldPoint, PupilSampling, solve_object_plane, trace_pupil
     from raytracer.viz import plots
 
     print("matplotlib analysis figures:")
-    system = OpticalSystem.from_prescription(
-        ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
-    )
-    tracer = SequentialTracer(system)
+    tracer = read_prescription(DUV).tracer()
     solve_object_plane(tracer)
     fields = [56.0, 62.0, 67.0]
 
@@ -128,8 +119,8 @@ def render_distortion_grids() -> None:
 
     matplotlib.use("Agg")
     from raytracer.analysis import distortion_grid
-    from raytracer.design import OpticalSystem
-    from raytracer.propagation import SequentialTracer, solve_object_plane
+    from raytracer.io import read_prescription
+    from raytracer.tracing import solve_object_plane
     from raytracer.viz import plots
 
     print("distortion grids:")
@@ -141,7 +132,7 @@ def render_distortion_grids() -> None:
 
     grids, titles, exaggerations = [], [], []
     for csv, title, half_deg, exaggeration in SYSTEMS:
-        tracer = SequentialTracer(OpticalSystem.from_prescription(ROOT / "data" / csv))
+        tracer = read_prescription(ROOT / "data" / csv).tracer()
         conjugate = solve_object_plane(tracer)
         half = abs(conjugate.object_z) * np.tan(np.deg2rad(half_deg))
         grids.append(
@@ -156,11 +147,7 @@ def render_distortion_grids() -> None:
     # ideal map here is the design intent rather than the recovered paraxial
     # value. A 50 mm half-field square puts its corners at 50*sqrt(2) = 70.7
     # mm, past the ~68 mm usable field radius: those are the vignetted points.
-    tracer = SequentialTracer(
-        OpticalSystem.from_prescription(
-            ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
-        )
-    )
+    tracer = read_prescription(DUV).tracer()
     solve_object_plane(tracer)
     grids.append(distortion_grid(tracer, magnification=0.25, half_field=50.0, n=11))
     titles.append("US7557996 DUV objective\n±50 mm object half-field")
@@ -212,29 +199,30 @@ def render_stigmatic_spots() -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    from raytracer import OpticalSystem, TableRow
     from raytracer.analysis import spot_data
-    from raytracer.design import OpticalSystem, SurfaceRow
-    from raytracer.optics.materials import AIR, ConstantIndex
-    from raytracer.propagation import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
-    from raytracer.surfaces.cartesian_oval import CartesianOvalProfile
+    from raytracer.geometry.surfaces import CartesianSurface, Sphere
+    from raytracer.materials import ConstantIndex
+    from raytracer.tracing import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
 
     print("stigmatic spot comparison:")
     n0, z0, ni, zi, semi, na = 1.0, -30.0, 1.7, 10.0, 3.0, 0.1
     glass = ConstantIndex("DENSE_GLASS", ni)
-    radius = CartesianOvalProfile(n0=n0, z0=z0, ni=ni, zi=zi).radius
+    oval_surface = CartesianSurface(n0, z0, ni, zi)
+    radius = oval_surface.radius
 
-    def spot(row):
-        tracer = SequentialTracer(OpticalSystem([row], object_space=AIR, object_z=z0))
+    def spot(surface):
+        """The surface, then glass up to the image plane at zi; the object at z0."""
+
+        system = OpticalSystem.from_table([TableRow(surface, zi, glass, semi)])
         pupil = trace_pupil(
-            tracer, FieldPoint(y=0.0), na_object_sine=na,
+            SequentialTracer(system, object_z=z0), FieldPoint(y=0.0), na_object_sine=na,
             sampling=PupilSampling(kind="rings", radial=14, azimuth=64), chief_slope=0.0,
         )
         return spot_data(pupil)
 
-    sphere = spot(SurfaceRow.refracting(radius=radius, thickness=zi, material=glass,
-                                        semidiameter=semi))
-    oval = spot(SurfaceRow.cartesian_oval(n0=n0, z0=z0, ni=ni, zi=zi, thickness=zi,
-                                          material=glass, semidiameter=semi))
+    sphere = spot(Sphere(radius))
+    oval = spot(oval_surface)
 
     fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.6))
     scale = 1.15 * np.abs(sphere.relative_um).max()
@@ -271,7 +259,7 @@ def render_stigmatic_spots() -> None:
         "(the oval's residual is double-precision round-off, not a spot)",
         fontsize=11,
     )
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.95))  # room for the suptitle
     fig.savefig(OUT / "stigmatic_spots.png", dpi=150, bbox_inches="tight", facecolor="white")
     shrink(OUT / "stigmatic_spots.png")
     print(f"    sphere {sphere.rms_radius_um:.4g} µm  vs  oval {oval.rms_radius_um:.4g} µm"

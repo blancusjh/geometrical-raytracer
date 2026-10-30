@@ -14,14 +14,13 @@ warnings.filterwarnings("ignore")
 import numpy as np
 print = functools.partial(print, flush=True)
 
-from raytracer.analysis import aplanatic_image_surface, aplanatism_map, aplanatism_report
-from raytracer.design import StigmaticTrain
-from raytracer.optics.materials import AIR, sellmeier_glass
+from raytracer.analysis import aplanatic_image_surface, aplanatism_map
+from raytracer.families import StigmaticTrain
+from raytracer.materials import AIR, sellmeier_glass
 from raytracer.optimize import (
     Aplanatism, AxialColor, Constraint, Distortion, EvaluationContext,
     FlatImageSurface, TargetMagnification, optimize_train,
 )
-from raytracer.propagation import SequentialTracer
 
 BK7 = sellmeier_glass("N-BK7")
 F2 = sellmeier_glass("N-F2")
@@ -193,7 +192,7 @@ class VirtualObjectAplanatism(Constraint):
 
     def residuals(self, context):
         train = context.train
-        tracer = SequentialTracer(train.to_system())
+        tracer = train.tracer()
         a = train.conjugates[0]
         out = np.full(len(self.sines), 1e3)
         heights, kept = [], []
@@ -238,7 +237,7 @@ def ultrawide():
     res = cons[0].residuals(ctx)
     # stigmatism check across the physical field: manual trace to the image
     # plane (beyond ±44 deg rays refract where no medium is defined)
-    tracer = SequentialTracer(fit.train.to_system())
+    tracer = fit.train.tracer()
     spread = []
     for deg in (15.0, 30.0, 43.0):
         t = np.tan(np.deg2rad(deg))

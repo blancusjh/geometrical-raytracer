@@ -26,8 +26,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer.design import OpticalSystem
-from raytracer.propagation import SequentialTracer, solve_object_plane
+from raytracer.io import read_prescription
+from raytracer.tracing import solve_object_plane
 from raytracer.viz.gl3d import Viewer3D
 
 FIELDS = [56.0, 62.0, 67.0]
@@ -59,19 +59,16 @@ def _bundle(viewer, tracer, label, sampling, **kw):
 def main() -> None:
     print("[duv_objective_3d] Loading the US7557996 prescription (48 surfaces)...", flush=True)
     csv = ROOT / "data" / "optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv"
-    system = OpticalSystem.from_prescription(csv)
-    tracer = SequentialTracer(system)
+    tracer = read_prescription(csv).tracer()
     solve_object_plane(tracer)
 
     viewer = Viewer3D(title="US7557996 — 3D   [m] lines/beam/spectrum  [a] axes  [w] wireframe")
-    viewer.add_system(system)
+    viewer.add_system(tracer.system, wavelength_um=tracer.wavelength_um)
     viewer.add_axes()
     _bundle(viewer, tracer, "lines mode", LINES_SAMPLING)
     _bundle(viewer, tracer, "beam mode (additive, violet)", BEAM_SAMPLING, mode="beam")
     _bundle(viewer, tracer, "spectrum mode (colorimetric)", BEAM_SAMPLING,
             mode="spectrum")
-    print("[duv_objective_3d] Opening window — [m] cycles ray mode, [w] wireframe,"
-          " drag to orbit.", flush=True)
     if "--beam" in sys.argv:
         viewer.set_ray_mode("beam")
     elif "--spectrum" in sys.argv:
@@ -85,6 +82,7 @@ def main() -> None:
         mpimg.imsave(out, image)
         print(f"wrote {out}")
     else:  # pragma: no cover - interactive
+        print("[duv_objective_3d] Opening window — [m] cycles ray mode, [w] wireframe, drag to orbit.", flush=True)
         viewer.run()
 
 

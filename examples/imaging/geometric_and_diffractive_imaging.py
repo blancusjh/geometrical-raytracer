@@ -1,10 +1,10 @@
 """Image formation through an optical system, two complementary ways.
 
-1. **Geometric (2-D engine):** a bar-pattern object emits weighted ray fans
-   (`ImageSource`); a doublet relays it onto a screen whose irradiance
-   histogram reveals the magnified, inverted image. The RMS spot radius of
-   the on-axis point of that object is also reported, quantifying the
-   doublet's (nonzero) aberration.
+1. **Geometric (non-sequential engine):** a bar-pattern object emits weighted
+   meridional ray fans (`ImageSource`); a biconvex singlet relays it onto a
+   sensor whose irradiance histogram reveals the magnified, inverted image.
+   The RMS spot radius of the rays landing near the centre of that image is
+   also reported, quantifying the singlet's (nonzero) aberration.
 2. **Diffractive (sequential analysis):** any picture becomes a binary mask
    (`BinaryMask.from_image`) and is imaged through a (perfect or fitted)
    pupil with the partially coherent Abbe method.
@@ -26,13 +26,18 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from raytracer import OpticalSystem
 from raytracer.analysis import BinaryMask, abbe_image, pupil_function, spot_data_from_points
-from raytracer.optics import ImageSource, Lens, Screen
-from raytracer.propagation import BranchingTracer, TraceConfig
+from raytracer.elements import Lens, Sensor
+from raytracer.geometry.apertures import Rectangle
+from raytracer.geometry.surfaces import Sphere
+from raytracer.materials import ConstantIndex
+from raytracer.sources import ImageSource
+from raytracer.tracing import NonSequentialTracer
 
 
 def geometric_relay():
-    """Bar-pattern object -> doublet -> screen irradiance."""
+    """Bar-pattern object -> singlet -> sensor irradiance."""
 
     # Three-bar test object, 12 mm tall, at the doublet's finite conjugate.
     profile = np.zeros(240)
@@ -40,29 +45,19 @@ def geometric_relay():
         profile[start : start + 30] = 1.0
     profile[105:135] *= 0.55  # middle bar dimmer: gray levels survive imaging
 
-    lens = Lens.from_radii(
-        r1=60.0, r2=-60.0, thickness=9.0, semidiameter=16.0, n=1.5168,
-        vertex=(0.0, 0.0), name="relay",
-    )
-    source = ImageSource(
-        profile=profile,
-        p0=np.array([-90.0, -6.0]),
-        p1=np.array([-90.0, 6.0]),
-        axis_direction=np.array([1.0, 0.0]),
-        aperture=np.deg2rad(10.0),
-        rays_per_point=31,
-    )
-    screen = Screen([171.4, -18.0], [171.4, 18.0])
+    lens = Lens("relay", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
+                material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0)
+    screen = Sensor("screen", aperture=Rectangle(36.0, 36.0), z=171.4)
+    source = ImageSource(profile, p0=(0.0, -6.0, -90.0), p1=(0.0, 6.0, -90.0), half_angle_deg=5.0, rays_per_point=31)
 
-    tracer = BranchingTracer([*lens.surfaces(), screen], TraceConfig(max_generations=4))
-    tracer.trace([source])
-    edges, values = screen.irradiance(bins=180)
-    centers = 0.5 * (edges[:-1] + edges[1:]) - screen.length / 2.0
+    hits = NonSequentialTracer(OpticalSystem([lens, screen]), max_interactions=4, split=False).trace(source).hits("screen")
+    values, edges = hits.histogram(axis=1, bins=180, range=(-18.0, 18.0))
+    centers = 0.5 * (edges[:-1] + edges[1:])
 
     # RMS spot size for rays landing near the object's mid-height bar (the
     # dimmer one), as a proxy for the relay's on-axis aberration.
-    near_center = [h.point for h in screen.hits if abs(h.s - screen.length / 2.0) < 2.0]
-    rms_um = spot_data_from_points(np.asarray(near_center)).rms_radius_um if len(near_center) > 1 else float("nan")
+    near_center = hits.local_points[np.abs(hits.local_points[:, 1]) < 2.0, :2]
+    rms_um = spot_data_from_points(near_center).rms_radius_um if len(near_center) > 1 else float("nan")
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
     object_y = np.linspace(-6.0, 6.0, profile.size)
@@ -70,7 +65,7 @@ def geometric_relay():
     axes[0].set(title="Object intensity profile", xlabel="y (mm)", ylabel="I")
     axes[1].plot(centers, values / values.max(), color="#b3421b")
     axes[1].set(
-        title=f"Screen irradiance ({len(screen.hits)} rays) — inverted, magnified\n"
+        title=f"Sensor irradiance ({len(hits)} rays) — inverted, magnified\n"
               f"RMS spot near center: {rms_um:.3g} um",
         xlabel="y (mm)",
     )
