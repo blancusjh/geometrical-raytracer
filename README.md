@@ -5,10 +5,11 @@ la ecuación de cada superficie, sin aproximación paraxial— a través de
 sistemas ópticos reales, y mide lo que sale: aberraciones, distorsión,
 frente de onda, PSF, formación de imagen.
 
-**12.000 líneas · 9 paquetes en cadena estricta · 232 tests contra verdades
-analíticas · dos objetivos de patente replicados dígito a dígito · lentes
-estigmáticas y aplanáticas por superficies de Descartes, con optimizador de
-restricciones enchufables y materiales reales**
+**Un solo modelo físico —elementos colocados en un medio ambiente— leído por
+un motor secuencial y uno no secuencial · 13 paquetes en cadena estricta ·
+397 tests contra verdades analíticas · dos objetivos de patente replicados
+dígito a dígito · lentes estigmáticas y aplanáticas por superficies de
+Descartes, con optimizador de restricciones enchufables y materiales reales**
 
 ![Objetivo DUV US7557996, tres longitudes de onda](docs/img/duv_3d_spectrum.png)
 
@@ -22,16 +23,21 @@ auto-expuesto revela la estructura del haz dentro del rango dinámico.
 
 ## Qué hace
 
-Dado un sistema óptico —una prescripción de superficies, o un puñado de
-lentes y espejos colocados en el espacio— el paquete responde a tres tipos
-de pregunta.
+Un sistema óptico es **un conjunto de elementos físicos —lentes, espejos,
+divisores de haz, prismas, diafragmas, sensores— colocados en el espacio y
+sumergidos en un medio ambiente**. Se escribe así, elemento por elemento con
+su posición y orientación, o con la notación concisa de siempre (una
+composición a lo largo del eje, o una tabla de prescripción) que construye
+exactamente lo mismo. Sobre ese único modelo el paquete responde tres
+preguntas.
 
 **¿Por dónde va la luz?** Cada rayo se intersecta con cada superficie
-resolviendo la ecuación de esa superficie. Para una cónica hay forma
-cerrada; para un perfil asférico, Newton sobre `f_Σ(A + λu) = 0` desde una
-semilla que aporta la propia superficie; para el resto, un barrido con
-bracket-and-bisect. La refracción y la reflexión se aplican en forma
-vectorial completa, y la reflexión total interna se detecta rayo a rayo.
+resolviendo su ecuación: forma cerrada para las cónicas, Newton desde el
+plano del vértice para las demás. La refracción y la reflexión se aplican
+en forma vectorial completa, y la reflexión total interna se detecta rayo a
+rayo. Qué hace la luz en una frontera no se declara en ninguna parte: se
+deduce de los medios a cada lado (que el sistema resuelve a partir de los
+elementos) y del recubrimiento de la superficie.
 
 **¿Qué tan bien forma imagen?** Spot diagrams ponderados por área de pupila,
 ray fans transversales, distorsión por rayo principal (la convención de
@@ -41,44 +47,102 @@ frente de onda por eikonal, PSF escalar e imagen aérea parcialmente
 coherente por el método de Abbe.
 
 **¿Cómo se ve?** Dos backends sobre una misma escena: figuras matplotlib
-para el análisis, y el visor OpenGL HDR para el trazado. La escena es una
+para el análisis, y el visor OpenGL HDR para el trazado. El dibujo es una
 lista de ítems neutrales —segmentos de rayo, perfiles de superficie,
-cuerpos de lente, pantallas, marcadores— y cada backend la consume entera.
+cuerpos de lente, sensores, marcadores— y cada backend la consume entera.
+Un dibujo 2-D es el corte meridional (plano y-z) del modelo 3-D.
 
-## Los dos motores de propagación
-
-Los dos motores se distinguen por lo que hace un rayo al llegar a una
-superficie.
-
-**Secuencial** — cada rayo atraviesa cada superficie en orden fijo, un solo
-camino determinista. Es el modelo de diseño óptico clásico, y el orden fijo
-es lo que permite vectorizar: los N rayos avanzan juntos en numpy, con un
-`TraceStatus` por rayo que marca fallo de intersección, TIR o viñeteo. Sobre
-él se apoyan la capa paraxial (matrices ABCD, recuperación de conjugados),
-la resolución del rayo principal y el muestreo de pupila.
-
-**Ramificado** — en cada colisión el rayo se divide en su hijo reflejado *y*
-su hijo refractado, y el recorrido en anchura genera el árbol completo. Con
-él se ven las cáusticas, la luz parásita y las reflexiones múltiples. Lleva
-OPL e intensidad acumuladas, con división de Fresnel opcional.
+## El modelo: elementos colocados en un medio
 
 ```python
-from pathlib import Path
-from raytracer.design import OpticalSystem
-from raytracer.propagation import (
-    SequentialTracer, FieldPoint, PupilSampling, solve_object_plane, trace_pupil,
+import raytracer as rt
+from raytracer import elements as el
+from raytracer.geometry import surfaces as sf
+from raytracer.materials import default_materials
+
+glass = default_materials()
+
+cooke = rt.OpticalSystem(
+    name="Cooke triplet",
+    ambient=rt.AIR,
+    components=[
+        el.Lens("L1", front=sf.Sphere(21.25), back=sf.Sphere(-158.65), thickness=2.0,
+                material=glass["N-SK16"], semi_diameter=6.5, z=0.0),
+        el.Lens("L2", front=sf.Sphere(-20.25), back=sf.Sphere(19.30), thickness=1.0,
+                material=glass["F4"], semi_diameter=5.0, z=8.0),
+        el.Stop("STO", aperture=4.75, z=9.0),
+        el.Lens("L3", front=sf.Sphere(141.25), back=sf.Sphere(-17.285), thickness=2.0,
+                material=glass["N-SK16"], semi_diameter=6.5, z=15.0),
+        el.Sensor("IMG", z=59.95),
+    ],
 )
+```
+
+Cada elemento acepta su colocación de la misma forma: `pos=(x, y, z)` o
+`z=`; `rot=` con ángulos de Euler en grados (intrínsecos x → y′ → z″,
+`R = Rx @ Ry @ Rz`), con `(ángulo, eje)` o con una `rt.Rotation`; o
+`axis=` / `normal=`, hacia donde apunta su +z local. Los sistemas son
+valores: `cooke.rotated(45, (1, 1, 0), about=(10, 0, 5))` devuelve otro.
+
+Lo que se **deduce** del sistema, nunca se declara:
+
+- **los medios a cada lado de cada frontera.** Donde la cara de un elemento
+  coincide con la de otro (misma pose, misma superficie), son una sola
+  frontera entre dos materiales: un doblete cementado, un líquido de
+  inmersión contra una lente;
+- **el camino secuencial**, en el orden en que la luz visita las fronteras.
+  Se infiere para un sistema coaxial; un sistema plegado o con divisor de
+  haz lo declara, con `"BS:reflect"` donde la física ofrece dos ramas.
+
+Una tabla de prescripción se lee como lo que describe. El objetivo DUV de
+la patente queda así:
+
+- su lente de CaF₂ recorrida dos veces es **una** lente;
+- sus dos espejos son elementos;
+- el plano de diafragma que la tabla pone dentro de una lente es un
+  diafragma **virtual**;
+- el líquido de inmersión es un cuerpo en contacto con la última lente y
+  con el sensor.
+
+## Los dos motores
+
+**Secuencial** — cada rayo visita las fronteras del camino en orden, un solo
+recorrido determinista, y los N rayos avanzan juntos en numpy con un
+`TraceStatus` por rayo (viñeteo, TIR, fallo de intersección, o `BEHIND`:
+el camino declarado lo manda a una frontera que ya pasó). Sobre él se
+apoyan la capa paraxial, el rayo principal y el muestreo de pupila. La
+longitud de onda y el plano objeto son hechos *de uso*: viven en el
+trazador, no en el sistema.
+
+```python
+from raytracer.io import read_prescription
+from raytracer.tracing import FieldPoint, PupilSampling, solve_object_plane, trace_pupil
 from raytracer.analysis import spot_data
 
-system = OpticalSystem.from_prescription(
-    Path("data/optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv")
-)
-tracer = SequentialTracer(system)
+duv = read_prescription("data/optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv")
+tracer = duv.tracer()               # a la longitud de onda del archivo (193.368 nm)
 solve_object_plane(tracer)          # recupera el plano objeto imponiendo B = 0
 
 pupil = trace_pupil(tracer, FieldPoint(y=62.0), na_object_sine=0.3,
                     sampling=PupilSampling(kind="rings", radial=12, azimuth=72))
 print(spot_data(pupil).rms_radius_um)        # 0.087 µm
+```
+
+**No secuencial** — sin orden: cada rayo se prueba contra todas las
+fronteras del *mismo* sistema, y en la primera que encuentra se divide en
+hijo reflejado y transmitido según su recubrimiento (Fresnel en una
+superficie desnuda). Los bordes de lente, las láminas de diafragma y los
+sensores absorben; los sensores además registran. Con `split=False` cada
+rayo sigue sólo la rama que tomaría el trazado secuencial: el dibujo
+limpio.
+
+```python
+from raytracer.sources import CollimatedSource
+from raytracer.tracing import NonSequentialTracer
+
+beam = CollimatedSource((0, 0, -40), direction=(0, 0, 1), beam_radius=2.0, rays=500, wavelength_um=0.55)
+tree = NonSequentialTracer(cooke, split=True).trace(beam)
+tree.hits("IMG").power.sum()     # potencia que llega al sensor, descontadas las pérdidas de Fresnel
 ```
 
 ![Layout del objetivo DUV](docs/img/duv_layout.png)
@@ -93,8 +157,8 @@ cero de Airy como referencia: los tres campos quedan por debajo del límite de
 difracción.
 
 Y el corte meridional del mismo trazado, con acumulación HDR: 363 rayos
-exactos llenando la apertura, terminando sobre una pantalla de observación
-dibujada en el plano imagen.
+exactos llenando la apertura, terminando sobre el sensor en el plano
+imagen.
 
 ![Objetivo DUV en 2-D](docs/img/duv_2d.png)
 
@@ -108,17 +172,13 @@ referencia estándar, inmune al coma y al viñeteo que arrastran el centroide
 de un spot—, y devuelve dónde aterriza cada punto en el plano imagen.
 
 ```python
-from pathlib import Path
-
 import numpy as np
 from raytracer.analysis import distortion_grid
-from raytracer.design import OpticalSystem
-from raytracer.propagation import SequentialTracer, solve_object_plane
+from raytracer.io import read_prescription
+from raytracer.tracing import solve_object_plane
 from raytracer.viz import plots
 
-tracer = SequentialTracer(
-    OpticalSystem.from_prescription(Path("data/optical_systems/photographic/cooke_triplet_prescription.csv"))
-)
+tracer = read_prescription("data/optical_systems/photographic/cooke_triplet_prescription.csv").tracer()
 conjugate = solve_object_plane(tracer)
 half = abs(conjugate.object_z) * np.tan(np.deg2rad(10.0))   # ±10° de semicampo
 
@@ -126,8 +186,8 @@ grid = distortion_grid(tracer, magnification=conjugate.magnification,
                        half_field=half, n=11)
 
 print(grid.valid_fraction)                     # 1.0  -- 121/121 sin viñetear
-print(grid.max_distortion_um)                  # 25.81  (µm)
-print(grid.max_relative_distortion_percent)    # 0.2074 (% de la altura de imagen)
+print(grid.max_distortion_um)                  # 7.564  (µm)
+print(grid.max_relative_distortion_percent)    # 0.1567 (% de la altura de imagen)
 
 plots.distortion_grid_figure(grid, exaggeration=25.0)
 ```
@@ -142,8 +202,8 @@ multiplicador común dejaría dos paneles ilegibles. El título de cada panel
 lleva la magnitud verdadera, sin amplificar.
 
 El triplete Cooke y el Doble Gauss dibujan corsé (**pincushion**): la
-desviación radial es positiva en todo el campo y crece con él, hasta 25,8 µm
-y 206 µm en la esquina — 0,207 % y 0,388 % de la altura de imagen.
+desviación radial es positiva en todo el campo y crece con él, hasta 7,6 µm
+y 206 µm en la esquina — 0,157 % y 0,388 % de la altura de imagen.
 
 El objetivo DUV, a ×2000, muestra el residuo de un diseño ya corregido: la
 desviación llega a +43,9 nm hacia r ≈ 5,6 mm (7,8 partes por millón, el
@@ -164,15 +224,40 @@ objeto o en grados de campo.
 
 ## Superficies
 
-Una superficie declara su propia geometría de una de dos formas —
-**implícita** (`f_Σ(x) = 0` y `∇f_Σ`) o **paramétrica** (`x = P(t)` y una
-semilla) — y con eso ya es intersectable. La intersección se resuelve una
-sola vez, genéricamente, en `math.intersections`.
+Una superficie es **geometría y sólo geometría**: la gráfica `z = s(x, y)`
+en su propio marco, vértice en el origen y eje en +z. Dónde está la pone la
+pose del elemento que la lleva. Qué hace la luz allí lo deciden los medios
+y el recubrimiento. Declarar `s` y su gradiente basta: la intersección
+(Newton desde el plano del vértice, en `geometry.intersections`), la normal
+y el recorte de apertura salen gratis. Las cónicas además se intersectan en
+forma cerrada.
 
-Vienen definidas la esfera/cónica/asférica de revolución, el segmento recto,
-las cónicas en forma polar (elipse, círculo, parábola, hipérbola) y el óvalo
-de Descartes. Añadir una superficie nueva es escribir su `f_Σ` y su
-gradiente; la intersección, la normal y el recorte de apertura salen gratis.
+La herencia sigue la especialización matemática, de modo que una subclase
+es un subconjunto de la familia de su padre:
+
+```
+Surface
+├── SurfaceOfRevolution
+│   ├── Conic ─┬─ Plane          (c = 0: el miembro plano de toda familia)
+│   │          ├─ Ellipsoid ── Sphere   (la esfera es el elipsoide de ejes iguales)
+│   │          ├─ Paraboloid
+│   │          └─ Hyperboloid
+│   ├── CartesianSurface         (la superficie estigmática de Descartes)
+│   └── Asphere ─┬─ EvenAsphere
+│                └─ QTypeAsphere (Forbes Q-con)
+├── ToroidalSurface ── CylindricalSurface   (el cilindro es el toro de radio de giro infinito)
+└── FreeformSurface              (polinomio XY sobre una cónica)
+```
+
+Una cónica es el miembro de desviación nula de *toda* familia asférica, así
+que la especialización entre ellas es un retículo y no un árbol. Esa
+relación la expresan `Asphere.base` y `EvenAsphere.from_conic`.
+
+Sobre la superficie, una `Interface` añade lo que la hace óptica *por sí
+misma*: su recubrimiento (`Uncoated` —Fresnel—, `AR`, `PerfectMirror`,
+`IdealBeamSplitter`, `Absorbing`) y su apertura libre. Un espejo es una
+superficie con recubrimiento reflectante. Donde un elemento pide una
+interfaz, basta una superficie desnuda.
 
 ### El caso que lo pone a prueba
 
@@ -217,7 +302,7 @@ los puntos de impacto trazados, y el cociente de senos medido sobre los
 rayos exactos — y los tests exigen que coincidan a 1e-9 por rayo.
 
 ```python
-from raytracer.design import StigmaticTrain
+from raytracer.families import StigmaticTrain
 from raytracer.analysis import aplanatism_report, aplanatic_image_surface
 from raytracer.optimize import optimize_aplanat
 
@@ -273,164 +358,73 @@ fabricable, en un tren exactamente estigmático.
 
 La construcción en dos superficies sigue la abstracción Ω (`OmegaLens`) del
 [generador de STL de superficies cartesianas](https://github.com/blancusjh/cartesian-surfaces-stl-generator)
-del autor; aquí la misma lente queda lista para el trazador secuencial.
+del autor; aquí la misma lente es una familia (`StigmaticTrain`) cuyo
+miembro `train.system()` son lentes reales colocadas sobre el eje, en
+contacto donde dos vidrios se tocan, con un sensor en la conjugada imagen.
 
 **Fuentes.** A. Silva-Lora y R. Torres, *Aplanatism in stigmatic optical
 systems*, J. Opt. Soc. Am. A 37 (2020); *Superconical aplanatic ovoid
 singlet lenses*, J. Opt. Soc. Am. A 37, 1155–1165 (2020); *Explicit
 Cartesian oval as a superconic surface for stigmatic imaging optical systems
 with real or virtual source or image*, Proc. R. Soc. A 476, 20190894 (2020).
-La parametrización GOTS de `raytracer.surfaces.cartesian_oval` transcribe la
+La parametrización GOTS de `raytracer.geometry.surfaces.cartesian` transcribe la
 del segundo artículo; `raytracer.analysis.aberrations.aplanatism` implementa
 las Ecs. (24)–(31) del primero.
 
 ## La ontología del paquete
 
-Los paquetes están cortados por la **naturaleza** de cada pieza, y las
-dependencias forman una cadena estrictamente descendente. Cada import a
-nivel de módulo apunta a un paquete anterior en el orden:
+Cada paquete responde una sola pregunta, y las dependencias forman una cadena
+estrictamente descendente: todo import a nivel de módulo apunta a un paquete
+anterior.
 
 ```
-math → surfaces → optics → design → propagation → io → analysis → optimize → viz
+geometry → materials → coatings → interfaces → elements → system → sources
+         → tracing → families → io → analysis → optimize → viz
 ```
 
-Esas son las aristas reales del grafo, leídas del AST de cada módulo:
-
-| paquete | importa a nivel de módulo | líneas |
+| paquete | pregunta | líneas |
 |---|---|---|
-| **`math`** | — | 463 |
-| **`surfaces`** | `math` | 1157 |
-| **`optics`** | `math`, `surfaces` | 973 |
-| **`design`** | `surfaces`, `optics` | 727 |
-| **`propagation`** | `math`, `surfaces`, `optics`, `design` | 1094 |
-| **`io`** | `surfaces`, `optics`, `design` | 424 |
-| **`analysis`** | `design`, `propagation` | 2302 |
-| **`optimize`** | `design`, `analysis` | 563 |
-| **`viz`** | `surfaces`, `optics`, `design`, `propagation`, `analysis` | 4123 |
+| **`geometry`** | ¿dónde está y qué forma tiene? — `Rotation`, `Pose`, superficies, aperturas, sólidos, intersección. Nada de óptica | 1969 |
+| **`materials`** | ¿qué llena el espacio? — índice constante, Abbe, Cauchy, Sellmeier, catálogo | 250 |
+| **`coatings`** | ¿cuánta luz refleja y transmite una frontera? | 155 |
+| **`interfaces`** | una superficie como frontera óptica, y las leyes de reflexión y refracción | 96 |
+| **`elements`** | ¿de qué cosas físicas está hecho un instrumento? — `Lens`, `Mirror`, `BeamSplitter`, `Prism`, `Stop`, `Sensor` | 382 |
+| **`system`** | ¿cómo están dispuestas y qué se sigue de ello? — `OpticalSystem`, `Assembly`, fronteras con sus medios, camino secuencial, tablas | 877 |
+| **`sources`** | ¿dónde empieza la luz? | 236 |
+| **`tracing`** | ¿cómo llega la luz de aquí a allá? — secuencial, no secuencial, paraxial, pupilas | 1113 |
+| **`families`** | ¿qué sistemas genera una familia de diseño? — `StigmaticTrain` | 363 |
+| **`io`** | ¿cómo se guarda un diseño? | 430 |
+| **`analysis`** | ¿qué se mide? — `imaging` mira la imagen, `aberrations` el error de rayo y de frente de onda | 2274 |
+| **`optimize`** | ¿qué es mejor? — restricciones enchufables sobre familias exactas | 553 |
+| **`viz`** | ¿cómo se muestra? — matplotlib y OpenGL HDR, 2-D como corte meridional del modelo 3-D | 3483 |
 
-`tests/test_architecture.py` recorre el AST de cada módulo y lo comprueba, de
-modo que la cadena es una afirmación verificada en cada `pytest`.
+`tests/test_architecture.py` lee el AST de cada módulo y comprueba la
+cadena en cada `pytest`. Comprueba además dos reglas más finas: un elemento
+no importa nunca el sistema ni los motores, y el sistema no importa nunca
+un motor ni un formato de archivo.
 
-### Qué es cada parte
+### Cuatro decisiones que explican el resto
 
-**`math` — geometría sin óptica.** Vectores y normalización,
-transformaciones rígidas (`RigidTransform`), y los solvers de intersección
-rayo/superficie. Aquí vive la aritmética que valdría igual para cualquier
-trazado geométrico: el paquete entero desconoce qué es un índice de
-refracción.
+**Lo declarado y lo deducido no se mezclan.** Un objeto guarda lo que se
+dijo de él. Los medios a cada lado de una frontera, el camino de un sistema
+coaxial, las posiciones de los vértices y el contacto entre dos lentes se
+calculan a partir de los elementos. Nunca se almacenan como estado propio.
 
-**`surfaces` — las formas que un rayo puede encontrar.** Una superficie es
-la frontera entre dos medios: posee su forma, su marco local, su apertura
-libre y los índices a cada lado. Declara cómo describirse a sí misma
-(implícita o paramétrica) y ahí termina su responsabilidad. `Surface.hit()`
-es una plantilla genérica que sirve a todas.
+**El hardware no es el uso.** El sistema no sabe de longitudes de onda ni
+de planos objeto. Esos son hechos del uso, y los lleva el trazador
+(`SequentialTracer(system, wavelength_um=..., object_z=...)`). El mismo
+sistema se traza a cualquier longitud de onda sin reconstruirlo.
 
-**`optics` — la luz y las leyes que obedece.** `Ray` (origen, dirección,
-longitud de onda, `point_at`), `laws` (reflexión y refracción vectoriales,
-en versión escalar y por lotes), `radiometry` (coeficientes de Fresnel s y
-p), `materials` (índice constante, Abbe, Sellmeier medido, y un catálogo de
-vidrios), `sources` (puntual, paralela, de imagen), `instruments` (una
-pantalla es un instrumento, que es una superficie) y `elements` (`Lens`,
-`Mirror` ya montados).
+**Todo es un valor.** Superficies, interfaces, elementos, ensamblajes y
+sistemas son inmutables y se comparan por sus parámetros. `rotated`,
+`translated`, `placed` y `replace` devuelven valores nuevos. Nada en el
+paquete muta un sistema.
 
-**`design` — el modelo de datos de un sistema.** `SurfaceRow` es una fila de
-prescripción: radio, espesor al siguiente, material, semidiámetro, constante
-cónica, coeficientes asféricos, tipo de superficie. `OpticalSystem` es la
-secuencia completa, con los vértices acumulados, los índices a cada lado de
-cada superficie, el índice del diafragma y los planos objeto e imagen.
-`StigmaticTrain` es la familia paramétrica de lentes ovoides estigmáticas
-(ver abajo), declarada como lo que ontológicamente es: **medios que llenan
-el espacio, superficies que los delimitan** — `media=(aire, vidrio, aire)`,
-donde cada medio es un `Material` a la fidelidad que haga falta: el medio
-de índice constante (`ConstantIndex`; un float basta) o una ley de
-dispersión real, con las formas construidas del índice principal en la
-longitud de onda de diseño. Los espejos son superficies puras (no
-delimitan medio nuevo). Describe **qué es** un sistema y contiene cero
-lógica de propagación: un diseño existe antes de que exista un motor que
-lo trace.
-
-**`propagation` — los algoritmos.** El único lugar que gobierna qué hace un
-rayo después de chocar. `sequential` vectoriza N rayos por M superficies en
-orden fijo; `branching` construye el árbol de reflejados y refractados;
-`paraxial` aporta `ParaxialModel`, `solve_object_plane` (recupera el plano
-objeto imponiendo B = 0 en la matriz del sistema) y `differential_conjugates`;
-`fields` aporta `FieldPoint`, el solver 2-D del rayo principal
-(`chief_ray_slopes`), el muestreo de pupila y `trace_pupil`. Estas dos
-últimas viven aquí porque resolver un rayo principal es trazar.
-
-**`io` — serialización.** Lectura y escritura de prescripciones, con los
-formatos en un registro (`FORMAT_READERS`, `FORMAT_WRITERS`), y catálogos de
-materiales como archivos de datos (`read_materials`: modelos constant /
-abbe / cauchy / sellmeier por fila de CSV — así entra la resina de
-impresión de `data/materials/formlabs_resins.csv`). El formato de archivo es una
-naturaleza distinta de lo que un sistema es.
-
-**`analysis` — lo que se mide sobre un sistema ya trazado.** Partido en dos
-por el objeto de la medida: `imaging` mira la imagen (spots, PSF escalar,
-imagen aérea de Abbe, contraste) y `aberrations` mira el error de rayo y de
-frente de onda (métricas de campo, distorsión, Seidel, cromática, eikonal,
-Zernike, ray fans, estigmatismo, aplanatismo). Los dos re-exportan desde
-`raytracer.analysis`, derivando la lista de sus propios `__all__`.
-
-**`optimize` — mover parámetros.** Todo lo anterior a este paquete mide;
-este varía. Su rasgo distintivo es *qué* varía: no coeficientes de una
-superficie ajustándose a una forma, sino las conjugadas libres de familias
-cuyos miembros ya son todos exactos en un sentido (estigmáticos), gastando
-esa libertad en comprar más propiedades. Las propiedades son **restricciones
-enchufables** (`constraints.py`): `Aplanatism`, `Distortion`,
-`FlatImageSurface`, `TargetMagnification`, `AxialColor` — cada una un objeto
-que produce su bloque de residuales sobre trazas compartidas en caché, y
-cualquier lista de ellas forma el objetivo de `optimize_train`. Una
-restricción nueva es una subclase de `Constraint` con `size` y `residuals`.
-
-**`viz` — presentación.** `plots` para las figuras matplotlib, `bodies`
-para los cuerpos de lente deducidos de la secuencia de medios — qué par de
-superficies encierra qué medio se *deduce* de la descripción estándar
-(aire → Σ1 → vidrio → Σ2 → aire), el contorno se cierra en la intersección
-de las caras cuando se cruzan bajo la apertura (la unión Ω del generador de
-STL del autor), los cuerpos vecinos que se interpenetran se cortan a la
-altura del cruce — la región que ambos sólidos reclaman no pertenece a
-ninguna pieza y acota la *apertura válida* del diseño; si un haz trazado
-refracta más allá del vidrio dibujado, `draw_system` lo advierte en vez
-de decorarlo: ahí la descripción no define medio alguno — piezas
-separadas y bien definidas, listas para
-exportarse lente a lente — y cada cuerpo se colorea por densidad óptica
-sobre una rampa de azul celeste: a mayor índice, más profundo el azul,
-automáticamente —, `scene` para la escena neutral
-de ítems, `gl/` para el visor OpenGL (cámara, shaders, renderers, ventana)
-e `interactive` para arrastrar fuente, lente y pantalla en vivo. Es el
-paquete más grande y el único del que nada depende.
-
-### Tres decisiones que explican el resto
-
-**Una sola entrada para intersectar.** Un rayo es `A + λu`. Una superficie
-se describe implícita o paramétricamente, y cada forma da un método:
-resolver `f_Σ(A + λu) = 0`, o resolver `A + λu = P(t)`, en ambos casos para
-la menor λ positiva. `intersect_ray_with_surface(rayo, superficie)` pregunta
-a la superficie qué ofrece y aplica el método. Dentro del implícito, el
-solver toma la ruta exacta más barata que la superficie permita: forma
-cerrada si `f_Σ` es cuadrática, Newton si la superficie da semilla,
-bracket-and-bisect en el caso general. Las tres resuelven *la misma
-ecuación*.
-
-**El gradiente implícito hace doble trabajo.** `∇f_Σ` es a la vez la
-derivada que necesita Newton y la normal de la superficie. Declarar `f_Σ` y
-su gradiente compra intersección y normales de una vez, y por eso
-`Surface.hit()` es una única plantilla genérica.
-
-**Un rayo lleva su estado y nada más.** `Ray` es origen, dirección,
-longitud de onda y `point_at()`. Detectar la colisión corresponde a la
-descripción de la superficie; decidir qué pasa después corresponde al
-algoritmo de propagación; la genealogía de rayos pertenece al algoritmo que
-la crea.
-
-Las dos únicas aristas que cruzan la cadena hacia arriba están diferidas a
-propósito, y el test las fija: `OpticalSystem.from_prescription` alcanza el
-registro de lectores de `io` desde dentro del método, de modo que el modelo
-de datos sigue sin depender de ningún formato de archivo; y
-`surfaces/surface.py` anota un `Ray` bajo `if TYPE_CHECKING`, que se borra
-en tiempo de ejecución, de modo que una superficie es intersectable sin
-saber qué es un rayo.
+**Un solo modelo para los dos motores.** El trazador secuencial sigue el
+camino del sistema. El no secuencial recorre las mismas fronteras, con los
+mismos medios y los mismos recubrimientos, sin orden. No hay un "mundo
+2-D": un dibujo plano es el corte meridional del modelo 3-D, y una fuente
+con `fan="y"` emite el abanico meridional.
 
 ## Instalación
 
@@ -498,8 +492,8 @@ medida leída de `data/materials/formlabs_resins.csv` y su color axial declarado
 ## Tests
 
 ```bash
-pytest                                    # 229 tests
-xvfb-run -a pytest                        # 233, incluidos los de contexto OpenGL
+pytest -m "not gpu"                       # 393 tests
+xvfb-run -a pytest                        # 397, incluidos los de contexto OpenGL
 ```
 
 Las verdades de referencia son analíticas donde existen: conjugados de
@@ -507,9 +501,11 @@ parábola y elipsoide a precisión de máquina, magnificación paraxial del
 objetivo DUV (+0.2500000135), NA de imagen 1.1977, RMS de Zernike (0.5089 nm
 tras quitar tilt y desenfoque), primer cero de Airy, colapso de contraste en
 el límite de coherencia parcial, y linealidad aditiva del framebuffer HDR.
-Los dos métodos de intersección se contrastan entre sí sobre el óvalo de
-Descartes —la única superficie que ofrece ambas descripciones— exigiendo que
-caigan en el mismo punto para el mismo rayo. La Ec. (24) del artículo de
+El impacto de Newton sobre el óvalo de Descartes se contrasta con su
+parametrización cerrada, y la intersección cerrada de las cónicas con la de
+Newton. Un sistema plegado con doble paso iguala a su gemelo desplegado a
+1e-12. La energía se conserva en cada división, con o sin recubrimiento, y
+una placa reproduce la serie incoherente de Fresnel `(1−R)/(1+R)` a 1e-10. La Ec. (24) del artículo de
 aplanatismo se contrasta con la construcción geométrica de la normal, y el
 mapa `M` con el cociente de senos de los rayos exactos, a 1e-9 por rayo; el
 singlete simétrico ancla el caso `M ≡ 1` a precisión de máquina. La cadena
