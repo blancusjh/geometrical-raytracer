@@ -37,12 +37,12 @@ def differential_conjugates(tracer: SequentialTracer, *, eps: float = 1e-4, star
     """
 
     base = np.array([0.0, 0.0, tracer.step_z(0) + start_z])
-    height = tracer.trace(base + [0.0, eps, 0.0], direction_from_slopes(0.0, 0.0), keep_path=False)
-    angle = tracer.trace(base, direction_from_slopes(0.0, eps), keep_path=False)
+    height = tracer.trace_ray(base + [0.0, eps, 0.0], direction_from_slopes(0.0, 0.0))
+    angle = tracer.trace_ray(base, direction_from_slopes(0.0, eps))
     if not (height.ok and angle.ok):
         raise RuntimeError("Differential rays did not survive the system")
-    a = height.image_point[1] / eps
-    b = angle.image_point[1] / eps
+    a = height.end[1] / eps
+    b = angle.end[1] / eps
     distance = -b / a
     return ConjugateSolution(object_z=float(base[2] - distance), magnification=float(a))
 

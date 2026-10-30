@@ -8,7 +8,7 @@ from typing import Literal
 import numpy as np
 
 from ..geometry.vectors import direction_from_slopes
-from .sequential import BatchTraceResult, SequentialTracer, TraceResult, TraceStatus
+from .sequential import SequentialTrace, SequentialTracer, TracedRay, TraceStatus
 
 
 @dataclass(frozen=True)
@@ -33,19 +33,11 @@ def trace_from_object(
     tracer: SequentialTracer,
     xy: tuple[float, float],
     slopes: tuple[float, float],
-    *,
-    keep_path: bool = False,
-    keep_aoi: bool = False,
-) -> TraceResult:
+) -> TracedRay:
     """Trace a single ray from the object plane given transverse slopes."""
 
     origin = np.array([xy[0], xy[1], _object_z(tracer)])
-    return tracer.trace(
-        origin,
-        direction_from_slopes(slopes[0], slopes[1]),
-        keep_path=keep_path,
-        keep_aoi=keep_aoi,
-    )
+    return tracer.trace_ray(origin, direction_from_slopes(slopes[0], slopes[1]))
 
 
 class _RayVignetted(RuntimeError):
@@ -99,9 +91,9 @@ def chief_ray_slopes(
     def stop_position(slopes: np.ndarray) -> np.ndarray:
         origin = np.array([[field.x, field.y, object_z]])
         direction = direction_from_slopes(float(slopes[0]), float(slopes[1]))[None, :]
-        batch = tracer.trace_batch(origin, direction, keep_paths=True)
-        ok = batch.status[0] == TraceStatus.OK or batch.failed_step[0] > stop_index
-        position = batch.paths[0, stop_index + 1, :2]
+        ray = tracer.trace(origin, direction)[0]
+        ok = ray.ok or ray.failed_step > stop_index
+        position = ray.path[stop_index + 1, :2]
         if not ok or not np.all(np.isfinite(position)):
             raise _RayVignetted
         return position
@@ -216,33 +208,37 @@ class PupilSampling:
 
 @dataclass
 class PupilTrace:
-    """Traced pupil bundle for one field point — the central analysis object."""
+    """A pupil-filling bundle for one field point: the trace, and the pupil it samples.
+
+    ``pupil`` and ``trace`` have a row per sampled ray; ``weight`` has one per
+    *surviving* ray, and so do :attr:`end`, :attr:`direction` and :attr:`opl`.
+    """
 
     field: FieldPoint
-    pupil_uv: np.ndarray  # (N, 2) normalized coordinates
-    weights: np.ndarray  # (N,) pupil-area weights over the *valid* subset
-    batch: BatchTraceResult
-    chief: TraceResult
+    pupil: np.ndarray  # (N, 2): normalized pupil coordinates
+    weight: np.ndarray  # (M,): pupil-area weights of the surviving rays, summing to 1
+    trace: SequentialTrace
+    chief: TracedRay
     na_object_sine: float
     sampling: PupilSampling = dataclass_field(default_factory=PupilSampling)
 
     @property
-    def valid(self) -> np.ndarray:
-        return self.batch.valid
+    def ok(self) -> np.ndarray:
+        return self.trace.ok
 
     @property
-    def image_points(self) -> np.ndarray:
-        """(M, 3) image-plane intersections of the surviving rays."""
+    def end(self) -> np.ndarray:
+        """``(M, 3)``: where the surviving rays meet the detector."""
 
-        return self.batch.image_points[self.valid]
+        return self.trace.end[self.ok]
 
     @property
-    def directions(self) -> np.ndarray:
-        return self.batch.directions[self.valid]
+    def direction(self) -> np.ndarray:
+        return self.trace.direction[self.ok]
 
     @property
     def opl(self) -> np.ndarray:
-        return self.batch.opl[self.valid]
+        return self.trace.opl[self.ok]
 
 
 def trace_pupil(
@@ -254,7 +250,6 @@ def trace_pupil(
     slope_model: Literal["tangent", "sine"] = "tangent",
     chief_slope: float | tuple[float, float] | None = None,
     stop_index: int | None = None,
-    keep_paths: bool = False,
 ) -> PupilTrace:
     """Trace a pupil-filling bundle for *field*.
 
@@ -306,22 +301,18 @@ def trace_pupil(
     else:
         raise ValueError(f"Unknown slope model {slope_model!r}")
 
-    batch = tracer.trace_batch(origins, directions, keep_paths=keep_paths)
-    chief = trace_from_object(
-        tracer, (field.x, field.y), (chief_sx, chief_sy), keep_path=True
-    )
+    trace = tracer.trace(origins, directions)
+    chief = trace_from_object(tracer, (field.x, field.y), (chief_sx, chief_sy))
 
-    weights_all = sampling.area_weights(points)
-    weights = weights_all[batch.valid]
-    total = weights.sum()
-    if total > 0.0:
-        weights = weights / total
+    weight = sampling.area_weights(points)[trace.ok]
+    if weight.sum() > 0.0:
+        weight = weight / weight.sum()
 
     return PupilTrace(
         field=field,
-        pupil_uv=points,
-        weights=weights,
-        batch=batch,
+        pupil=points,
+        weight=weight,
+        trace=trace,
         chief=chief,
         na_object_sine=na_object_sine,
         sampling=sampling,

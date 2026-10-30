@@ -36,34 +36,36 @@ PRIMARY, REFLECTED, TRANSMITTED = 0, 1, 2
 
 @dataclass
 class DetectorHits:
-    """What one detector recorded: world and local points, directions, power, wavelength, OPL."""
+    """What one detector recorded, a row per arriving ray: where (in the world and on
+    the detector), from which direction, with what power, wavelength and OPL."""
 
     name: str
-    points: np.ndarray
-    local_points: np.ndarray
-    directions: np.ndarray
+    point: np.ndarray
+    local_point: np.ndarray
+    direction: np.ndarray
     power: np.ndarray
     wavelength_um: np.ndarray
     opl: np.ndarray
     generation: np.ndarray
 
     def __len__(self) -> int:
-        return self.points.shape[0]
+        return self.point.shape[0]
 
     def histogram(self, axis: int = 1, bins: int = 100, range=None) -> tuple[np.ndarray, np.ndarray]:
         """Power per bin along a local axis (0 = x, 1 = y): ``(power, bin_edges)``."""
 
-        return np.histogram(self.local_points[:, axis], bins=bins, range=range, weights=self.power)
+        return np.histogram(self.local_point[:, axis], bins=bins, range=range, weights=self.power)
 
 
 @dataclass
 class RayTree:
-    """Every traced segment, with its genealogy.
+    """Every traced segment, a row each, with its genealogy.
 
     Segment ``i`` runs from ``start[i]`` to ``end[i]``; ``parent[i]`` is the
     segment it was born from (−1 for a source ray), ``kind[i]`` says how
     (primary / reflected / transmitted), ``face[i]`` names the boundary it
-    ended on (``None`` for a ray leaving the system).
+    ended on (``None`` for a ray leaving the system), ``opl[i]`` is the
+    optical path length at its end.
     """
 
     start: np.ndarray
@@ -75,7 +77,7 @@ class RayTree:
     parent: np.ndarray
     kind: np.ndarray
     face: list
-    opl_end: np.ndarray
+    opl: np.ndarray
     detectors: dict[str, DetectorHits] = field(default_factory=dict)
 
     def __len__(self) -> int:
@@ -148,7 +150,7 @@ class NonSequentialTracer:
             sources = [sources]
         rays = Rays.concatenate([s if isinstance(s, Rays) else s.emit() for s in sources])
         n = len(rays)
-        front = _Front(rays.origins, rays.directions, rays.power, rays.wavelength_um,
+        front = _Front(rays.origin, rays.direction, rays.power, rays.wavelength_um,
                        np.ones(n, dtype=int), np.full(n, -1), np.full(n, PRIMARY), np.zeros(n))
         segments, detections = [], {}
         first_id = 0
@@ -287,7 +289,7 @@ class NonSequentialTracer:
             parent=fronts.parent,
             kind=fronts.kind,
             face=[n for _, _, names, _ in segments for n in names],
-            opl_end=np.concatenate([o for _, _, _, o in segments]),
+            opl=np.concatenate([o for _, _, _, o in segments]),
             detectors=hits,
         )
 

@@ -16,15 +16,15 @@ from .fields import (
 )
 from .nonsequential import DetectorHits, NonSequentialTracer, RayTree
 from .paraxial import ConjugateSolution, ParaxialModel, differential_conjugates, solve_object_plane
-from .sequential import BatchTraceResult, SequentialTracer, TraceResult, TraceStatus
+from .sequential import SequentialTrace, SequentialTracer, TracedRay, TraceStatus
 
 __all__ = [
     "SequentialTracer",
     "NonSequentialTracer",
     "RayTree",
     "DetectorHits",
-    "TraceResult",
-    "BatchTraceResult",
+    "SequentialTrace",
+    "TracedRay",
     "TraceStatus",
     "ConjugateSolution",
     "ParaxialModel",

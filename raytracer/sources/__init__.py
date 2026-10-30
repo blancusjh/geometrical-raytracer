@@ -24,29 +24,29 @@ from ..geometry.vectors import as_vector, normalize
 
 @dataclass
 class Rays:
-    """A batch of rays: origins and unit directions ``(N, 3)``, wavelength (µm) and power ``(N,)``."""
+    """A batch of rays, a row each: origin and unit direction ``(N, 3)``, wavelength (µm) and power ``(N,)``."""
 
-    origins: np.ndarray
-    directions: np.ndarray
+    origin: np.ndarray
+    direction: np.ndarray
     wavelength_um: np.ndarray
     power: np.ndarray
 
     def __post_init__(self) -> None:
-        self.origins = np.atleast_2d(np.asarray(self.origins, dtype=float))
-        d = np.atleast_2d(np.asarray(self.directions, dtype=float))
-        self.directions = d / np.linalg.norm(d, axis=1, keepdims=True)
-        n = self.origins.shape[0]
+        self.origin = np.atleast_2d(np.asarray(self.origin, dtype=float))
+        d = np.atleast_2d(np.asarray(self.direction, dtype=float))
+        self.direction = d / np.linalg.norm(d, axis=1, keepdims=True)
+        n = self.origin.shape[0]
         self.wavelength_um = np.broadcast_to(np.asarray(self.wavelength_um, dtype=float), (n,)).copy()
         self.power = np.broadcast_to(np.asarray(self.power, dtype=float), (n,)).copy()
 
     def __len__(self) -> int:
-        return self.origins.shape[0]
+        return self.origin.shape[0]
 
     @staticmethod
     def concatenate(batches: "list[Rays]") -> "Rays":
         return Rays(
-            np.vstack([b.origins for b in batches]),
-            np.vstack([b.directions for b in batches]),
+            np.vstack([b.origin for b in batches]),
+            np.vstack([b.direction for b in batches]),
             np.concatenate([b.wavelength_um for b in batches]),
             np.concatenate([b.power for b in batches]),
         )

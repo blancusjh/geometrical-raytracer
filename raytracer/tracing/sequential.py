@@ -18,7 +18,7 @@ the hardware does not: the wavelength, and the object plane.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, make_dataclass
 from enum import IntEnum
 
 import numpy as np
@@ -42,52 +42,56 @@ class TraceStatus(IntEnum):
     BEHIND = 6
 
 
-@dataclass
-class TraceResult:
-    """Outcome of tracing a single ray."""
+class _PerRay:
+    """Quantities derived the same way for a whole trace and for one of its rays."""
 
-    image_point: np.ndarray
-    direction: np.ndarray
-    opl: float
-    status: TraceStatus
-    failed_step: int | None = None
-    path: np.ndarray | None = None  # (n_steps + 1, 3): start, then the hit at every step
-    aoi_deg: np.ndarray | None = None
+    path: np.ndarray
+    status: np.ndarray
 
     @property
-    def ok(self) -> bool:
-        return self.status is TraceStatus.OK
+    def ok(self):
+        """Whether the ray reached the detector."""
 
-
-@dataclass
-class BatchTraceResult:
-    """Outcome of tracing N rays at once."""
-
-    image_points: np.ndarray  # (N, 3)
-    directions: np.ndarray  # (N, 3)
-    opl: np.ndarray  # (N,)
-    status: np.ndarray  # (N,) int
-    failed_step: np.ndarray  # (N,) int, -1 when the ray survived
-    paths: np.ndarray | None = None  # (N, n_steps + 1, 3)
-    aoi_deg: np.ndarray | None = None  # (N, n_steps)
-
-    @property
-    def valid(self) -> np.ndarray:
         return self.status == TraceStatus.OK
 
-    def __len__(self) -> int:
-        return self.image_points.shape[0]
+    @property
+    def end(self) -> np.ndarray:
+        """Where the ray ended: its hit on the detector (NaN if it never got there)."""
 
-    def __getitem__(self, i: int) -> TraceResult:
-        return TraceResult(
-            image_point=self.image_points[i],
-            direction=self.directions[i],
-            opl=float(self.opl[i]),
-            status=TraceStatus(int(self.status[i])),
-            failed_step=None if self.failed_step[i] < 0 else int(self.failed_step[i]),
-            path=None if self.paths is None else self.paths[i],
-            aoi_deg=None if self.aoi_deg is None else self.aoi_deg[i],
-        )
+        return self.path[..., -1, :]
+
+
+@dataclass
+class SequentialTrace(_PerRay):
+    """N rays traced along a path: one row per ray, one column per quantity.
+
+    ``trace[i]`` is the row of ray *i*, a :class:`TracedRay` with the same columns.
+    """
+
+    path: np.ndarray  # (N, steps + 1, 3): the start, then the hit at every step (NaN after a failure)
+    direction: np.ndarray  # (N, 3): the last direction
+    opl: np.ndarray  # (N,): optical path length to the detector
+    status: np.ndarray  # (N,): TraceStatus values
+    failed_step: np.ndarray  # (N,): the step where the ray stopped, -1 if it did not
+    aoi_deg: np.ndarray  # (N, steps): angle of incidence at every step
+
+    def __len__(self) -> int:
+        return self.path.shape[0]
+
+    def __getitem__(self, i: int) -> "TracedRay":
+        row = {f.name: getattr(self, f.name)[i] for f in fields(self)}
+        row["status"] = TraceStatus(int(row["status"]))
+        return TracedRay(**row)
+
+
+#: One row of a :class:`SequentialTrace`: the same columns, for one ray.
+TracedRay = make_dataclass(
+    "TracedRay",
+    [(f.name, f.type) for f in fields(SequentialTrace)],
+    bases=(_PerRay,),
+    frozen=True,
+    namespace={"__doc__": "One row of a SequentialTrace: the same columns, for one ray."},
+)
 
 
 class SequentialTracer:
@@ -186,25 +190,14 @@ class SequentialTracer:
 
     # -- tracing -------------------------------------------------------------
 
-    def trace(self, origin: ArrayLike, direction: ArrayLike, *, keep_path: bool = True, keep_aoi: bool = False) -> TraceResult:
-        """Trace one ray; convenience wrapper around :meth:`trace_batch`."""
+    def trace_ray(self, origin: ArrayLike, direction: ArrayLike) -> "TracedRay":
+        """Trace one ray: the single row of a one-ray :meth:`trace`."""
 
-        batch = self.trace_batch(
-            np.asarray(origin, dtype=float)[None, :],
-            np.asarray(direction, dtype=float)[None, :],
-            keep_paths=keep_path,
-            keep_aoi=keep_aoi,
-        )
-        return batch[0]
+        return self.trace(np.asarray(origin, dtype=float)[None, :], np.asarray(direction, dtype=float)[None, :])[0]
 
-    def trace_batch(
-        self,
-        origins: ArrayLike,
-        directions: ArrayLike,
-        *,
-        keep_paths: bool = False,
-        keep_aoi: bool = False,
-    ) -> BatchTraceResult:
+    def trace(self, origins: ArrayLike, directions: ArrayLike) -> SequentialTrace:
+        """Trace N rays given by their ``(N, 3)`` starts and directions."""
+
         p = np.array(origins, dtype=float, copy=True)
         d = np.array(directions, dtype=float, copy=True)
         if p.ndim != 2 or p.shape[1] != 3:
@@ -218,12 +211,9 @@ class SequentialTracer:
         failed = np.full(n_rays, -1, dtype=np.int64)
         opl = np.zeros(n_rays)
         alive = np.ones(n_rays, dtype=bool)
-        paths = None
-        if keep_paths:
-            paths = np.full((n_rays, n_steps + 1, 3), np.nan)
-            paths[:, 0, :] = p
-        aoi = np.full((n_rays, n_steps), np.nan) if keep_aoi else None
-        image = np.full((n_rays, 3), np.nan)
+        path = np.full((n_rays, n_steps + 1, 3), np.nan)
+        path[:, 0, :] = p
+        aoi = np.full((n_rays, n_steps), np.nan)
 
         def fail(mask: np.ndarray, code: TraceStatus, step: int) -> None:
             nonlocal alive
@@ -259,17 +249,14 @@ class SequentialTracer:
             n1 = np.where(going_plus, n_minus, n_plus)
             q = pose.to_world(ql)
             opl = np.where(alive, opl + n1 * t, opl)
-            if keep_paths:
-                paths[alive, i + 1, :] = q[alive]
+            path[alive, i + 1, :] = q[alive]
 
             normal = pose.direction_to_world(normal_local)
             normal = np.where(going_plus[:, None], -normal, normal)  # face the incoming ray
-            if keep_aoi:
-                cos_i = -np.einsum("ij,ij->i", d, normal)
-                aoi[alive, i] = np.degrees(np.arccos(np.clip(np.abs(cos_i[alive]), 0.0, 1.0)))
+            cos_i = -np.einsum("ij,ij->i", d, normal)
+            aoi[alive, i] = np.degrees(np.arccos(np.clip(np.abs(cos_i[alive]), 0.0, 1.0)))
 
             if step.event == DETECT:
-                image[alive] = q[alive]
                 break
             if step.event == REFLECT:
                 d_new = reflect(d, normal)
@@ -282,16 +269,7 @@ class SequentialTracer:
             d = np.where(alive[:, None], d_new, d)
             p = np.where(alive[:, None], q + d * self.restart_offset, p)
 
-        image[~alive] = np.nan
-        return BatchTraceResult(
-            image_points=image,
-            directions=d,
-            opl=opl,
-            status=status,
-            failed_step=failed,
-            paths=paths,
-            aoi_deg=aoi,
-        )
+        return SequentialTrace(path=path, direction=d, opl=opl, status=status, failed_step=failed, aoi_deg=aoi)
 
 
-__all__ = ["TraceStatus", "TraceResult", "BatchTraceResult", "SequentialTracer"]
+__all__ = ["TraceStatus", "SequentialTrace", "TracedRay", "SequentialTracer"]
