@@ -512,6 +512,8 @@ class OpenGLViewer(app.Canvas):
     # -- interaction ----------------------------------------------------------
 
     def on_resize(self, event) -> None:
+        if not hasattr(self, "camera"):  # some backends (glfw) resize during Canvas.__init__
+            return
         self.camera.resize(self._viewport_px())
         self.update()
 

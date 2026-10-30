@@ -39,7 +39,7 @@ from ..elements import BeamSplitter, Lens, Mirror, Prism, Sensor, Stop
 from ..geometry.apertures import Annulus, Aperture, Circle, Rectangle
 from ..geometry.surfaces import Plane
 from ..geometry.transforms import Pose
-from .bodies import element_outline, index_color, medium_index, system_extent
+from .bodies import element_outline, index_color, medium_index
 from .plots import DEFAULT_MATERIAL_COLORS
 
 TWO_PI = 2.0 * np.pi
@@ -573,9 +573,9 @@ class Viewer3D:
                    wavelength_um: float | None = None) -> None:
         """Every element of *system* at its world pose: lenses coloured by
         material, mirrors opaque, beam splitters glassy, blades dark, sensors
-        dim. Closed solids by default; ``section='half'`` gives a cutaway."""
+        (those with an aperture) gold. Closed solids by default;
+        ``section='half'`` gives a cutaway."""
 
-        scale = system_extent(system)
         for element, pose in system.walk():
             if isinstance(element, Lens):
                 self.add_lens(element, pose, section=section, wavelength_um=wavelength_um)
@@ -588,9 +588,10 @@ class Viewer3D:
             elif isinstance(element, Stop) and not element.virtual:
                 self.add_surface(Plane(), element.outer_radius, pose=pose, color=STOP_COLOR,
                                  section=section, angular_samples=angular_samples, hole=element.aperture)
-            elif isinstance(element, Sensor):
-                aperture = element.aperture if element.aperture is not None else Circle(scale)
-                self.add_surface(element.surface, aperture, pose=pose, color=SENSOR_COLOR,
+            elif isinstance(element, Sensor) and element.aperture is not None:
+                # an unbounded sensor (a prescription's image plane) has no
+                # physical size to draw; give it an aperture to see it
+                self.add_surface(element.surface, element.aperture, pose=pose, color=SENSOR_COLOR,
                                  section=section, angular_samples=angular_samples)
             elif isinstance(element, Prism):
                 for facet_pose, outline in element.solid.facets():
