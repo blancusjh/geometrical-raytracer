@@ -43,11 +43,10 @@ def tracer(prescription) -> SequentialTracer:
 
 
 def test_prescription_loads(prescription, system, tracer):
-    # The table's air-to-air dummy row is dropped and the last two rows
-    # (the cemented HIINDEX1|HIINDEX2 face and the immersion layer ending on
-    # the wafer) merge with the faces they coincide with, so the 48-step path
-    # visits 47 distinct boundaries plus the image; the double-pass CaF2 lens
-    # (L3) is crossed twice.
+    # 48 table rows less the air-to-air dummy (surface 36), plus the image:
+    # 48 steps. The double-pass CaF2 lens L3 is visited twice (steps 4-5 and
+    # 7-8), the HIINDEX1|HIINDEX2 face is one cemented boundary, and the image
+    # plane is the back face of the HIINDEX2 immersion layer.
     assert len(system.path) == 48
     assert prescription.wavelength_um == pytest.approx(0.193368)
     assert tracer.wavelength_um == pytest.approx(0.193368)
