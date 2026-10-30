@@ -9,6 +9,7 @@ reference pupil inside the barrel (aim_z)."""
 import functools
 import time
 import warnings
+from types import SimpleNamespace
 
 warnings.filterwarnings("ignore")
 import numpy as np
@@ -19,8 +20,9 @@ from raytracer.families import StigmaticTrain
 from raytracer.materials import AIR, sellmeier_glass
 from raytracer.optimize import (
     Aplanatism, AxialColor, Constraint, Distortion, EvaluationContext,
-    FlatImageSurface, TargetMagnification, optimize_train,
+    FlatImageSurface, TargetMagnification, constraint_residuals, optimize_train,
 )
+from scipy.optimize import least_squares
 
 BK7 = sellmeier_glass("N-BK7")
 F2 = sellmeier_glass("N-F2")
@@ -32,16 +34,16 @@ WL = 0.58756
 
 
 def multistart(build, constraints, *, na, samples, n_free, starts, seed, spans,
-               bounds, score, **ls):
+               bounds, score, optimize=optimize_train, **ls):
     rng = np.random.default_rng(seed)
     best = None
     for _ in range(starts):
         d = np.array([rng.uniform(*span) for span in spans])
         try:
             train = build(tuple(d))
-            fit = optimize_train(train, constraints, na_object_sine=na,
-                                 samples=samples, bounds=bounds,
-                                 diff_step=1e-4, max_nfev=60, **ls)
+            fit = optimize(train, constraints, na_object_sine=na,
+                           samples=samples, bounds=bounds,
+                           diff_step=1e-4, max_nfev=60, **ls)
             s = score(fit)
         except (ValueError, ZeroDivisionError):
             continue
@@ -49,9 +51,9 @@ def multistart(build, constraints, *, na, samples, n_free, starts, seed, spans,
         if np.isfinite(s) and (best is None or s < best[0]):
             best = (s, fit)
     if best is not None:
-        fit = optimize_train(best[1].train, constraints, na_object_sine=na,
-                             samples=samples, bounds=bounds, diff_step=1e-4,
-                             xtol=1e-14, ftol=1e-14, gtol=1e-14, **ls)
+        fit = optimize(best[1].train, constraints, na_object_sine=na,
+                       samples=samples, bounds=bounds, diff_step=1e-4,
+                       xtol=1e-14, ftol=1e-14, gtol=1e-14, **ls)
         best = (score(fit), fit)
     return best
 
@@ -211,6 +213,29 @@ class VirtualObjectAplanatism(Constraint):
         return self.weight * out
 
 
+def fit_conjugates(train, constraints, *, na_object_sine, samples, bounds, **ls):
+    """``optimize_train`` without its before/after aplanatism reports.
+
+    Those reports launch a fan from the object plane, which a virtual
+    object (d0 > 0, inside the lens) cannot do: the tracer rightly refuses
+    a ray that must run backwards to its first surface. The constraints
+    here launch their own converging fans instead.
+    """
+
+    x0 = np.array(train.conjugates[1:-1], dtype=float)
+    size = sum(c.size(None) for c in constraints)
+
+    def objective(x):
+        try:
+            candidate = train.with_conjugates(x)
+        except ValueError:
+            return np.full(size, 1e3)
+        return constraint_residuals(candidate, constraints, na_object_sine=na_object_sine, samples=samples)
+
+    result = least_squares(objective, x0, x_scale=np.maximum(np.abs(x0), 1.0), bounds=bounds, **ls)
+    return SimpleNamespace(train=train.with_conjugates(result.x), result=result)
+
+
 def ultrawide():
     print("=" * 70)
     print("ULTRAWIDE — 2 lenses (N-SF11 + N-BK7), virtual object d0 = +8 mm")
@@ -231,7 +256,7 @@ def ultrawide():
 
     best = multistart(build, cons, na=0.1, samples=5, n_free=3, starts=6,
                       seed=23, spans=[(-500, 500)] * 3, bounds=(-3e3, 3e3),
-                      score=score)
+                      score=score, optimize=fit_conjugates)
     s, fit = best
     ctx = EvaluationContext(fit.train, na_object_sine=0.1, samples=5)
     res = cons[0].residuals(ctx)

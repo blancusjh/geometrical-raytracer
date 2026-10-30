@@ -110,6 +110,18 @@ class Conic(SurfaceValue, SurfaceOfRevolution):
     def sag_and_slope(self, r: ArrayLike) -> tuple[np.ndarray, np.ndarray]:
         return conic_sag_and_slope(r, self.c, self.k)
 
+    def normal(self, points: ArrayLike) -> np.ndarray:
+        """Unit normals from the quadric's own gradient, exact up to an ellipsoid's equator.
+
+        ``∇(c r² − 2z + c(1+k) z²)`` turned to the +z side: ``(−c x, −c y, 1 − c(1+k) z)``.
+        The sag slope diverges where the vertex sheet turns vertical; this does not.
+        """
+
+        p = np.asarray(points, dtype=float)
+        c, ck = self.c, self.c * (1.0 + self.k)
+        n = np.stack([-c * p[..., 0], -c * p[..., 1], 1.0 - ck * p[..., 2]], axis=-1)
+        return n / np.linalg.norm(n, axis=-1, keepdims=True)
+
     def intersect(self, origins, directions, alive=None, *, mode="nearest", t_min=1e-9) -> SurfaceHits:
         o, d = origins, directions
         if alive is None:

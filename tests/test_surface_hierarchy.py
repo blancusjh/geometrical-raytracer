@@ -215,3 +215,19 @@ def test_closed_form_conic_intersection_equals_newton(conic):
     both = closed.ok & newton.ok
     assert both.sum() > 0.9 * n
     np.testing.assert_allclose(closed.t[both], newton.t[both], atol=1e-9)
+
+
+def test_conic_normal_is_exact_up_to_the_equator():
+    """The quadric's gradient agrees with the sag slope away from the rim and stays
+    finite where the vertex sheet of an ellipsoid turns vertical."""
+
+    e = Ellipsoid.from_semi_axes(20.0, 12.0)
+    r = np.array([0.0, 4.0, 8.0])
+    z = e.sag(r, np.zeros(3))
+    pts = np.column_stack([r, np.zeros(3), z])
+    _, dsdx, _ = e.sag_gradient(r, np.zeros(3))
+    by_slope = np.column_stack([-dsdx, np.zeros(3), np.ones(3)])
+    by_slope /= np.linalg.norm(by_slope, axis=1, keepdims=True)
+    assert np.allclose(e.normal(pts), by_slope, atol=1e-14)
+    equator = e.normal(np.array([[12.0, 0.0, 20.0]]))
+    assert np.allclose(equator, [[-1.0, 0.0, 0.0]], atol=1e-15)
