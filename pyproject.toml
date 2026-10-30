@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "raytracer"
-version = "0.3.0"
-description = "Optical ray-tracing toolkit: vectorized sequential 3-D propagation with prescription import and analysis, plus a branching 2-D propagation with OpenGL/matplotlib visualization"
+version = "0.4.0"
+description = "Optical ray tracing on one physical model: elements placed in an ambient medium, traced sequentially and non-sequentially, with aberration and image analysis and OpenGL/matplotlib visualization"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

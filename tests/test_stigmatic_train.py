@@ -63,8 +63,8 @@ def test_collimating_surface_emits_parallel_rays():
     from raytracer.materials import ConstantIndex
 
     profile = CartesianSurface(n0=1.0, z0=-60.0, ni=1.5, zi=INF)
-    # The old row had no clear aperture; a lens body needs one now. 30 mm is
-    # beyond the steepest ray here (sine 0.35 from 60 mm reaches ~22 mm).
+    # A lens body needs a semi-diameter: 30 mm is beyond the steepest ray here
+    # (sine 0.35 from 60 mm reaches ~22 mm).
     row = TableRow(profile, 30.0, ConstantIndex("N1.5", 1.5), 30.0)
     system = OpticalSystem.from_table([row])
     tracer = SequentialTracer(system, object_z=-60.0)
@@ -211,7 +211,7 @@ def test_member_system_is_cemented_lenses_and_a_sensor():
 
 def test_unset_semidiameter_clips_at_the_usable_height():
     """With no semidiameter the train is clear out to the largest height every
-    surface supports (the old system had no clip there at all)."""
+    surface supports."""
 
     train = StigmaticTrain.singlet(n=1.5, d0=-60.0, d1=300.0, d2=60.0, thickness=8.0)
     limit = train.max_semidiameter

@@ -2,8 +2,8 @@
 
 The laws live in :mod:`raytracer.interfaces` (vector form, batches of 3-D
 rays) and the Fresnel power split in :mod:`raytracer.coatings`
-(``Uncoated``). The old 2-D scalar functions are gone; the plane of
-incidence here is the x-z plane, with the surface normal along z.
+(``Uncoated``). The plane of incidence here is the x-z plane, with the
+surface normal along z.
 """
 
 import numpy as np
@@ -78,8 +78,7 @@ def test_reflection_ignores_the_normal_orientation():
 
 
 def test_batch_rows_are_independent():
-    """Each row of a batch is the same as tracing that ray alone (the old
-    batch-vs-scalar check: only the batch form exists now)."""
+    """Each row of a batch is the same as tracing that ray alone."""
 
     n1, n2 = 1.0, 1.5
     thetas = np.deg2rad([5.0, 20.0, 40.0])

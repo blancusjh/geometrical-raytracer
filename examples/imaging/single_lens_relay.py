@@ -36,14 +36,14 @@ from raytracer.sources import PointSource
 from raytracer.tracing import NonSequentialTracer
 from raytracer.viz import Drawing, show
 
-SCREEN_HALF = 12.0
+SENSOR_HALF = 12.0
 
 
 def build_relay() -> OpticalSystem:
     lens = Lens("singlet", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
                 material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0)
-    screen = Sensor("screen", aperture=Rectangle(2 * SCREEN_HALF, 2 * SCREEN_HALF), z=171.4)
-    return OpticalSystem([lens, screen])
+    sensor = Sensor("IMG", aperture=Rectangle(2 * SENSOR_HALF, 2 * SENSOR_HALF), z=171.4)
+    return OpticalSystem([lens, sensor])
 
 
 def trace(system: OpticalSystem, rays: int):
@@ -70,10 +70,10 @@ def main() -> None:
         save_dir.mkdir(parents=True, exist_ok=True)
 
     if backend in ("mpl", "both"):
-        hits = render(41, "mpl", save_dir, "singlet_mpl.png").hits("screen")  # few rays: readable diagram
-        values, edges = hits.histogram(axis=1, bins=100, range=(-SCREEN_HALF, SCREEN_HALF))
+        hits = render(41, "mpl", save_dir, "singlet_mpl.png").hits("IMG")  # few rays: readable diagram
+        values, edges = hits.histogram(axis=1, bins=100, range=(-SENSOR_HALF, SENSOR_HALF))
         spot = spot_data_from_points(hits.local_points[:, :2])
-        print(f"screen: {len(hits)} hits, irradiance peak at y={edges[np.argmax(values)]:.2f} mm")
+        print(f"sensor: {len(hits)} hits, irradiance peak at y={edges[np.argmax(values)]:.2f} mm")
         print(f"RMS spot radius: {spot.rms_radius_um:.4g} um "
               "(nonzero: a spherical singlet is not stigmatic)")
 

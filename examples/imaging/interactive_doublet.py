@@ -40,9 +40,9 @@ VIEW = dict(x_lims=(-110.0, 200.0), y_lims=(-60.0, 60.0), size=(1300, 700))
 def main() -> None:
     lens = Lens("lens", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
                 material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0)
-    screen = Sensor("screen", aperture=Rectangle(30.0, 30.0), z=171.4)
+    sensor = Sensor("IMG", aperture=Rectangle(30.0, 30.0), z=171.4)
     source = PointSource((0.0, 0.0, -90.0), half_angle_deg=9.0, rays=201, fan="y")
-    session = InteractiveSession(sources=[source], system=OpticalSystem([lens, screen]), max_interactions=5)
+    session = InteractiveSession(sources=[source], system=OpticalSystem([lens, sensor]), max_interactions=5)
 
     if "--save" not in sys.argv:  # pragma: no cover - interactive
         session.run(**VIEW)

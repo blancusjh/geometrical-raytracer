@@ -123,10 +123,8 @@ def test_axial_color_probe_survives_a_very_distant_object():
 
 
 def test_tracer_at_wavelength_leaves_the_original_untouched():
-    """The old test guarded against the per-wavelength copy sharing mutable
-    rows with the original. Systems are immutable values now; what remains
-    to check is that the per-wavelength tracer is a new tracer of the same
-    system and object plane, and that the original keeps its wavelength."""
+    """The per-wavelength tracer is a new tracer of the same system and object
+    plane, and the original keeps its wavelength."""
 
     tracer = singlet_tracer()
     at_f = tracer.at_wavelength(F_LINE)

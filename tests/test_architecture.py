@@ -8,10 +8,9 @@ module and enforces that.
 Two kinds of import are exempt, both deliberate:
 
 - imports inside a function body, deferred to call time (this is how
-  ``OpticalSystem.from_prescription`` reaches the ``io`` reader registry
-  without the data model depending on a file format at import time);
-- imports inside ``if TYPE_CHECKING:``, erased at runtime (this is how
-  ``surfaces`` annotates a ``Ray`` it never imports).
+  ``OpticalSystem.from_table`` reaches its builder module, and how a
+  ``Prescription`` builds a tracer, without importing them at load time);
+- imports inside ``if TYPE_CHECKING:``, erased at runtime.
 """
 
 from __future__ import annotations

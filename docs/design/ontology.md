@@ -196,7 +196,7 @@ suffix or belong to a dimensionless allow-list.
 
 **Law 7 — Measurement is not presentation.** Nothing below `viz` imports
 matplotlib, vispy or Qt. `Result.plot()` is a deferred call into the `viz`
-registry, the same pattern as today's `from_prescription`. *Why:* headless
+registry, the same pattern as `OpticalSystem.from_table`. *Why:* headless
 analysis, and results that outlive any plotting library. *Enforced:* the
 layer test, extended to third-party imports.
 
@@ -232,7 +232,7 @@ Three checks turn this document into something `pytest` fails on.
    system never imports an engine or a file format. Still to add: a
    third-party rule (below `viz`, no `matplotlib`, `vispy` or `PySide6`;
    law 7).
-2. **Glossary.** `docs/design/glossary.md`, to be written once D1–D7 (§9)
+2. **Glossary.** `docs/design/glossary.md`, to be written once D1–D7 (§8)
    are settled, defines every public name, once,
    with its nature and package. A test collects `raytracer.__all__`
    recursively and fails on any name missing from the glossary, and on any
@@ -250,25 +250,7 @@ Laws 2, 5, 6, 8 and 10 each get the dedicated tests listed in §6.
 
 ---
 
-## 8. What changed from the old code
-
-| Old | Now |
-|---|---|
-| `math`, `surfaces` | `geometry` (vectors, `Rotation`/`Pose`, surfaces, apertures, solids, intersection) |
-| `optics.materials` | `materials` |
-| `optics.laws`, `optics.radiometry` | `interfaces.reflect/refract`; Fresnel is the `Uncoated` coating |
-| `SurfaceRow`, `SurfaceKind` | `TableRow` (a view and a constructor); the model is placed elements |
-| `SurfaceKind.STOP` | a `Stop` element (`virtual=True` for a reference plane inside glass) |
-| `OpticalSystem(rows, wavelength_um, object_z)` | `OpticalSystem(components, ambient, path, stop)`; wavelength and object plane on the tracer |
-| `set_thickness`, `set_asphere` (mutation) | new values: `replace`, `with_component`, `placed`, `rotated` |
-| 2-D `Lens`/`Mirror`/`Screen`, `BranchingTracer` | the same 3-D elements and `Sensor`, `NonSequentialTracer`; `fan="y"` sources for meridional pictures |
-| `propagation` | `tracing` |
-| `design.StigmaticTrain.to_system()` | `families.StigmaticTrain.system()` / `.tracer()` |
-| `OpticalSystem.from_prescription` | `io.read_prescription` → `Prescription(system, wavelength_um)` |
-
----
-
-## 9. Open decisions
+## 8. Open decisions
 
 **D1 — Name of "a system under conditions".** `Configuration`, `Setup`, or
 `Imaging`. *Recommended: `Configuration`.*
@@ -285,8 +267,7 @@ the README is in Spanish.
 **D7 — Glass data shipped with the package.** *Recommended:* ship
 refractiveindex.info data (CC0); read vendor `.agf` files from a user path.
 
-Settled: the package is `geometry.surfaces`, not `shapes`. Prescription
-tables keep the standard signed convention, while placed elements have
-absolute poses. Old names were broken, not shimmed. Mutating verbs are
-past participles that return new values (`rotated`, `translated`,
-`placed`).
+Settled: surfaces live in `geometry.surfaces`. Prescription tables keep the
+standard signed convention, while placed elements have absolute poses.
+Verbs that change a value are past participles and return a new value
+(`rotated`, `translated`, `placed`).

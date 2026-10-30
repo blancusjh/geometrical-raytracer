@@ -1,11 +1,6 @@
-"""Regression: multiple ray bundles drawn on one viewer must all render.
-
-draw_rays/draw_ray_segments used to *replace* the stored segments, so a scene
-with two RaySegmentsItem bundles (e.g. on-axis + off-axis telescope beams)
-silently dropped every bundle but the last — the drawn rays then never
-matched the physics (a Keplerian's on-axis beam never appeared to cross the
-optical axis at its marked intermediate image).
-"""
+"""Several ray bundles drawn on one viewer all render: each draw call adds
+its segments to the ones already there (an on-axis and an off-axis
+telescope beam must both appear)."""
 
 import numpy as np
 import pytest

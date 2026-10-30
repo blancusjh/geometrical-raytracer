@@ -98,8 +98,7 @@ def aplanatism_residuals(
 ) -> np.ndarray:
     """Residual vector: per-ray ``M - 1``, plus weighted image-surface sagitta.
 
-    The original fixed pairing, now expressed through the constraint
-    system: ``[Aplanatism(), FlatImageSurface(field_heights, weight)]``.
+    The constraints ``[Aplanatism(), FlatImageSurface(field_heights, weight)]``.
     """
 
     return constraint_residuals(

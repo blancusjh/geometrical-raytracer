@@ -47,10 +47,10 @@ def geometric_relay():
 
     lens = Lens("relay", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
                 material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0)
-    screen = Sensor("screen", aperture=Rectangle(36.0, 36.0), z=171.4)
+    sensor = Sensor("IMG", aperture=Rectangle(36.0, 36.0), z=171.4)
     source = ImageSource(profile, p0=(0.0, -6.0, -90.0), p1=(0.0, 6.0, -90.0), half_angle_deg=5.0, rays_per_point=31)
 
-    hits = NonSequentialTracer(OpticalSystem([lens, screen]), max_interactions=4, split=False).trace(source).hits("screen")
+    hits = NonSequentialTracer(OpticalSystem([lens, sensor]), max_interactions=4, split=False).trace(source).hits("IMG")
     values, edges = hits.histogram(axis=1, bins=180, range=(-18.0, 18.0))
     centers = 0.5 * (edges[:-1] + edges[1:])
 

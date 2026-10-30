@@ -77,9 +77,8 @@ def test_sphere_intersection_matches_closed_form():
 
 
 def test_vignetting_status_and_step():
-    # The old test clipped on an air-to-air plane row; a prescription now
-    # drops such a row (it changes nothing), so the clipping aperture is a
-    # real diaphragm.
+    # A real diaphragm clips: a prescription row of air on both sides changes
+    # nothing and is not an element, so it cannot.
     system = OpticalSystem.compose(Stop("S", aperture=5.0), Gap(10.0), Sensor("IMG"))
     tracer = SequentialTracer(system)
     batch = tracer.trace_batch(

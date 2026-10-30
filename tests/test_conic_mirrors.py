@@ -1,9 +1,5 @@
-"""Geometric ground truths for conic mirrors, traced non-sequentially.
-
-(The 2-D polar-form ``CircleSurface``/``EllipseSurface``/``ParabolaSurface``
-are gone: a conic mirror is a :class:`Mirror` carrying a conic surface,
-placed with a pose, and light finds it with the non-sequential tracer.)
-"""
+"""Geometric ground truths for conic mirrors: a :class:`Mirror` carrying a
+conic surface, placed with a pose, traced non-sequentially."""
 
 import numpy as np
 import pytest

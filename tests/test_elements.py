@@ -184,8 +184,8 @@ def single_ray(origin, direction) -> Rays:
 
 
 def test_sensor_records_and_misses_outside_its_aperture():
-    screen = Sensor("S", aperture=Rectangle(1.0, 2.0))  # the old segment from y=-1 to y=1
-    system = OpticalSystem([screen])
+    sensor = Sensor("S", aperture=Rectangle(1.0, 2.0))  # y from -1 to 1
+    system = OpticalSystem([sensor])
     tree = NonSequentialTracer(system).trace(single_ray([0.0, 0.5, -2.0], [0.0, 0.0, 1.0]))
     hits = tree.hits("S")
     assert len(hits) == 1
@@ -239,13 +239,13 @@ def biconvex(name="L1", **placement) -> Lens:
 
 def test_lens_focuses_a_parallel_fan_onto_a_sensor():
     # Thin-lens estimate f ~ R / (2 (n-1)) = 60 mm; sensor near focus.
-    screen = Sensor("screen", aperture=Rectangle(40.0, 40.0), z=58.0)
-    system = OpticalSystem([biconvex(), screen])
+    sensor = Sensor("IMG", aperture=Rectangle(40.0, 40.0), z=58.0)
+    system = OpticalSystem([biconvex(), sensor])
     source = CollimatedSource((0.0, 0.0, -30.0), beam_radius=8.0, rays=41, fan="y")
     tree = NonSequentialTracer(system, split=False).trace(source)
 
-    hits = tree.hits("screen")
-    assert len(hits) >= 35  # nearly every ray lands on the screen
+    hits = tree.hits("IMG")
+    assert len(hits) >= 35  # nearly every ray lands on the sensor
     assert np.ptp(hits.local_points[:, 1]) < 3.0  # concentrated near focus (spherical aberration aside)
     values, edges = hits.histogram(axis=1, bins=64, range=(-20.0, 20.0))
     assert values.sum() == pytest.approx(hits.power.sum())
@@ -254,14 +254,14 @@ def test_lens_focuses_a_parallel_fan_onto_a_sensor():
 
 
 def test_sensor_absorbs_rays():
-    screen = Sensor("screen", aperture=Rectangle(20.0, 20.0), z=5.0)
+    sensor = Sensor("IMG", aperture=Rectangle(20.0, 20.0), z=5.0)
     source = PointSource((0.0, 0.0, 0.0), half_angle_deg=15.0, rays=9, fan="y")
-    tree = NonSequentialTracer(OpticalSystem([screen]), max_interactions=5).trace(source)
+    tree = NonSequentialTracer(OpticalSystem([sensor]), max_interactions=5).trace(source)
     # Every ray ends on the sensor: no children are spawned.
     assert (tree.generation == 1).all()
     assert (tree.parent == -1).all()
-    assert len(tree.hits("screen")) == 9
-    assert tree.hits("screen").power.sum() == pytest.approx(1.0)
+    assert len(tree.hits("IMG")) == 9
+    assert tree.hits("IMG").power.sum() == pytest.approx(1.0)
 
 
 def test_sequential_and_non_sequential_land_rays_on_the_same_image_point():

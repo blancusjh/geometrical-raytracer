@@ -13,17 +13,14 @@ from raytracer.tracing import NonSequentialTracer
 
 
 def _relay(profile, *, object_height=6.0, rays_per_point=41):
-    """A biconvex relay imaging a 1-D object profile at z = -90 onto a sensor at 171.4.
-
-    The old 2-D frame (axis +x, height y) maps to the meridional y-z plane;
-    the old full fan aperture of 8 degrees is a 4 degree half-angle.
-    """
+    """A biconvex relay imaging a 1-D object profile at z = -90 onto a sensor at 171.4,
+    in the meridional y-z plane, with fans of 4 degree half-angle."""
 
     lens = Lens(
         "relay", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
         material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0,
     )
-    screen = Sensor("screen", aperture=Rectangle(40.0, 40.0), z=171.4)
+    sensor = Sensor("IMG", aperture=Rectangle(40.0, 40.0), z=171.4)
     source = ImageSource(
         np.asarray(profile, dtype=float),
         p0=(0.0, -object_height, -90.0),
@@ -31,8 +28,8 @@ def _relay(profile, *, object_height=6.0, rays_per_point=41):
         half_angle_deg=4.0,
         rays_per_point=rays_per_point,
     )
-    tree = NonSequentialTracer(OpticalSystem([lens, screen]), split=False).trace(source)
-    return tree.hits("screen")
+    tree = NonSequentialTracer(OpticalSystem([lens, sensor]), split=False).trace(source)
+    return tree.hits("IMG")
 
 
 def test_two_point_object_images_inverted_and_magnified():

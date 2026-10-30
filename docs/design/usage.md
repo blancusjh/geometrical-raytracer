@@ -1,8 +1,8 @@
 # The library as if it existed
 
 **Status.** §2 (describing a system) and the core of §12 (non-sequential
-tracing) are implemented. The other sections remain the specification of
-what comes next.
+tracing) are implemented; every other section is marked *Planned* and is
+the specification of what comes next.
 
 One continuous session. The subject is a Cooke triplet, later a zoom, a
 folded telescope and a laser line. Every planned feature appears at least
@@ -22,6 +22,8 @@ import raytracer as rt
 ---
 
 ## 1. Materials come from catalogues
+
+*Planned.*
 
 A material is a *medium*: what fills space between surfaces. Catalogues are
 data files. They are read by `io` and collected in a library that resolves
@@ -189,6 +191,8 @@ arm = system.replace(path=["BS:reflect", "M1", "L2.front", "L2.back", "D2"])
 
 ## 3. Stating how it is *used*: conditions
 
+*Planned.*
+
 ```python
 day = rt.Conditions(
     object=rt.Object.at_infinity(),
@@ -249,6 +253,8 @@ error lists every such feature. Nothing is dropped silently. **‹law 9›**
 
 ## 4. Where in field, pupil and spectrum: coordinates
 
+*Planned.*
+
 Every sequential quantity is a function of three things: a field point, a
 pupil point and a wavelength.
 
@@ -270,6 +276,8 @@ index into the declared list, or `"all"` (the default). `wavelength=
 ---
 
 ## 5. First-order optics
+
+*Planned.*
 
 ```python
 fo = rt.analysis.first_order(triplet)
@@ -293,6 +301,8 @@ is stored on the system. **‹law 3›**
 
 ## 6. Tracing, when you want rays and not a measurement
 
+*Planned.*
+
 ```python
 rays = rt.trace(triplet, field="all", pupil=rt.pupil.hexapolar(rings=6), wavelength="all")
 rays.shape                       # (fields, wavelengths, pupil samples)
@@ -314,6 +324,8 @@ rays.jones                       # polarisation ray-tracing matrices, per ray
 ---
 
 ## 7. Measuring image quality
+
+*Planned.*
 
 Every analysis is a function `Configuration → Result`. A result is a value.
 It carries what it was computed from (its configuration and the exact
@@ -436,6 +448,8 @@ is not a system. `train.system()` gives the member, and `train.under(c)` is
 
 ## 8. Showing results
 
+*Planned.*
+
 ```python
 rt.viz.plot(mtf)                     # one entry point, dispatched on the result type
 mtf.plot()                           # the same; a deferred convenience, not a dependency
@@ -449,6 +463,8 @@ No analysis imports matplotlib. **‹law 7›**
 ---
 
 ## 9. Parameters: how the library refers to a degree of freedom
+
+*Planned.*
 
 One noun serves sweeps, multi-configuration, tolerancing and (later)
 optimisation. A parameter reads a value from a configuration and returns a
@@ -472,6 +488,8 @@ rt.param.ObjectDistance(); rt.param.FieldScale()      # parameters of the condit
 
 ## 10. Multi-configuration
 
+*Planned.*
+
 ```python
 zoom = rt.MultiConfiguration.vary(
     base=zoom_lens.under(day),
@@ -490,6 +508,8 @@ Every analysis takes one of them, and a sweep takes all of them.
 ---
 
 ## 11. Tolerancing
+
+*Planned.*
 
 A tolerance is a *physical* error (fabrication or assembly), stated in the
 units an optical shop uses. It maps onto parameters. It is not a raw field
@@ -550,13 +570,15 @@ tree.segments()                                  # every segment, with generatio
   per coating (Fresnel for bare surfaces).
 * `split=False` follows the branch a sequential trace would take, which
   gives the clean picture for drawing.
-* `fan="y"` on a source gives the meridional fan of the old 2-D figures.
+* `fan="y"` on a source gives the meridional fan of a 2-D figure.
 * Planned: irradiance maps in W/mm², ghost-path queries, Monte Carlo
   splitting with `seed=`.
 
 ---
 
 ## 13. Beams and waves
+
+*Planned.*
 
 A Gaussian beam is a different *kind of light*, like a ray, and it has its
 own engine.

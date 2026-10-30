@@ -6,10 +6,6 @@ by Newton from the vertex plane (:func:`newton_graph`). The answer must not
 depend on the route, so the Cartesian surface — the one surface with a
 closed-form parametrization *and* an implicit Descartes condition besides
 its sag — is the natural cross-check.
-
-(The old 2-D scalar solvers, ``LineSegment`` and the polar-form full
-circle are gone; a flat detector is a :class:`Sensor` on a :class:`Plane`,
-tested in ``test_elements.py``.)
 """
 
 import numpy as np

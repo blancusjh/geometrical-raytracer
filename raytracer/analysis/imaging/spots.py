@@ -65,10 +65,9 @@ def spot_data_from_points(
     points: np.ndarray, *, field_label: float = 0.0, weights: np.ndarray | None = None
 ) -> SpotData:
     """Spot statistics from raw ``(N, 2)`` image-plane points (mm), equal-weighted
-    by default. For engines with no :class:`PupilTrace` — e.g. the 2-D
-    branching propagation's ``Screen.coordinates()`` — this is the same
-    convergence metric (RMS radius from the centroid, in um) without needing a
-    sequential pupil trace.
+    by default: the same convergence metric (RMS radius from the centroid, in
+    um) for points with no :class:`PupilTrace` behind them, such as a sensor's
+    hits in a non-sequential trace.
     """
 
     points = np.asarray(points, dtype=float)
