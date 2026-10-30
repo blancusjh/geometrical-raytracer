@@ -29,12 +29,17 @@ from ..system import DETECT, REFLECT, STOP, TRANSMIT, OpticalSystem
 
 
 class TraceStatus(IntEnum):
+    """Why a ray stopped. ``BEHIND``: the path sends it back to a boundary it has
+    already passed — allowed only at a stop, which prescriptions may place
+    behind the previous vertex as a reference plane."""
+
     OK = 0
     VIGNETTED = 1
     TIR = 2
     DIVERGED = 3
     PARALLEL = 4
     MISSED = 5
+    BEHIND = 6
 
 
 @dataclass
@@ -231,13 +236,12 @@ class SequentialTracer:
             fail(hits.parallel, TraceStatus.PARALLEL, i)
             fail(hits.diverged, TraceStatus.DIVERGED, i)
             fail(hits.missed, TraceStatus.MISSED, i)
+            if step.event != STOP:
+                fail(hits.t < -1e-6, TraceStatus.BEHIND, i)
             t = np.where(alive, hits.t, 0.0)
             ql = pl + t[:, None] * dl
 
-            if step.clear_aperture is not None:
-                region = step.clear_aperture
-            else:
-                region = face.interface.clear_aperture if step.event == STOP else face.clear_aperture
+            region = face.interface.clear_aperture if step.event == STOP else face.clear_aperture
             if self.clip_apertures and region is not None:
                 fail(~region.contains(ql[:, 0], ql[:, 1], slack=self.aperture_slack), TraceStatus.VIGNETTED, i)
 

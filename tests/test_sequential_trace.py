@@ -154,3 +154,37 @@ def test_opl_is_signed_behind_a_virtual_stop():
     assert result.ok
     assert tracer.image_z == pytest.approx(50.0)
     assert result.opl == pytest.approx(10.0 + 1.5 * 20.0 + 30.0, abs=1e-9)
+
+
+def test_a_path_back_to_a_passed_boundary_stops_the_ray():
+    """Two faces that cross: beyond the crossing the second face lies behind
+    the ray, so the stated path is no longer physical there."""
+
+    glass = ConstantIndex("G", 1.5)
+    system = OpticalSystem.compose(
+        Lens("A", front=Plane(), back=Plane(), thickness=2.0, material=glass, semi_diameter=5.0),
+        Gap(1.0),
+        Lens("B", front=Sphere(-5.0), back=Plane(), thickness=4.0, material=glass, semi_diameter=4.8),
+        Gap(20.0),
+        Sensor("IMG"),
+    )
+    tracer = SequentialTracer(system)
+    on_axis = tracer.trace([0.0, 0.0, -5.0], [0.0, 0.0, 1.0])
+    beyond = tracer.trace([0.0, 4.5, -5.0], [0.0, 0.0, 1.0])
+    assert on_axis.ok
+    assert beyond.status is TraceStatus.BEHIND and beyond.failed_step == 2
+
+
+def test_a_stop_may_sit_behind_the_ray():
+    """Prescriptions put the stop plane at a curved vertex; it is a reference plane, not a wall."""
+
+    glass = ConstantIndex("G", 1.5)
+    system = OpticalSystem.from_table(
+        [
+            TableRow(Sphere(20.0), 3.0, glass, 8.0),
+            TableRow(Sphere(-20.0), 0.0, AIR, 8.0),
+            TableRow(Plane(), 30.0, AIR, 6.0, kind="stop"),
+        ]
+    )
+    result = SequentialTracer(system).trace([0.0, 5.0, -5.0], [0.0, 0.0, 1.0])
+    assert result.ok

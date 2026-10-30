@@ -1,11 +1,10 @@
-"""General 2-D chief-ray solver, cross-checked against the 1-D solver.
+"""The chief-ray solver, checked against the definition of a chief ray.
 
-``chief_ray_slopes`` solves for both transverse slopes jointly instead of
-assuming ``s_x = 0`` and exploiting rotational symmetry, so it must agree
-exactly with ``chief_ray_slope`` in the degenerate on-axis-y case, and must
-give a physically consistent answer for a genuinely off-axis (x, y) field
-point via the system's actual rotational symmetry (checked independently,
-not assumed by the solver itself).
+``chief_ray_slopes`` solves for both transverse slopes jointly, assuming no
+symmetry. Its answer must cross the stop at its centre, keep ``s_x = 0``
+for a meridional field, and — through the system's rotational symmetry,
+checked independently rather than assumed by the solver — give the same
+radial image height for a field point on a rotated axis.
 """
 
 from pathlib import Path
@@ -17,7 +16,6 @@ from raytracer.io import read_prescription
 from raytracer.tracing import (
     FieldPoint,
     SequentialTracer,
-    chief_ray_slope,
     chief_ray_slopes,
     solve_object_plane,
     trace_from_object,
@@ -36,12 +34,12 @@ def tracer() -> SequentialTracer:
 
 
 @pytest.mark.parametrize("y", [56.0, 62.0, 67.0])
-def test_matches_1d_solver_on_axis(tracer, y):
-    field = FieldPoint(y=y)
-    sy_1d = chief_ray_slope(tracer, field)
-    sx_2d, sy_2d = chief_ray_slopes(tracer, field)
-    assert sx_2d == pytest.approx(0.0, abs=1e-9)
-    assert sy_2d == pytest.approx(sy_1d, abs=1e-8)
+def test_meridional_chief_ray_crosses_the_stop_centre(tracer, y):
+    sx, sy = chief_ray_slopes(tracer, FieldPoint(y=y))
+    assert sx == pytest.approx(0.0, abs=1e-9)
+    result = trace_from_object(tracer, (0.0, y), (sx, sy), keep_path=True)
+    at_stop = result.path[tracer.system.stop_index + 1, :2]
+    assert np.hypot(*at_stop) < 1e-8
 
 
 def test_off_axis_field_matches_rotated_meridional_case(tracer):
@@ -58,7 +56,7 @@ def test_off_axis_field_matches_rotated_meridional_case(tracer):
     radial_image_height = np.hypot(*result.image_point[:2])
 
     meridional = FieldPoint(y=r)
-    sy_ref = chief_ray_slope(tracer, meridional)
+    _, sy_ref = chief_ray_slopes(tracer, meridional)
     ref_result = trace_from_object(tracer, (0.0, r), (0.0, sy_ref))
 
     assert radial_image_height == pytest.approx(abs(ref_result.image_point[1]), rel=1e-6)

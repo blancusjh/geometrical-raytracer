@@ -127,16 +127,15 @@ def test_double_pass_lens_from_a_prescription_table():
     )
 
 
-def test_double_pass_keeps_each_pass_clear_aperture():
-    """US 7,557,996 lists a narrower clear semi-diameter for the first pass
-    through its CaF2 lens than for the second; the physical surface is the
-    larger, the first visit is clipped at its own."""
+def test_double_pass_is_one_surface_with_one_clear_aperture():
+    """US 7,557,996 crosses its CaF2 lens twice and lists a clear
+    semi-diameter per pass; the physical surface is one, clear over the
+    wider of the two."""
 
     system = read_prescription(US7557996).system
     first, second = system.path[4], system.path[8]
     assert first.face is second.face
-    assert first.clear_aperture == Circle(53.189)
-    assert second.clear_aperture is None and second.face.clear_aperture == Circle(67.241)
+    assert first.face.clear_aperture == Circle(67.241)
     # The cemented HIINDEX1|HIINDEX2 face keeps its own 18.135 mm, not its lens's 58.621 mm.
     cemented = system.face("L21.back")
     assert set(cemented.names) == {"L21.back", "L22.front"}
@@ -291,9 +290,11 @@ def test_table_rows_describe_the_path():
     assert rows[4].semi_diameter == pytest.approx(read_prescription(COOKE).system["STO"].aperture.radius)
 
 
-def test_table_rejects_a_lens_with_no_semi_diameter():
+def test_table_without_semi_diameter_falls_back_on_what_the_surfaces_allow():
+    system = OpticalSystem.from_table([TableRow(Sphere(50.0), 5.0, G1), TableRow(Plane(), 20.0, AIR)])
+    assert system["L1"].semi_diameter == 50.0  # a sphere's sag exists out to r = |R|
     with pytest.raises(ValueError, match="semi-diameter"):
-        OpticalSystem.from_table([TableRow(Sphere(50.0), 5.0, G1), TableRow(Plane(), 20.0, AIR)])
+        OpticalSystem.from_table([TableRow(Plane(), 5.0, G1), TableRow(Plane(), 20.0, AIR)])
 
 
 def test_air_rows_that_change_nothing_are_dropped():

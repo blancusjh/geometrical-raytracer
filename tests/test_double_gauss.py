@@ -18,7 +18,7 @@ from raytracer.tracing import (
     FieldPoint,
     ParaxialModel,
     SequentialTracer,
-    chief_ray_slope,
+    chief_ray_slopes,
     solve_object_plane,
     trace_from_object,
 )
@@ -63,10 +63,7 @@ def chief_distortion_ppm(tracer, object_z, stop_index, magnification, angle_deg)
     y = abs(object_z) * np.tan(np.deg2rad(angle_deg))
     z_stop = tracer.step_z(stop_index)
     estimate = -y / (z_stop - object_z)
-    slope = chief_ray_slope(
-        tracer, FieldPoint(y=y), stop_index=stop_index,
-        bracket=(estimate - 0.02, estimate + 0.02), scan=101,
-    )
+    _, slope = chief_ray_slopes(tracer, FieldPoint(y=y), stop_index=stop_index, initial_guess=(0.0, estimate))
     result = trace_from_object(tracer, (0.0, y), (0.0, slope))
     ideal_y = y * magnification
     return float((result.image_point[1] / ideal_y - 1) * 1e6)

@@ -120,14 +120,8 @@ def seidel_coefficients(
     for e.g. the US7557996 objective's), while the ray-slope route needs
     no such tuning and works unchanged across systems.
 
-    Each field's chief ray is solved with the general 2-D solver
-    :func:`~raytracer.tracing.fields.chief_ray_slopes` and passed into
-    :func:`~raytracer.tracing.fields.trace_pupil` explicitly, rather
-    than left for ``trace_pupil`` to solve internally: its default 1-D
-    ``chief_ray_slope`` scans a fixed, comparatively coarse slope bracket
-    that can come up empty for a huge finite-object stand-in for infinity
-    (as in the Cooke triplet/double-Gauss examples), where the true chief
-    ray sits in a needle-thin slice of that bracket.
+    Each field's chief ray is solved with
+    :func:`~raytracer.tracing.fields.chief_ray_slopes`.
     """
 
     field_heights_mm = np.asarray(field_heights_mm, dtype=float)

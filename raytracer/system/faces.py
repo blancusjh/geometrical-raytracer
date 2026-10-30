@@ -81,16 +81,10 @@ class PhysicalFace:
 
 @dataclass(frozen=True)
 class Step:
-    """One visit of the sequential path: a boundary and what happens there.
-
-    ``clear_aperture``, when set, is the clear aperture of this visit alone
-    — narrower than the boundary's own, as a prescription lists it for each
-    pass through a double-pass lens.
-    """
+    """One visit of the sequential path: a boundary and what happens there."""
 
     face: PhysicalFace
     event: str
-    clear_aperture: Aperture | None = None
 
     @property
     def name(self) -> str:
@@ -104,6 +98,20 @@ def face_name(element: Element, face: ElementFace) -> str:
     return f"{element.name}.{face.name}" if face.name else element.name
 
 
+def _coincide(a: tuple[Element, ElementFace, Pose], b: tuple[Element, ElementFace, Pose]) -> bool:
+    """Two element faces are one physical boundary: same place, same surface."""
+
+    (_, fa, pa), (_, fb, pb) = a, b
+    return EDGE not in (fa.role, fb.role) and pa.isclose(pb, atol=1e-9) and fa.interface.surface == fb.interface.surface
+
+
+def _canonical_order(member: tuple[Element, ElementFace, Pose]) -> tuple:
+    """A merged boundary is named after the sensor or stop in it, else alphabetically."""
+
+    element, face, _ = member
+    return (face.role not in (DETECTOR, BLADE), face_name(element, face))
+
+
 def _merge_coatings(a: Coating, b: Coating, where: str) -> Coating:
     if isinstance(a, Uncoated):
         return b
@@ -112,76 +120,53 @@ def _merge_coatings(a: Coating, b: Coating, where: str) -> Coating:
     raise ValueError(f"{where}: two coincident faces carry different coatings ({a!r} vs {b!r})")
 
 
-def _larger(a: Aperture | None, b: Aperture | None) -> Aperture | None:
-    if a is None or b is None:
-        return None
-    return a if a.extent >= b.extent else b
+def _physical_face(group: list[tuple[Element, ElementFace, Pose]], ambient: Material) -> PhysicalFace:
+    group = sorted(group, key=_canonical_order)
+    names = tuple(face_name(e, f) for e, f, _ in group)
+    elements = tuple(e.name for e, _, _ in group)
+    element, face, pose = group[0]
+    if face.role == EDGE:
+        return PhysicalFace(names, None, pose, None, EDGE, element.material or ambient, ambient, elements, wall=face.wall)
+
+    sides: dict[int, Material] = {}
+    interface, extent = face.interface, face.extent
+    for e, f, _ in group:
+        if f.bulk_side:
+            if f.bulk_side in sides:
+                raise ValueError(f"{'='.join(names)}: two elements claim the same side of one boundary (their bodies overlap)")
+            sides[f.bulk_side] = e.material
+        if f is not face:
+            interface = interface.replace(coating=_merge_coatings(interface.coating, f.interface.coating, names[0]))
+            if extent is not None and (f.extent is None or f.extent.extent > extent.extent):
+                extent = f.extent
+    return PhysicalFace(
+        names,
+        interface,
+        pose,
+        extent,
+        face.role,
+        sides.get(-1, ambient),
+        sides.get(+1, ambient),
+        elements,
+        hole=face.hole,
+        virtual=isinstance(element, Stop) and element.virtual,
+    )
 
 
 def resolve_faces(placed: list[tuple[Element, Pose]], ambient: Material) -> tuple[PhysicalFace, ...]:
-    """Merge coincident element faces and assign the media on both sides."""
+    """Merge coincident element faces into physical boundaries and assign the media on both sides."""
 
-    groups: list[dict] = []
+    groups: list[list[tuple[Element, ElementFace, Pose]]] = []
     for element, pose in placed:
         for face in element.faces():
-            world = pose @ face.pose
-            name = face_name(element, face)
-            if face.role == EDGE:
-                groups.append({"names": [name], "faces": [(element, face)], "pose": world})
-                continue
-            for g in groups:
-                other_element, other = g["faces"][0]
-                if (
-                    other.role != EDGE
-                    and g["pose"].isclose(world, atol=1e-9)
-                    and other.interface.surface == face.interface.surface
-                ):
-                    g["names"].append(name)
-                    g["faces"].append((element, face))
+            member = (element, face, pose @ face.pose)
+            for group in groups:
+                if _coincide(group[0], member):
+                    group.append(member)
                     break
             else:
-                groups.append({"names": [name], "faces": [(element, face)], "pose": world})
-
-    faces = []
-    for g in groups:
-        (element0, face0), *rest = g["faces"]
-        if face0.role == EDGE:
-            m = element0.material or ambient
-            faces.append(
-                PhysicalFace((g["names"][0],), None, g["pose"], None, EDGE, m, ambient, (element0.name,), wall=face0.wall)
-            )
-            continue
-        sides = {+1: None, -1: None}
-        interface, extent, role, hole = face0.interface, face0.extent, face0.role, face0.hole
-        virtual = isinstance(element0, Stop) and element0.virtual
-        for element, face in g["faces"]:
-            if face.bulk_side:
-                if sides[face.bulk_side] is not None:
-                    raise ValueError(
-                        f"{'='.join(g['names'])}: two elements claim the same side of one boundary "
-                        "(their bodies overlap)"
-                    )
-                sides[face.bulk_side] = element.material
-            if (element, face) is not g["faces"][0]:
-                interface = interface.replace(coating=_merge_coatings(interface.coating, face.interface.coating, g["names"][0]))
-                extent = _larger(extent, face.extent)
-                if face.role in (DETECTOR, BLADE):
-                    role = face.role
-        faces.append(
-            PhysicalFace(
-                tuple(g["names"]),
-                interface,
-                g["pose"],
-                extent,
-                role,
-                sides[-1] or ambient,
-                sides[+1] or ambient,
-                tuple(e.name for e, _ in g["faces"]),
-                hole=hole,
-                virtual=virtual,
-            )
-        )
-    return tuple(faces)
+                groups.append([member])
+    return tuple(_physical_face(group, ambient) for group in groups)
 
 
 def default_event(face: PhysicalFace) -> str | None:
@@ -196,11 +181,7 @@ def default_event(face: PhysicalFace) -> str | None:
 
 
 def parse_path(spec, faces: tuple[PhysicalFace, ...]) -> tuple[Step, ...]:
-    """Read ``["L1.front", "BS:reflect", ...]`` against the system's boundaries.
-
-    An item may also be a pair ``("L3.front", aperture)`` giving the clear
-    aperture of that visit (see :class:`Step`).
-    """
+    """Read ``["L1.front", "BS:reflect", ...]`` against the system's boundaries."""
 
     by_name = {n: f for f in faces for n in f.names}
     steps = []
@@ -208,9 +189,6 @@ def parse_path(spec, faces: tuple[PhysicalFace, ...]) -> tuple[Step, ...]:
         if isinstance(item, Step):
             steps.append(item)
             continue
-        visit_aperture = None
-        if isinstance(item, tuple):
-            item, visit_aperture = item
         name, _, event = str(item).partition(":")
         if name not in by_name:
             raise KeyError(f"path step {item!r}: no boundary named {name!r}; known: {sorted(by_name)}")
@@ -225,7 +203,7 @@ def parse_path(spec, faces: tuple[PhysicalFace, ...]) -> tuple[Step, ...]:
             )
         if event not in (TRANSMIT, REFLECT, STOP, DETECT):
             raise ValueError(f"path step {item!r}: unknown event {event!r}")
-        steps.append(Step(face, event, visit_aperture))
+        steps.append(Step(face, event))
     return tuple(steps)
 
 

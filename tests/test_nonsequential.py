@@ -190,3 +190,14 @@ def test_dispersive_media_need_a_wavelength():
     red = NonSequentialTracer(OpticalSystem([lens]), wavelength_um=0.65627, split=False).trace(rays)
     # Blue bends more toward the axis than red.
     assert blue.direction[1, 1] < red.direction[1, 1] < 0.0
+
+
+def test_a_beam_splitter_splits_even_without_split():
+    """split=False follows the sequential branch; a beam splitter has none, so it still splits."""
+
+    system = OpticalSystem([BeamSplitter("BS", aperture=10.0, rot=(0.0, -45.0, 0.0))])
+    beam = CollimatedSource((0.0, 0.0, -20.0), beam_radius=1.0, rays=7)
+    tree = NonSequentialTracer(system, split=False).trace(beam)
+    children = tree.kind[tree.generation == 2]
+    assert set(children.tolist()) == {REFLECTED, TRANSMITTED}
+    assert tree.power[tree.generation == 2].sum() == pytest.approx(1.0)

@@ -198,7 +198,7 @@ class StigmaticTrain:
         height every surface supports).
         """
 
-        return OpticalSystem.from_table(self.table(), ambient=self.media[0], object_medium=self.media[0])
+        return OpticalSystem.from_table(self.table(), ambient=self.media[0])
 
     def tracer(self, wavelength_um: float | None = None, **kwargs) -> SequentialTracer:
         """A sequential tracer of :meth:`system`, object plane at ``d_0``.

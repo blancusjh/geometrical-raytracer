@@ -75,11 +75,11 @@ def test_paraxial_matrix_agrees_with_differential(system, tracer):
 
 def test_field_traces_match_reference_image_heights(tracer):
     # Reference: object y=56 -> image y=14.000000; y=62 -> 15.499997; y=67 -> 16.749999
-    from raytracer.tracing import chief_ray_slope, trace_from_object
+    from raytracer.tracing import chief_ray_slopes, trace_from_object
 
     expected = {56.0: 14.000000, 62.0: 15.499997, 67.0: 16.749999}
     for y_obj, y_img in expected.items():
-        slope = chief_ray_slope(tracer, FieldPoint(y=y_obj))
+        _, slope = chief_ray_slopes(tracer, FieldPoint(y=y_obj))
         result = trace_from_object(tracer, (0.0, y_obj), (0.0, slope))
         assert result.ok
         assert result.image_point[1] == pytest.approx(y_img, abs=5e-6)

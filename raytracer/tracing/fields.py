@@ -49,57 +49,6 @@ def trace_from_object(
     )
 
 
-def chief_ray_slope(
-    tracer: SequentialTracer,
-    field: FieldPoint,
-    *,
-    stop_index: int | None = None,
-    bracket: tuple[float, float] = (-0.08, 0.08),
-    scan: int = 65,
-    xtol: float = 1e-14,
-) -> float:
-    """Slope s_y whose ray crosses the axis at the stop surface.
-
-    The bracket is scanned first because rays with extreme slopes vignette;
-    ``brentq`` then refines the first sign change among surviving samples.
-    """
-
-    system = tracer.system
-    if stop_index is None:
-        stop_index = system.stop_index
-    if stop_index is None:
-        raise ValueError("the system has no aperture stop; pass stop_index (a path step) explicitly")
-    object_z = _object_z(tracer)
-
-    samples = np.linspace(bracket[0], bracket[1], scan)
-    origins = np.repeat([[field.x, field.y, object_z]], scan, axis=0)
-    directions = np.array([direction_from_slopes(0.0, s) for s in samples])
-    batch = tracer.trace_batch(origins, directions, keep_paths=True)
-
-    def height_at_stop(slope: float) -> float:
-        result = trace_from_object(tracer, (field.x, field.y), (0.0, float(slope)), keep_path=True)
-        if not result.ok and (
-            result.failed_step is not None and result.failed_step <= stop_index
-        ):
-            raise RuntimeError("Ray vignetted before the stop")
-        return float(result.path[stop_index + 1, 1])
-
-    valid: list[tuple[float, float]] = []
-    for j in range(scan):
-        # A ray is usable if it survived at least up to the stop surface.
-        if batch.status[j] == TraceStatus.OK or batch.failed_step[j] > stop_index:
-            y_stop = batch.paths[j, stop_index + 1, 1]
-            if np.isfinite(y_stop):
-                valid.append((float(samples[j]), float(y_stop)))
-
-    for (a, fa), (b, fb) in zip(valid, valid[1:]):
-        if fa == 0.0:
-            return a
-        if fa * fb < 0.0:
-            return float(optimize.brentq(height_at_stop, a, b, xtol=xtol))
-    raise RuntimeError(f"No unvignetted chief ray found for field {field}")
-
-
 class _RayVignetted(RuntimeError):
     """A probe ray failed to reach the stop — internal to the 2-D solve.
 
@@ -120,9 +69,8 @@ def chief_ray_slopes(
 ) -> tuple[float, float]:
     """General ``(s_x, s_y)`` whose ray crosses the axis at the stop surface.
 
-    Unlike :func:`chief_ray_slope`, this does not fix ``s_x = 0`` or lean on
-    rotational symmetry to reduce the problem to one dimension: it solves
-    for both transverse slopes jointly, by damped Newton iteration (a
+    It does not fix ``s_x = 0`` or lean on rotational symmetry to reduce the
+    problem to one dimension: it solves for both transverse slopes jointly, by damped Newton iteration (a
     numerical 2x2 Jacobian, backtracked whenever a trial step vignettes or
     makes the residual worse) on the ray's transverse position at the stop
     surface. That makes it correct for a field point with ``x`` and ``y``
@@ -323,12 +271,7 @@ def trace_pupil(
     ``chief_slope`` accepts either a meridional slope ``s_y`` or a full
     ``(s_x, s_y)`` pair, so a chief ray solved by :func:`chief_ray_slopes`
     for a genuinely off-axis ``(x, y)`` field point can be used as-is.
-    Omitted, it is solved with :func:`chief_ray_slopes` — the general 2-D
-    solver rather than the 1-D :func:`chief_ray_slope`, which agrees with
-    it to machine precision where both converge but scans a fixed, fairly
-    coarse slope bracket that comes up empty whenever the true chief ray
-    occupies a needle-thin slice of it (any large finite-object stand-in
-    for infinity, such as the Cooke triplet and double-Gauss examples).
+    Omitted, it is solved with :func:`chief_ray_slopes`.
 
     The ``"sine"`` model is meridional-only and rejects a non-zero ``s_x``
     rather than silently applying a convention it was never defined for.
@@ -393,7 +336,6 @@ def trace_pupil(
 __all__ = [
     "FieldPoint",
     "trace_from_object",
-    "chief_ray_slope",
     "chief_ray_slopes",
     "PupilSampling",
     "PupilTrace",
