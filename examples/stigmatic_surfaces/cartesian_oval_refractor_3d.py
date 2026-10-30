@@ -73,7 +73,7 @@ def bundle(tracer: SequentialTracer, sampling: dict):
     """An on-axis pupil bundle (the surface is its own stop: chief slope 0)."""
 
     return trace_pupil(tracer, FieldPoint(y=0.0), na_object_sine=NA_OBJECT,
-                       sampling=PupilSampling(kind="rings", **sampling), chief_slope=0.0, keep_paths=True)
+                       sampling=PupilSampling(kind="rings", **sampling), chief_slope=0.0)
 
 
 def main() -> None:
@@ -97,11 +97,11 @@ def main() -> None:
     viewer.add_system(system)
 
     lines = bundle(tracer, LINES_SAMPLING)
-    viewer.add_paths(lines.batch.paths[lines.valid], color=(0.45, 0.80, 1.0, 0.55), group="lines")
+    viewer.add_paths(lines.trace.path[lines.ok], color=(0.45, 0.80, 1.0, 0.55), group="lines")
 
     beam = bundle(tracer, BEAM_SAMPLING)
-    rgb = spectral_rgb(WAVELENGTH_NM) * (BEAM_ENERGY / max(int(beam.valid.sum()), 1))
-    viewer.add_paths(beam.batch.paths[beam.valid], color=(*rgb.tolist(), 1.0), width=1.0, group="beam", additive=True)
+    rgb = spectral_rgb(WAVELENGTH_NM) * (BEAM_ENERGY / max(int(beam.ok.sum()), 1))
+    viewer.add_paths(beam.trace.path[beam.ok], color=(*rgb.tolist(), 1.0), width=1.0, group="beam", additive=True)
 
     viewer.add_marker([0.0, 0.0, ZI])  # design image point (pixel-sized at any zoom)
     viewer.add_axes()

@@ -66,8 +66,8 @@ def objective_focus_z() -> float:
     """
 
     tracer = SequentialTracer(OpticalSystem.compose(OBJECTIVE, Gap(300.0), Sensor("image")), restart_offset=0.0)
-    result = tracer.trace(np.array([0.0, 1.0, -10.0]), np.array([0.0, 0.0, 1.0]))
-    point, direction = result.image_point, result.direction
+    ray = tracer.trace_ray(np.array([0.0, 1.0, -10.0]), np.array([0.0, 0.0, 1.0]))
+    point, direction = ray.end, ray.direction
     return float(point[2] - point[1] / direction[1] * direction[2])
 
 

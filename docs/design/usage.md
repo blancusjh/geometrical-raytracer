@@ -304,17 +304,18 @@ is stored on the system. **‹law 3›**
 *Planned.*
 
 ```python
-rays = rt.trace(triplet, field="all", pupil=rt.pupil.hexapolar(rings=6), wavelength="all")
-rays.shape                       # (fields, wavelengths, pupil samples)
-rays.image_points                # (..., 3) mm
-rays.directions, rays.opl_mm, rays.status         # status: OK, VIGNETTED, TIR, MISSED, DIVERGED
-rays.where(rt.RayStatus.OK)
+trace = rt.trace(triplet, field="all", pupil=rt.pupil.hexapolar(rings=6), wavelength="all")
+trace.shape                      # (fields, wavelengths, pupil samples): a row per ray
+trace.end                        # (..., 3) mm: where each ray met the detector
+trace.direction, trace.opl, trace.status          # status: OK, VIGNETTED, TIR, MISSED, BEHIND, …
+trace.ok                         # the rays that reached the detector
 
 ray = rt.trace_ray(triplet, field=rt.Field.normalized(hy=1.0), pupil=rt.Pupil(py=1.0))
-print(ray.table())               # per-surface: point, normal, angle of incidence, OPL, medium
+ray.path                         # the same columns, for one ray: its hit at every step
+print(ray.table())               # per step: point, normal, angle of incidence, OPL, medium
 
-rays = rt.trace(triplet, field=0, pupil=rt.pupil.hexapolar(8), polarization=True)
-rays.jones                       # polarisation ray-tracing matrices, per ray
+trace = rt.trace(triplet, field=0, pupil=rt.pupil.hexapolar(8), polarization=True)
+trace.jones                      # a column of polarisation ray-tracing matrices
 ```
 
 `rt.trace` is the sequential engine. It is chosen by the subject (a

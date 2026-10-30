@@ -56,7 +56,7 @@ def geometric_relay():
 
     # RMS spot size for rays landing near the object's mid-height bar (the
     # dimmer one), as a proxy for the relay's on-axis aberration.
-    near_center = hits.local_points[np.abs(hits.local_points[:, 1]) < 2.0, :2]
+    near_center = hits.local_point[np.abs(hits.local_point[:, 1]) < 2.0, :2]
     rms_um = spot_data_from_points(near_center).rms_radius_um if len(near_center) > 1 else float("nan")
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))

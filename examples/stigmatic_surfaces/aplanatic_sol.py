@@ -98,8 +98,8 @@ def _system_image_surface(tracer: SequentialTracer, heights) -> "np.ndarray":
             sampling=PupilSampling(kind="rings", radial=6, azimuth=24),
             chief_slope=(0.0 - h) / (0.0 - tracer.object_z),
         )
-        if pupil.valid.sum() >= 3:
-            _, blur_mm = _closest_point_to_rays(pupil.image_points, pupil.directions)
+        if pupil.ok.sum() >= 3:
+            _, blur_mm = _closest_point_to_rays(pupil.end, pupil.direction)
             blur[i] = blur_mm * 1e3
     return blur
 
@@ -156,7 +156,7 @@ def part1_compare_singlets():
     ):
         if m is None:
             slopes = chief_ray_slopes(tracer, FieldPoint(y=1e-4), stop_index=0)
-            m = trace_from_object(tracer, (0.0, 1e-4), slopes).image_point[1] / 1e-4
+            m = trace_from_object(tracer, (0.0, 1e-4), slopes).end[1] / 1e-4
         rows = chief_ray_distortion(tracer, heights, magnification=m, stop_index=0)
         worst = max(rows, key=lambda r: abs(r["chief_ray_relative_distortion_ppm"]))
         print(f"  {name:10s}  m0 = {m:+.4f}   worst {worst['chief_ray_distortion_um']:+9.3f} um "

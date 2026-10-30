@@ -88,8 +88,8 @@ def angular_magnification(system: OpticalSystem, theta_in: float = 0.01) -> tupl
     tracer = SequentialTracer(system, restart_offset=0.0)
     d = np.array([0.0, np.sin(theta_in), np.cos(theta_in)])
     origins = np.array([[0.0, -5.0, -20.0], [0.0, 5.0, -20.0]])
-    result = tracer.trace_batch(origins, np.tile(d, (2, 1)))
-    theta_out = np.arctan2(result.directions[:, 1], result.directions[:, 2])
+    trace = tracer.trace(origins, np.tile(d, (2, 1)))
+    theta_out = np.arctan2(trace.direction[:, 1], trace.direction[:, 2])
     return float(np.mean(theta_out) / theta_in), float(np.ptp(theta_out))
 
 

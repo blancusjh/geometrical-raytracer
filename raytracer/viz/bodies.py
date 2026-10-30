@@ -305,7 +305,7 @@ def draw_system(
 
 
 def draw_traced(ax, tracer, beams, *, ray_style: dict, draw_failed: bool = False, xlim=None, **element_options):
-    """Draw *tracer*'s system, then each beam ``(color, trace results)``: its rays and where it focuses.
+    """Draw *tracer*'s system, then each beam ``(color, traced rays)``: its rays and where it focuses.
 
     Mirrors follow the hits of the rays that got through; failed rays are drawn up to where they stopped when
     ``draw_failed``. Returns those rays' paths stacked, or None.

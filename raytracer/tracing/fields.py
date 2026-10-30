@@ -8,7 +8,7 @@ from typing import Literal
 import numpy as np
 
 from ..geometry.vectors import direction_from_slopes
-from .sequential import SequentialTrace, SequentialTracer, TracedRay, TraceStatus
+from .sequential import SequentialTrace, SequentialTracer, TracedRay
 
 
 @dataclass(frozen=True)

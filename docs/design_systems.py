@@ -202,7 +202,7 @@ class VirtualObjectAplanatism(Constraint):
             t = sine / np.sqrt(1.0 - sine * sine)
             origin = np.array([0.0, (a - self.launch_z) * t, self.launch_z])
             direction = np.array([0.0, -t, 1.0]) / np.sqrt(1.0 + t * t)
-            r = tracer.trace(origin, direction, keep_path=True)
+            r = tracer.trace_ray(origin, direction)
             if not r.ok:
                 continue
             heights.append(np.abs(r.path[1:-1, 1]))
@@ -268,8 +268,8 @@ def ultrawide():
         t = np.tan(np.deg2rad(deg))
         origin = np.array([0.0, (8.0 - (-25.0)) * t, -25.0])
         direction = np.array([0.0, -t, 1.0]) / np.sqrt(1 + t * t)
-        r = tracer.trace(origin, direction)
-        spread.append(abs(r.image_point[1]) if r.ok else np.nan)
+        r = tracer.trace_ray(origin, direction)
+        spread.append(abs(r.end[1]) if r.ok else np.nan)
     print(f"  d* = {tuple(round(v, 3) for v in fit.result.x)}   [{time.time()-t0:.0f}s]")
     print(f"  aplanatism |M-1| rms over 5-55 deg: {s:.3e}   "
           f"(worst {np.max(np.abs(res)):.3e})")
