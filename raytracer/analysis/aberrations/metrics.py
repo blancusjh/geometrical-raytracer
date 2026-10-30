@@ -47,9 +47,9 @@ def field_metrics(
             tracer, field, na_object_sine=na_object_sine, sampling=sampling,
             stop_index=stop_index,
         )
-        points = pupil.image_points[:, :2]
-        directions = pupil.directions
-        weights = pupil.weights
+        points = pupil.end[:, :2]
+        directions = pupil.direction
+        weights = pupil.weight
 
         centroid = np.sum(points * weights[:, None], axis=0)
         relative = points - centroid
@@ -81,7 +81,7 @@ def field_metrics(
         )
 
         ideal_y = field.y * magnification
-        chief_y = float(pupil.chief.image_point[1])
+        chief_y = float(pupil.chief.end[1])
         results.append(
             {
                 "object_height_mm": field.y,
@@ -105,7 +105,7 @@ def field_metrics(
                 "sagittal_focus_shift_mm": sagittal_focus,
                 "tangential_focus_shift_mm": tangential_focus,
                 "astigmatic_separation_mm": tangential_focus - sagittal_focus,
-                "unvignetted_rays": int(pupil.valid.sum()),
+                "unvignetted_rays": int(pupil.ok.sum()),
             }
         )
     return results

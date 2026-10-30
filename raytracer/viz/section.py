@@ -321,7 +321,7 @@ def mirror_arcs(system, paths, *, pad: float = 0.06, samples: int = 200) -> list
     """``[(step, curve (M, 2)), ...]``: each reflecting step's arc over the part of its face the rays use.
 
     An off-axis mirror (a ring field, a folded path) is used away from its vertex, so its whole cap would put
-    curve where no light goes. *paths* are sequential ``keep_path`` traces ``(N, n_steps + 1, 3)``; the arc
+    curve where no light goes. *paths* are the ``path`` column of a sequential trace ``(N, n_steps + 1, 3)``; the arc
     spans their hits along the face's local y, extended by *pad* of that span.
     """
 
@@ -349,7 +349,7 @@ def beam_foci_from_paths(paths, *, pinch_ratio: float = 0.2, min_rays: int = 3) 
     An intermediate leg counts only for a genuine pinch inside the leg — blur below ``pinch_ratio`` of the
     beam's spread at both ends — and reports where the traced beam actually pinches, not the nominal plane.
     The final leg reports any real convergence on or beyond the last boundary; a collimated exit (afocal) or
-    a virtual focus reports nothing. *paths* are ``keep_path`` traces ``(rays, points, 3)``.
+    a virtual focus reports nothing. *paths* are the ``path`` column of a sequential trace ``(rays, points, 3)``.
     """
 
     paths = np.asarray(paths, dtype=float)

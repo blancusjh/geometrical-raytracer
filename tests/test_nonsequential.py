@@ -78,7 +78,7 @@ def test_fresnel_losses_of_a_window_sum_the_incoherent_series():
     tree = NonSequentialTracer(splitter_bench(window), max_interactions=60, min_power=1e-14).trace(source)
     expected = 0.5 * (1.0 - R_NORMAL) / (1.0 + R_NORMAL)
     assert tree.hits("CAM_T").power.sum() == pytest.approx(expected, rel=1e-10)
-    np.testing.assert_allclose(tree.hits("CAM_T").directions, np.tile([0.0, 0.0, 1.0], (len(tree.hits("CAM_T")), 1)), atol=1e-12)
+    np.testing.assert_allclose(tree.hits("CAM_T").direction, np.tile([0.0, 0.0, 1.0], (len(tree.hits("CAM_T")), 1)), atol=1e-12)
     assert tree.power[leaves(tree)].sum() == pytest.approx(1.0, abs=1e-12)
     # An anti-reflection coating removes the loss.
     coated = window.replace(front=window.front.replace(coating=AR()), back=window.back.replace(coating=AR()))
@@ -152,16 +152,16 @@ def test_sequential_and_non_sequential_agree_on_image_points():
     origins = np.tile([0.0, y_obj, -500.0], (len(slopes), 1))
     directions = np.column_stack([np.zeros_like(slopes), slopes, np.ones_like(slopes)])
     directions /= np.linalg.norm(directions, axis=1, keepdims=True)
-    batch = tracer.trace_batch(origins, directions)
-    assert batch.valid.all()
+    trace = tracer.trace(origins, directions)
+    assert trace.ok.all()
 
     ns = NonSequentialTracer(prescription.system, wavelength_um=prescription.wavelength_um, split=False)
     tree = ns.trace(Rays(origins, directions, np.nan, 1.0))
     hits = tree.hits("IMG")
     assert len(hits) == len(slopes)
-    order = np.argsort(hits.points[:, 1])
-    np.testing.assert_allclose(hits.points[order], batch.image_points[np.argsort(batch.image_points[:, 1])], atol=1e-9)
-    np.testing.assert_allclose(np.sort(hits.opl), np.sort(batch.opl), atol=1e-6)
+    order = np.argsort(hits.point[:, 1])
+    np.testing.assert_allclose(hits.point[order], trace.end[np.argsort(trace.end[:, 1])], atol=1e-9)
+    np.testing.assert_allclose(np.sort(hits.opl), np.sort(trace.opl), atol=1e-6)
 
 
 def test_rays_that_meet_nothing_escape():

@@ -137,15 +137,15 @@ def _paraxial_focus_z(tracer: SequentialTracer, *, probe_height_mm: float | None
         )
 
     origin = np.array([0.0, 0.0, object_z])
-    angled = tracer.trace(
-        origin, direction_from_slopes(0.0, probe_height_mm / reach), keep_path=False
+    angled = tracer.trace_ray(
+        origin, direction_from_slopes(0.0, probe_height_mm / reach)
     )
     if not angled.ok:
         raise RuntimeError(
             f"Differential ray (probe height {probe_height_mm:.4g} mm at the first "
             "surface) did not survive the system; pass an explicit probe_height_mm"
         )
-    y2 = angled.image_point[1]
+    y2 = angled.end[1]
     slope = angled.direction[1] / angled.direction[2]
     if abs(slope) < 1e-12:
         raise RuntimeError(
@@ -212,7 +212,7 @@ def lateral_color(
         )
         guess = (0.0, chief_slope)
         result = trace_from_object(wl_tracer, (0.0, field.y), (0.0, chief_slope))
-        image_heights.append(float(result.image_point[1]))
+        image_heights.append(float(result.end[1]))
 
     return LateralColor(
         wavelengths_um=wavelengths_um,
@@ -308,12 +308,12 @@ def chromatic_spots(
         return pupil, slopes
 
     reference_pupil, guess = bundle(float(reference_wavelength_um), None)
-    origin = reference_pupil.chief.image_point[:2]
+    origin = reference_pupil.chief.end[:2]
 
     offsets = []
     for wavelength_um in wavelengths_um:
         pupil, _ = bundle(float(wavelength_um), guess)
-        offsets.append((pupil.image_points[:, :2] - origin) * 1e3)
+        offsets.append((pupil.end[:, :2] - origin) * 1e3)
 
     return ChromaticSpots(
         wavelengths_um=wavelengths_um,

@@ -65,7 +65,7 @@ def chief_distortion_um(tracer, object_z, stop_index, magnification, angle_deg):
     _, slope = chief_ray_slopes(tracer, FieldPoint(y=y), stop_index=stop_index, initial_guess=(0.0, estimate))
     result = trace_from_object(tracer, (0.0, y), (0.0, slope))
     ideal_y = y * magnification
-    return float((result.image_point[1] - ideal_y) * 1e3)
+    return float((result.end[1] - ideal_y) * 1e3)
 
 
 def test_near_infinity_conjugate_is_in_front(tracer):
@@ -77,7 +77,7 @@ def test_near_infinity_conjugate_is_in_front(tracer):
     conjugate = solve_object_plane(tracer)
     assert conjugate.object_z < 0
     assert conjugate.magnification < 0
-    r = trace_from_object(tracer, (0.0, 0.0), (0.0, 0.0), keep_path=True)
+    r = trace_from_object(tracer, (0.0, 0.0), (0.0, 0.0))
     assert np.all(np.diff(r.path[:, 2]) >= 0)  # monotonically forward
 
 

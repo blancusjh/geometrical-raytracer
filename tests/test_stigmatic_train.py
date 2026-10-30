@@ -151,7 +151,7 @@ def _rms_spot_um(train: StigmaticTrain, *, na: float) -> float:
         sampling=PupilSampling(kind="rings", radial=8, azimuth=32),
         chief_slope=0.0,
     )
-    assert pupil.valid.sum() > 0.8 * pupil.valid.size
+    assert pupil.ok.sum() > 0.8 * pupil.ok.size
     return spot_data(pupil).rms_radius_um
 
 

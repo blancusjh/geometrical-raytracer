@@ -52,7 +52,7 @@ def _tree(starts_zy, ends_zy):
         parent=np.full(n, -1),
         kind=np.zeros(n, dtype=int),
         face=["s"] * n,
-        opl_end=np.zeros(n),
+        opl=np.zeros(n),
     )
 
 

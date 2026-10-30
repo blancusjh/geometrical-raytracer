@@ -189,8 +189,8 @@ def test_sensor_records_and_misses_outside_its_aperture():
     tree = NonSequentialTracer(system).trace(single_ray([0.0, 0.5, -2.0], [0.0, 0.0, 1.0]))
     hits = tree.hits("S")
     assert len(hits) == 1
-    assert hits.points[0] == pytest.approx([0.0, 0.5, 0.0])
-    assert hits.local_points[0, 1] == pytest.approx(0.5)  # 3/4 of the way along the segment
+    assert hits.point[0] == pytest.approx([0.0, 0.5, 0.0])
+    assert hits.local_point[0, 1] == pytest.approx(0.5)  # 3/4 of the way along the segment
     assert hits.opl[0] == pytest.approx(2.0)
 
     tree = NonSequentialTracer(system).trace(single_ray([0.0, 2.0, -2.0], [0.0, 0.0, 1.0]))
@@ -246,7 +246,7 @@ def test_lens_focuses_a_parallel_fan_onto_a_sensor():
 
     hits = tree.hits("IMG")
     assert len(hits) >= 35  # nearly every ray lands on the sensor
-    assert np.ptp(hits.local_points[:, 1]) < 3.0  # concentrated near focus (spherical aberration aside)
+    assert np.ptp(hits.local_point[:, 1]) < 3.0  # concentrated near focus (spherical aberration aside)
     values, edges = hits.histogram(axis=1, bins=64, range=(-20.0, 20.0))
     assert values.sum() == pytest.approx(hits.power.sum())
     peak = np.argmax(values)
@@ -290,7 +290,7 @@ def test_sequential_and_non_sequential_land_rays_on_the_same_image_point():
     tree = NonSequentialTracer(system, split=False).trace(single_ray([0.0, y_obj, tracer.object_z], direction))
     hits = tree.hits("IMG")
     assert len(hits) == 1
-    assert hits.points[0] == pytest.approx(reference.image_point, abs=1e-9)
+    assert hits.point[0] == pytest.approx(reference.end, abs=1e-9)
     # Both accumulate the same optical path (the sequential tracer's restart
     # offset adds 1e-8 mm per boundary, hence the tolerance).
     assert hits.opl[0] == pytest.approx(reference.opl, abs=1e-6)

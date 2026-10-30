@@ -184,12 +184,12 @@ class Viewer3D:
 
         for k, field_y in enumerate(fields):
             pupil = trace_pupil(tracer, FieldPoint(y=float(field_y)), na_object_sine=na_object_sine,
-                                sampling=PupilSampling(kind="rings", radial=radial, azimuth=azimuth), keep_paths=True,
+                                sampling=PupilSampling(kind="rings", radial=radial, azimuth=azimuth),
                                 stop_index=stop_index)
-            paths = pupil.batch.paths[pupil.valid]
+            paths = pupil.trace.path[pupil.ok]
             if mode in ("beam", "spectrum"):
                 wl = wavelength_nm if mode == "beam" else float(wavelengths_nm[k % len(wavelengths_nm)])
-                rgb = spectral_rgb(wl) * (beam_energy / max(int(pupil.valid.sum()), 1))
+                rgb = spectral_rgb(wl) * (beam_energy / max(int(pupil.ok.sum()), 1))
                 self.add_paths(paths, color=(*rgb.tolist(), 1.0), width=1.0, group=mode, additive=True)
             else:
                 self.add_paths(paths, color=RAY_COLORS[k % len(RAY_COLORS)], group="lines")

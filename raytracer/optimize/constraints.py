@@ -236,7 +236,7 @@ class AxialColor(Constraint):
             direction = result.direction / np.linalg.norm(result.direction)
             if not result.ok or abs(direction[1]) < 1e-15:
                 continue
-            crossing = result.image_point[2] - result.image_point[1] * (
+            crossing = result.end[2] - result.end[1] * (
                 direction[2] / direction[1]
             )
             shifts[i] = crossing - train.conjugates[-1]

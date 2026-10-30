@@ -176,9 +176,9 @@ def fit_transverse(
     ``grad_q W = -NA * (r' - centroid)`` by weighted least squares.
     """
 
-    points = pupil.image_points[:, :2]
-    directions = pupil.directions
-    weights = pupil.weights.copy()
+    points = pupil.end[:, :2]
+    directions = pupil.direction
+    weights = pupil.weight.copy()
     chief_direction = pupil.chief.direction
 
     u = n_image * (directions[:, 0] - chief_direction[0]) / na_image

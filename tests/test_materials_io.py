@@ -86,7 +86,7 @@ def bk7_train() -> StigmaticTrain:
 def _axial_focus_z(train: StigmaticTrain, wavelength_um: float) -> float:
     result = trace_from_object(train.tracer(wavelength_um), (0.0, 0.0), (0.0, 0.05))
     d = result.direction / np.linalg.norm(result.direction)
-    return float(result.image_point[2] - result.image_point[1] * d[2] / d[1])
+    return float(result.end[2] - result.end[1] * d[2] / d[1])
 
 
 def test_indices_are_derived_at_the_design_wavelength(bk7_train):

@@ -111,13 +111,13 @@ def oval_lens(semi_diameter: float, *, extra: float = 0.0) -> OpticalSystem:
 
 def test_semidiameter_clips_rays_beyond_the_aperture():
     tracer = SequentialTracer(oval_lens(2.0, extra=5.0))
-    batch = tracer.trace_batch(
+    trace = tracer.trace(
         np.array([[0.0, 1.0, Z0], [0.0, 3.0, Z0]]),
         np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
     )
-    assert batch.status[0] == TraceStatus.OK
-    assert batch.status[1] == TraceStatus.VIGNETTED
-    assert batch.failed_step[1] == 0
+    assert trace.status[0] == TraceStatus.OK
+    assert trace.status[1] == TraceStatus.VIGNETTED
+    assert trace.failed_step[1] == 0
 
 
 def test_drawn_curve_matches_the_traced_surface():
@@ -144,12 +144,12 @@ def test_axial_object_point_images_stigmatically():
     directions = np.column_stack(
         [np.sin(angles) * np.cos(phi), np.sin(angles) * np.sin(phi), np.cos(angles)]
     )
-    batch = tracer.trace_batch(origins, directions)
-    assert batch.valid.all()
-    assert np.max(np.abs(batch.image_points[:, :2])) < 1e-9
+    trace = tracer.trace(origins, directions)
+    assert trace.ok.all()
+    assert np.max(np.abs(trace.end[:, :2])) < 1e-9
     # Fermat: every path from the object to the image has the same optical length.
     expected = N0 * abs(Z0) + NI * ZI
-    assert np.max(np.abs(batch.opl - expected)) < 1e-9
+    assert np.max(np.abs(trace.opl - expected)) < 1e-9
 
 
 def test_non_sequential_trace_finds_the_same_focus():
@@ -160,5 +160,5 @@ def test_non_sequential_trace_finds_the_same_focus():
     tree = NonSequentialTracer(system, split=False).trace(source)
     hits = tree.hits("IMG")
     assert len(hits) == 61
-    assert np.max(np.abs(hits.points[:, :2])) < 1e-9
+    assert np.max(np.abs(hits.point[:, :2])) < 1e-9
     assert hits.opl == pytest.approx(N0 * abs(Z0) + NI * ZI, abs=1e-9)

@@ -44,7 +44,7 @@ def layout_figure(
     for field_y, color in zip(fields, FIELD_COLORS):
         _, chief = chief_ray_slopes(tracer, FieldPoint(y=field_y))
         slopes = chief + np.linspace(-fan_half_slope, fan_half_slope, fan_count)
-        beams.append((color, [trace_from_object(tracer, (0.0, field_y), (0.0, s), keep_path=True) for s in slopes]))
+        beams.append((color, [trace_from_object(tracer, (0.0, field_y), (0.0, s)) for s in slopes]))
     draw_traced(ax, tracer, beams, draw_failed=True, ray_style=dict(lw=0.65, alpha=0.72, zorder=3),
                 material_colors={**DEFAULT_MATERIAL_COLORS, **(material_colors or {})}, alpha=0.66,
                 mirror_labels=mirror_labels, sensors=False)

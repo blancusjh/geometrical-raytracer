@@ -113,7 +113,7 @@ def chief_ray_distortion(
         previous = slopes
         ideal = height * magnification
         actual = float(
-            trace_from_object(tracer, (0.0, field.y), slopes).image_point[1]
+            trace_from_object(tracer, (0.0, field.y), slopes).end[1]
         )
         rows.append(
             {
@@ -246,7 +246,7 @@ def distortion_grid(
                 continue
             actual_points[i, j] = trace_from_object(
                 tracer, (field.x, field.y), slopes
-            ).image_point[:2]
+            ).end[:2]
             valid[i, j] = True
             guesses[(i, j)] = slopes
 

@@ -38,7 +38,7 @@ def test_two_point_object_images_inverted_and_magnified():
     profile[80] = 1.0  # object point at y = +3.6 mm
     hits = _relay(profile)
 
-    positions = hits.local_points[:, 1]
+    positions = hits.local_point[:, 1]
     weights = hits.power
     # Split arrivals by sign and locate both image points.
     y_up = np.average(positions[positions > 0], weights=weights[positions > 0])
@@ -56,7 +56,7 @@ def test_image_intensity_scales_with_pixel_value():
     profile[30] = 1.0
     profile[70] = 0.4
     hits = _relay(profile)
-    positions = hits.local_points[:, 1]
+    positions = hits.local_point[:, 1]
     bright = hits.power[positions > 0].sum()  # pixel 30 (lower object) -> upper image
     dim = hits.power[positions < 0].sum()
     assert dim / bright == pytest.approx(0.4, abs=0.03)

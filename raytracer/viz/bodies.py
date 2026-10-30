@@ -278,11 +278,11 @@ def draw_system(
             else:
                 chief = (0.0 - h) / (aim_z - object_z)
             smax = na / np.sqrt(1.0 - na * na)
-            fan = [trace_from_object(tracer, (0.0, h), (0.0, chief + s), keep_path=True) for s in np.linspace(-smax, smax, rays)]
+            fan = [trace_from_object(tracer, (0.0, h), (0.0, chief + s)) for s in np.linspace(-smax, smax, rays)]
         else:
             reference = object_z if object_z is not None else 0.0
             fan = [
-                tracer.trace(np.array([0.0, (reference - launch) * t, launch]), np.array([0.0, -t, 1.0]) / np.hypot(t, 1.0), keep_path=True)
+                tracer.trace_ray(np.array([0.0, (reference - launch) * t, launch]), np.array([0.0, -t, 1.0]) / np.hypot(t, 1.0))
                 for t in np.tan(np.arcsin(h)) + np.linspace(-0.04, 0.04, rays)
             ]
         beams.append((color, fan))
@@ -319,7 +319,7 @@ def draw_traced(ax, tracer, beams, *, ray_style: dict, draw_failed: bool = False
 
     for color, fan in beams:
         for r in fan:
-            if r.ok or (draw_failed and r.path is not None):
+            if r.ok or draw_failed:
                 finite = r.path[np.isfinite(r.path).all(axis=1)]
                 ax.plot(finite[:, 2], finite[:, 1], color=color, **ray_style)
     beyond = False

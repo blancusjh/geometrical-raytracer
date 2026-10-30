@@ -37,7 +37,7 @@ def tracer() -> SequentialTracer:
 def test_meridional_chief_ray_crosses_the_stop_centre(tracer, y):
     sx, sy = chief_ray_slopes(tracer, FieldPoint(y=y))
     assert sx == pytest.approx(0.0, abs=1e-9)
-    result = trace_from_object(tracer, (0.0, y), (sx, sy), keep_path=True)
+    result = trace_from_object(tracer, (0.0, y), (sx, sy))
     at_stop = result.path[tracer.system.stop_index + 1, :2]
     assert np.hypot(*at_stop) < 1e-8
 
@@ -53,13 +53,13 @@ def test_off_axis_field_matches_rotated_meridional_case(tracer):
     field = FieldPoint(x=r * np.sin(angle), y=r * np.cos(angle))
     sx, sy = chief_ray_slopes(tracer, field)
     result = trace_from_object(tracer, (field.x, field.y), (sx, sy))
-    radial_image_height = np.hypot(*result.image_point[:2])
+    radial_image_height = np.hypot(*result.end[:2])
 
     meridional = FieldPoint(y=r)
     _, sy_ref = chief_ray_slopes(tracer, meridional)
     ref_result = trace_from_object(tracer, (0.0, r), (0.0, sy_ref))
 
-    assert radial_image_height == pytest.approx(abs(ref_result.image_point[1]), rel=1e-6)
+    assert radial_image_height == pytest.approx(abs(ref_result.end[1]), rel=1e-6)
 
 
 def test_warm_start_matches_cold_start(tracer):

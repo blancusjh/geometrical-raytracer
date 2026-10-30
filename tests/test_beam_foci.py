@@ -25,8 +25,7 @@ def trace_fan(train, *, height=0.0, na=0.08, rays=7):
     chief = (0.0 - height) / (0.0 - tracer.object_z)
     paths = []
     for s in np.linspace(-na, na, rays):
-        r = trace_from_object(tracer, (0.0, height), (0.0, chief + s),
-                              keep_path=True)
+        r = trace_from_object(tracer, (0.0, height), (0.0, chief + s))
         if r.ok:
             paths.append(r.path)
     return np.stack(paths)

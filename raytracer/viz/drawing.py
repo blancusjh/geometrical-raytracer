@@ -42,7 +42,7 @@ class Drawing:
         a traced *tree* adds what each sensor recorded.
         """
 
-        hits = {} if tree is None else {name: d.points for name, d in tree.detectors.items()}
+        hits = {} if tree is None else {name: d.point for name, d in tree.detectors.items()}
         bodies = body_outlines(system, wavelength_um=wavelength_um)
         return self._add_placed(list(system.walk()), bodies, material_colors, hits, sensors)
 

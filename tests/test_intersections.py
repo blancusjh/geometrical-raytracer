@@ -161,7 +161,7 @@ def test_placed_hit_agrees_with_the_bare_solver():
     tracer = SequentialTracer(OpticalSystem([lens, sensor]))
     origin = pose.to_world([0.0, 0.5, -20.0])
     direction = pose.direction_to_world([0.0, 0.0, 1.0])
-    result = tracer.trace(origin, direction)
+    result = tracer.trace_ray(origin, direction)
     assert result.ok
     world_hit = result.path[1]
 

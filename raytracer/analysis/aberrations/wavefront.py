@@ -73,11 +73,11 @@ def exit_pupil_wavefront(
 
     chief = pupil.chief
     chief_opl = chief.opl
-    chief_point = chief.image_point
+    chief_point = chief.end
     chief_direction = chief.direction
 
-    directions = pupil.directions
-    points = pupil.image_points
+    directions = pupil.direction
+    points = pupil.end
     opl = pupil.opl
 
     u = n_image * (directions[:, 0] - chief_direction[0]) / na_image

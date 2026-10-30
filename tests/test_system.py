@@ -117,10 +117,10 @@ def test_double_pass_lens_from_a_prescription_table():
         TableRow(Sphere(-R1), s, AIR, 15.0),
     ])
     o, dirs = meridional_rays()
-    a = SequentialTracer(folded, restart_offset=0.0).trace_batch(o, dirs)
-    b = SequentialTracer(unfolded, restart_offset=0.0).trace_batch(o, dirs)
-    assert a.valid.all() and b.valid.all()
-    np.testing.assert_allclose(a.image_points[:, :2], b.image_points[:, :2], atol=1e-12)
+    a = SequentialTracer(folded, restart_offset=0.0).trace(o, dirs)
+    b = SequentialTracer(unfolded, restart_offset=0.0).trace(o, dirs)
+    assert a.ok.all() and b.ok.all()
+    np.testing.assert_allclose(a.end[:, :2], b.end[:, :2], atol=1e-12)
     np.testing.assert_allclose(a.opl, b.opl, atol=1e-10)
     assert ParaxialModel(SequentialTracer(folded)).effective_focal_length() == pytest.approx(
         ParaxialModel(SequentialTracer(unfolded)).effective_focal_length(), rel=1e-12
@@ -158,9 +158,9 @@ def test_virtual_stop_inside_a_lens():
     assert system.pose_of("STO").position[2] == pytest.approx(6.0)
 
     rays = Rays([[0.0, 1.0, -20.0], [0.0, 8.0, -20.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], np.nan, 1.0)
-    batch = SequentialTracer(system).trace_batch(rays.origins, rays.directions)
-    assert batch.status.tolist() == [TraceStatus.OK, TraceStatus.VIGNETTED]
-    assert batch.failed_step[1] == 2
+    trace = SequentialTracer(system).trace(rays.origin, rays.direction)
+    assert trace.status.tolist() == [TraceStatus.OK, TraceStatus.VIGNETTED]
+    assert trace.failed_step[1] == 2
     tree = NonSequentialTracer(system, split=False).trace(rays)
     assert "STO" not in tree.face
     assert len(tree.hits("IMG")) == 2
@@ -172,7 +172,7 @@ def test_a_real_stop_blocks_light_non_sequentially():
     tree = NonSequentialTracer(system).trace(rays)
     assert tree.face == ["IMG", "S", "IMG"]  # through the opening, on the blade, around it
     assert len(tree) == 3  # the blade absorbs: no children
-    assert tree.hits("IMG").points[:, 1].tolist() == [1.0, 5.0]
+    assert tree.hits("IMG").point[:, 1].tolist() == [1.0, 5.0]
 
 
 # -- the path ---------------------------------------------------------------------
@@ -223,17 +223,17 @@ def test_stated_paths_choose_the_beam_splitter_branch():
     assert [s.event for s in reflect.path] == ["reflect", "detect"]
     o = np.array([[0.0, 1.0, 0.0], [2.0, -1.0, 0.0]])
     d = np.tile([0.0, 0.0, 1.0], (2, 1))
-    r = SequentialTracer(reflect).trace_batch(o, d)
-    t = SequentialTracer(transmit).trace_batch(o, d)
-    assert r.valid.all() and t.valid.all()
+    r = SequentialTracer(reflect).trace(o, d)
+    t = SequentialTracer(transmit).trace(o, d)
+    assert r.ok.all() and t.ok.all()
     # Reflection about the 45-degree plane swaps the roles of y and z.
-    np.testing.assert_allclose(r.image_points, [[0.0, -40.0, 19.0], [2.0, -40.0, 21.0]], atol=1e-12)
-    np.testing.assert_allclose(t.image_points, [[0.0, 1.0, 60.0], [2.0, -1.0, 60.0]], atol=1e-12)
-    np.testing.assert_allclose(r.directions, np.tile([0.0, -1.0, 0.0], (2, 1)), atol=1e-12)
+    np.testing.assert_allclose(r.end, [[0.0, -40.0, 19.0], [2.0, -40.0, 21.0]], atol=1e-12)
+    np.testing.assert_allclose(t.end, [[0.0, 1.0, 60.0], [2.0, -1.0, 60.0]], atol=1e-12)
+    np.testing.assert_allclose(r.direction, np.tile([0.0, -1.0, 0.0], (2, 1)), atol=1e-12)
     # The non-sequential tracer finds both branches at once, half the power each.
     tree = NonSequentialTracer(OpticalSystem(parts)).trace(Rays(o, d, np.nan, 0.5))
-    np.testing.assert_allclose(tree.hits("CAM_R").points, r.image_points, atol=1e-6)
-    np.testing.assert_allclose(tree.hits("CAM_T").points, t.image_points, atol=1e-6)
+    np.testing.assert_allclose(tree.hits("CAM_R").point, r.end, atol=1e-6)
+    np.testing.assert_allclose(tree.hits("CAM_T").point, t.end, atol=1e-6)
     assert tree.hits("CAM_R").power.sum() == pytest.approx(0.5)
 
 
@@ -261,13 +261,13 @@ def test_folding_mirror_with_a_stated_path():
     sensor = Sensor("IMG", pos=(0.0, 30.0 - 105.0, 30.0), normal=(0.0, -1.0, 0.0))
     folded = OpticalSystem([lens, fold, sensor], path=["L.front", "L.back", "FOLD:reflect", "IMG"])
     o, d = meridional_rays()
-    a = SequentialTracer(straight, restart_offset=0.0).trace_batch(o, d)
-    b = SequentialTracer(folded, restart_offset=0.0).trace_batch(o, d)
-    assert a.valid.all() and b.valid.all()
+    a = SequentialTracer(straight, restart_offset=0.0).trace(o, d)
+    b = SequentialTracer(folded, restart_offset=0.0).trace(o, d)
+    assert a.ok.all() and b.ok.all()
     # Unfold: the mirror maps (x, y, z) to (x, 30 - z, 30 - y).
-    np.testing.assert_allclose(b.image_points[:, 0], a.image_points[:, 0], atol=1e-11)
-    np.testing.assert_allclose(30.0 - b.image_points[:, 2], a.image_points[:, 1], atol=1e-11)
-    np.testing.assert_allclose(30.0 - b.image_points[:, 1], a.image_points[:, 2], atol=1e-11)
+    np.testing.assert_allclose(b.end[:, 0], a.end[:, 0], atol=1e-11)
+    np.testing.assert_allclose(30.0 - b.end[:, 2], a.end[:, 1], atol=1e-11)
+    np.testing.assert_allclose(30.0 - b.end[:, 1], a.end[:, 2], atol=1e-11)
     np.testing.assert_allclose(b.opl, a.opl, atol=1e-10)
 
 
@@ -321,13 +321,13 @@ def test_a_moved_system_traces_identically_after_moving_the_rays():
         assert moved.pose_of(element.name).isclose(motion @ system.pose_of(element.name), atol=1e-12)
 
     o, d = meridional_rays()
-    a = prescription.tracer().trace_batch(o, d)
-    b = SequentialTracer(moved, wavelength_um=prescription.wavelength_um).trace_batch(
+    a = prescription.tracer().trace(o, d)
+    b = SequentialTracer(moved, wavelength_um=prescription.wavelength_um).trace(
         motion.to_world(o), motion.direction_to_world(d)
     )
-    assert a.valid.all() and b.valid.all()
-    np.testing.assert_allclose(b.image_points, motion.to_world(a.image_points), atol=1e-11)
-    np.testing.assert_allclose(b.directions, motion.direction_to_world(a.directions), atol=1e-13)
+    assert a.ok.all() and b.ok.all()
+    np.testing.assert_allclose(b.end, motion.to_world(a.end), atol=1e-11)
+    np.testing.assert_allclose(b.direction, motion.direction_to_world(a.direction), atol=1e-13)
     np.testing.assert_allclose(b.opl, a.opl, atol=1e-10)
 
 
@@ -338,9 +338,9 @@ def test_an_assembly_moves_its_elements_together():
     for element in system.elements:
         assert grouped.pose_of(element.name).isclose(pose @ system.pose_of(element.name), atol=1e-12)
     o, d = meridional_rays()
-    a = SequentialTracer(system, wavelength_um=0.5876).trace_batch(o, d)
-    b = SequentialTracer(grouped, wavelength_um=0.5876).trace_batch(pose.to_world(o), pose.direction_to_world(d))
-    np.testing.assert_allclose(b.image_points, pose.to_world(a.image_points), atol=1e-11)
+    a = SequentialTracer(system, wavelength_um=0.5876).trace(o, d)
+    b = SequentialTracer(grouped, wavelength_um=0.5876).trace(pose.to_world(o), pose.direction_to_world(d))
+    np.testing.assert_allclose(b.end, pose.to_world(a.end), atol=1e-11)
 
 
 def test_systems_are_values():

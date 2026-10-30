@@ -58,7 +58,7 @@ def _spot_from_arrays(field_y: float, points: np.ndarray, weights: np.ndarray) -
 def spot_data(pupil: PupilTrace) -> SpotData:
     """Compute area-weighted spot statistics from a pupil trace."""
 
-    return _spot_from_arrays(pupil.field.y, pupil.image_points[:, :2], pupil.weights)
+    return _spot_from_arrays(pupil.field.y, pupil.end[:, :2], pupil.weight)
 
 
 def spot_data_from_points(
