@@ -344,8 +344,8 @@ y el experimento del ejemplo la recorre por número de superficies:
 
 | N superficies | (M−1)_RMS | sagita máx (campo 3 mm) |
 |---|---|---|
-| 2 (aplanático exacto, sin libertad) | 1.7e-16 | 7.77 mm |
-| 4 (cementado, peso de campo plano) | 2.9e-04 | 0.0000 mm |
+| 2 (aplanático exacto, sin libertad) | 2.1e-16 | 7.77 mm |
+| 4 (cementado, peso de campo plano) | 3.6e-04 | 0.0000 mm |
 | 6 (triplete en aire, peso de campo plano) | 7.9e-06 | 0.0001 mm |
 
 Con 3 grados de libertad (N=4) se compra aplanatismo *o* campo plano; con 5
@@ -453,8 +453,8 @@ Todos aceptan `--save salida.png` para renderizar sin abrir ventana;
 
 Cada ejemplo verifica su propia afirmación e imprime el número. El espejo
 elíptico mide la distancia de cada rayo reflejado al foco lejano
-(5,1e-13 µm RMS); el newtoniano comprueba que el plegado exacto a 90°
-conserva el foco (1,5e-15); los telescopios *resuelven* la separación que
+(5,9e-13 µm RMS); el newtoniano comprueba que el plegado exacto a 90°
+conserva el foco (1,9e-15); los telescopios *resuelven* la separación que
 hace infinita la focal efectiva en el sistema real de espesor finito, y
 luego confirman por trazado que dos rayos paralelos salen paralelos.
 
