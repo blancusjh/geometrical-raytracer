@@ -188,3 +188,12 @@ def test_a_stop_may_sit_behind_the_ray():
     )
     result = SequentialTracer(system).trace([0.0, 5.0, -5.0], [0.0, 0.0, 1.0])
     assert result.ok
+
+
+def test_tracer_replace_keeps_the_settings_it_is_not_given():
+    glass = ConstantIndex("G", 1.5)
+    system = OpticalSystem.compose(Lens("A", front=Sphere(20.0), back=Plane(), thickness=2.0, material=glass, semi_diameter=5.0), Gap(30.0), Sensor("IMG"))
+    tracer = SequentialTracer(system, wavelength_um=0.55, object_z=-100.0, clip_apertures=False)
+    moved = tracer.replace(object_z=-200.0)
+    assert (moved.wavelength_um, moved.object_z, moved.clip_apertures) == (0.55, -200.0, False)
+    assert tracer.at_wavelength(0.65).object_z == -100.0

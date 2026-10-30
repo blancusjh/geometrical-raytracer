@@ -70,7 +70,7 @@ cooke = rt.OpticalSystem(
                 material=glass["N-SK16"], semi_diameter=6.5, z=0.0),
         el.Lens("L2", front=sf.Sphere(-20.25), back=sf.Sphere(19.30), thickness=1.0,
                 material=glass["F4"], semi_diameter=5.0, z=8.0),
-        el.Stop("STO", aperture=4.75, z=9.0),
+        el.Stop("STO", aperture=4.75, z=9.0, virtual=True),  # en el vértice curvo de L2: un plano de referencia
         el.Lens("L3", front=sf.Sphere(141.25), back=sf.Sphere(-17.285), thickness=2.0,
                 material=glass["N-SK16"], semi_diameter=6.5, z=15.0),
         el.Sensor("IMG", z=59.95),

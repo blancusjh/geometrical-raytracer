@@ -214,14 +214,17 @@ class Lens(Element):
 
 
 class Mirror(Element):
-    """A single reflecting surface (coated :class:`~raytracer.coatings.PerfectMirror` unless told otherwise)."""
+    """A single reflecting surface (coated :class:`~raytracer.coatings.PerfectMirror` unless told otherwise).
+
+    ``aperture=None`` is an unbounded mirror: the whole surface reflects.
+    """
 
     def __init__(
         self,
         name: str,
         *,
         surface: Surface | Interface,
-        aperture: Aperture | float,
+        aperture: Aperture | float | None,
         coating: Coating | None = None,
         **placement,
     ) -> None:

@@ -207,6 +207,22 @@ def _lens(name: str, front: _Surface, back: _Surface, material: Material) -> Len
     )
 
 
+def _cuts(stop: Stop, lens: Lens) -> bool:
+    """Whether the stop's plane, out to the blade's edge, passes through the lens body.
+
+    A table may place its stop plane where no diaphragm can be: inside a lens,
+    or at a curved vertex with glass beyond it. Such a stop is a reference
+    plane of the design, and is read as virtual.
+    """
+
+    z = stop.pose.position[2] - lens.pose.position[2]
+    r = np.linspace(0.0, min(stop.outer_radius, lens.semi_diameter), 129)
+    zero = np.zeros_like(r)
+    front = lens.front.surface.sag(r, zero)
+    back = lens.thickness + lens.back.surface.sag(r, zero)
+    return bool(np.any((front + 1e-9 < z) & (z < back - 1e-9)))
+
+
 def from_table(cls, rows, *, name: str = "", ambient: Material = AIR, image_surface: Surface | None = None,
                image_name: str = "IMG", stop: str | None = None):
     """Read prescription rows into placed elements; the row order becomes the stated path.
@@ -234,11 +250,16 @@ def from_table(cls, rows, *, name: str = "", ambient: Material = AIR, image_surf
         if surface.kind == MIRROR and not surface.on_glass:
             mirrors += 1
             names[id(surface)] = surface.name or f"M{mirrors}"
-            elements.append(Mirror(names[id(surface)], surface=surface.interface, aperture=Circle(surface.semi_diameter), z=surface.z))
+            aperture = Circle(surface.semi_diameter) if surface.semi_diameter > 0.0 else None
+            elements.append(Mirror(names[id(surface)], surface=surface.interface, aperture=aperture, z=surface.z))
         elif surface.kind == STOP:
             names[id(surface)] = surface.name or "STO"
-            inside = any(f.z + 1e-9 < surface.z < b.z - 1e-9 for f, b, _ in bodies)
-            elements.append(Stop(names[id(surface)], aperture=Circle(surface.semi_diameter), virtual=inside, z=surface.z))
+            if surface.semi_diameter <= 0.0:
+                raise ValueError(f"the stop at z = {surface.z} has no semi-diameter: a stop's opening is its definition")
+            stop_element = Stop(names[id(surface)], aperture=Circle(surface.semi_diameter), z=surface.z)
+            if any(_cuts(stop_element, lens) for lens in elements if isinstance(lens, Lens)):
+                stop_element = stop_element.replace(virtual=True)
+            elements.append(stop_element)
         elif id(surface) not in names:
             raise ValueError(f"the surface at z = {surface.z} bounds no body and is neither a mirror nor a stop")
     elements.append(Sensor(image_name, surface=image_surface, z=image_z))

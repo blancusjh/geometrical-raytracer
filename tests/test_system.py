@@ -355,3 +355,21 @@ def test_systems_are_values():
         system.with_component("nope", system["L2"])
     with pytest.raises(ValueError, match="unique"):
         OpticalSystem([Sensor("A"), Sensor("A", z=1.0)])
+
+
+def test_a_stop_whose_plane_runs_through_glass_is_virtual():
+    """The Cooke triplet's stop sits at the F4 lens's curved back vertex: off
+    axis its plane is inside the glass, so it is a reference plane, not a blade."""
+
+    cooke = read_prescription(Path(__file__).resolve().parents[1] / "data/optical_systems/photographic/cooke_triplet_prescription.csv")
+    gauss = read_prescription(Path(__file__).resolve().parents[1] / "data/optical_systems/photographic/double_gauss_prescription.csv")
+    assert cooke.system["STO"].virtual
+    assert not gauss.system["STO"].virtual
+
+
+def test_table_mirror_without_semi_diameter_is_unbounded_and_stop_without_is_an_error():
+    rows = [TableRow(Sphere(-100.0), -50.0, None, None, kind="mirror")]
+    system = OpticalSystem.from_table(rows)
+    assert system["M1"].aperture is None
+    with pytest.raises(ValueError, match="stop"):
+        OpticalSystem.from_table([TableRow(Plane(), 10.0, AIR, None, kind="stop"), TableRow(Sphere(50.0), 5.0, G1, 10.0), TableRow(Plane(), 20.0, AIR, 10.0)])

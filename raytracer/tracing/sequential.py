@@ -134,18 +134,25 @@ class SequentialTracer:
         except ValueError as exc:
             raise ValueError(f"{exc} (pass wavelength_um= to the tracer)") from None
 
-    def at_wavelength(self, wavelength_um: float) -> "SequentialTracer":
-        """The same tracer, evaluating the media at another wavelength."""
+    def replace(self, **changes) -> "SequentialTracer":
+        """The same tracer with some settings changed — another system, wavelength or object plane."""
 
-        return SequentialTracer(
-            self.system,
-            wavelength_um=wavelength_um,
+        settings = dict(
+            system=self.system,
+            wavelength_um=self.wavelength_um,
             object_z=self.object_z,
             newton_tol=self.newton_tol,
             clip_apertures=self.clip_apertures,
             aperture_slack=self.aperture_slack,
             restart_offset=self.restart_offset,
         )
+        settings.update(changes)
+        return SequentialTracer(settings.pop("system"), **settings)
+
+    def at_wavelength(self, wavelength_um: float) -> "SequentialTracer":
+        """The same tracer, evaluating the media at another wavelength."""
+
+        return self.replace(wavelength_um=wavelength_um)
 
     # -- facts of the path used by the analyses ------------------------------
 
