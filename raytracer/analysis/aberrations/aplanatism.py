@@ -1,6 +1,6 @@
 """The Silva-Lora & Torres aplanatism condition for stigmatic trains.
 
-A :class:`~raytracer.design.stigmatic.StigmaticTrain` is rigorously
+A :class:`~raytracer.families.StigmaticTrain` is rigorously
 stigmatic for its end conjugates whatever its intermediate conjugates are.
 Aplanatism — stigmatism that survives a transverse displacement of the
 object point, i.e. freedom from coma as well as spherical aberration — is
@@ -40,15 +40,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...design.stigmatic import StigmaticTrain
-from ...propagation.fields import FieldPoint, PupilSampling, trace_from_object, trace_pupil
-from ...propagation.sequential import SequentialTracer
+from ...families import StigmaticTrain
+from ...tracing.fields import FieldPoint, PupilSampling, trace_from_object, trace_pupil
+from ...tracing.sequential import SequentialTracer
 
 
-def normal_axis_crossing(profile, rho):
+def normal_axis_crossing(surface, rho):
     """``V_k C_k``: axis crossing of the surface normal, per the paper's Eq. (24).
 
-    *profile* is a :class:`~raytracer.surfaces.cartesian_oval.CartesianOvalProfile`
+    *surface* is a :class:`~raytracer.geometry.surfaces.CartesianSurface`
     (only its G, O, S parameters enter); *rho* is the vertex-surface distance
     of the hit point. Paraxially (``rho -> 0``) this is the vertex radius
     ``1/O``. The expression assumes ``G != 0`` and ``O != 0`` (the paper's
@@ -57,7 +57,7 @@ def normal_axis_crossing(profile, rho):
     """
 
     rho = np.asarray(rho, dtype=float)
-    G, O, S = profile.G, profile.O, profile.S
+    G, O, S = surface.G, surface.O, surface.S
     if G == 0.0 or O == 0.0:
         raise ValueError(
             "Eq. (24) is singular for G = 0 or O = 0; use the geometric "
@@ -69,7 +69,7 @@ def normal_axis_crossing(profile, rho):
         return 1.0 / inverse
 
 
-def _vc_geometric(profile, h):
+def _vc_geometric(surface, h):
     """``V_k C_k`` from the sag and slope at radial height *h*.
 
     The normal at ``(z(h), h)`` crosses the axis at ``z + h/z'``. Infinite
@@ -80,20 +80,20 @@ def _vc_geometric(profile, h):
     """
 
     h = np.asarray(h, dtype=float)
-    z, dz = profile.sag_and_slope(h)
+    z, dz = surface.sag_and_slope(h)
     tiny = 1e-12
     with np.errstate(divide="ignore"):
         vertex_radius = (
-            np.inf if profile.curvature == 0.0 else 1.0 / profile.curvature
+            np.inf if surface.curvature == 0.0 else 1.0 / surface.curvature
         )
         return np.where(h < tiny, vertex_radius, z + np.where(h < tiny, 1.0, h) / dz)
 
 
-def _inverse_vc_geometric(profile, h):
+def _inverse_vc_geometric(surface, h):
     """``1/V_k C_k`` — kept for the Eq. (24) cross-validation tests."""
 
     with np.errstate(divide="ignore"):
-        return 1.0 / _vc_geometric(profile, h)
+        return 1.0 / _vc_geometric(surface, h)
 
 
 def aplanatism_map(train: StigmaticTrain, rho_or_heights, *, from_heights: bool = False):
@@ -115,8 +115,8 @@ def aplanatism_map(train: StigmaticTrain, rho_or_heights, *, from_heights: bool 
         )
 
     result = np.ones(values.shape[0])
-    for k, profile in enumerate(train.profiles):
-        if profile.is_plane:
+    for k, surface in enumerate(train.surfaces):
+        if surface.is_plane:
             continue
         za = train.conjugates[k] - train.vertices[k]
         zb = train.conjugates[k + 1] - train.vertices[k]
@@ -137,9 +137,9 @@ def aplanatism_map(train: StigmaticTrain, rho_or_heights, *, from_heights: bool 
             rho = values[:, k]
             h = rho.copy()
             for _ in range(3):
-                z, _ = profile.sag_and_slope(h)
+                z, _ = surface.sag_and_slope(h)
                 h = np.sqrt(np.maximum(rho * rho - z * z, 0.0))
-        vc = _vc_geometric(profile, h)
+        vc = _vc_geometric(surface, h)
         a = 0.0 if np.isinf(za) else 1.0 / za
         b = 0.0 if np.isinf(zb) else 1.0 / zb
         # (b - 1/VC)/(a - 1/VC) written as (b*VC - 1)/(a*VC - 1): finite at
@@ -217,7 +217,7 @@ def aplanatism_report(
     ``valid`` false, so the ray count is stable for optimizers.
     """
 
-    tracer = tracer or SequentialTracer(train.to_system())
+    tracer = tracer or train.tracer()
     n0, nn = train.indices[0], train.indices[-1]
     gt = train.gt
     sines = np.linspace(na_object_sine / samples, na_object_sine, samples)
@@ -323,7 +323,7 @@ def aplanatic_image_surface(
     is relative to that reference-ray convention.
     """
 
-    tracer = tracer or SequentialTracer(train.to_system())
+    tracer = tracer or train.tracer()
     sampling = sampling or PupilSampling(kind="rings", radial=4, azimuth=12)
     heights = np.asarray(heights, dtype=float)
 

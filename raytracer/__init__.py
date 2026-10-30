@@ -1,52 +1,55 @@
-"""Optical ray-tracing toolkit, layered by the nature of each piece:
+"""Optical ray tracing on one physical model.
 
-- ``math`` — vectors, rigid transforms, and the ray/surface intersection
-  solvers. Knows nothing about optics.
-- ``surfaces`` — the shapes a ray can meet. Each declares its own geometry,
-  implicitly (``f_Sigma(x) = 0``) or parametrically (``x = P(t)``); none
-  solves its own intersection.
-- ``optics`` — light and the laws it obeys: ``Ray``, ``laws`` (reflection,
-  refraction), ``radiometry`` (Fresnel), materials, sources, instruments,
-  elements.
-- ``propagation`` — the algorithms that emit rays, prolong them to a
-  collision, and decide what happens next: ``sequential`` and ``branching``.
-- ``design`` — the data model of a system, independent of any engine.
-- ``io`` — reading/writing a design. ``analysis`` — aberrations and image
-  quality. ``viz`` — matplotlib and OpenGL presentation.
+An optical system is **elements placed in an ambient medium**. Each piece of
+the package answers one question, and imports only from the pieces above
+it in this list:
 
-Every public name from ``surfaces``, ``optics``, ``propagation``, ``design``
-and ``io`` is re-exported here for convenience, derived from those packages'
-own ``__all__`` so the lists cannot drift apart.
+- :mod:`~raytracer.geometry` — shape and place, no optics: rotations and
+  poses, surfaces, apertures, solids, ray/surface intersection.
+- :mod:`~raytracer.materials` — the media that fill space.
+- :mod:`~raytracer.coatings` — how much light a boundary reflects and transmits.
+- :mod:`~raytracer.interfaces` — a surface as an optical boundary, and the
+  laws of reflection and refraction.
+- :mod:`~raytracer.elements` — lenses, mirrors, beam splitters, prisms,
+  stops, sensors.
+- :mod:`~raytracer.system` — :class:`OpticalSystem` and :class:`Assembly`;
+  the media on each side of each boundary and the sequential path follow
+  from the placed elements.
+- :mod:`~raytracer.tracing` — the engines: sequential (along the path) and
+  non-sequential (wherever light goes), plus paraxial optics and pupils.
+- :mod:`~raytracer.sources` — emitters for non-sequential tracing.
+- :mod:`~raytracer.families` — generators of systems (stigmatic trains).
+- :mod:`~raytracer.io` — reading and writing designs and catalogues.
+- :mod:`~raytracer.analysis` — what is measured on a traced system.
+- :mod:`~raytracer.optimize` — moving a family's parameters.
+- :mod:`~raytracer.viz` — figures and the OpenGL viewer.
+
+The namespaces are the API (``from raytracer import elements as el``);
+the top level holds only the system and the most used names.
 """
 
-from . import design, io, optics, propagation, surfaces
-from .design import *  # noqa: F401,F403
-from .io import *  # noqa: F401,F403
-from .math.transforms import RigidTransform
-from .math.vectors import direction_from_angle, normalize
-from .optics import *  # noqa: F401,F403
-from .propagation import *  # noqa: F401,F403
-from .surfaces import *  # noqa: F401,F403
+from . import coatings, elements, geometry, interfaces, materials, system
+from .geometry import Pose, Rotation
+from .interfaces import Interface
+from .materials import AIR, VACUUM
+from .system import Assembly, Gap, OpticalSystem, TableRow
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
-    "RigidTransform",
-    "normalize",
-    "direction_from_angle",
-    *surfaces.__all__,
-    *optics.__all__,
-    *propagation.__all__,
-    *design.__all__,
-    *io.__all__,
+    "OpticalSystem",
+    "Assembly",
+    "Gap",
+    "TableRow",
+    "Interface",
+    "Pose",
+    "Rotation",
+    "AIR",
+    "VACUUM",
+    "geometry",
+    "materials",
+    "coatings",
+    "interfaces",
+    "elements",
+    "system",
 ]
-
-
-def __getattr__(name: str):
-    # Lazy: the OpenGL viewer pulls in vispy, which should not be a hard
-    # requirement for headless/analysis use.
-    if name in ("OpenGLViewer", "RenderConfig"):
-        from .viz.gl.viewer import OpenGLViewer, RenderConfig
-
-        return {"OpenGLViewer": OpenGLViewer, "RenderConfig": RenderConfig}[name]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

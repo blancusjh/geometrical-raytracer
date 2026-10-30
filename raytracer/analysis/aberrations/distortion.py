@@ -16,7 +16,7 @@ centroid-based figure alongside the full aberration summary.
   off a curve.
 
 Both use the general 2-D chief-ray solver
-(:func:`raytracer.propagation.fields.chief_ray_slopes`), not the
+(:func:`raytracer.tracing.fields.chief_ray_slopes`), not the
 rotationally-symmetric 1-D shortcut, so they are correct for a genuinely
 off-axis (x, y) field point in any system this tracer can trace.
 """
@@ -27,8 +27,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...propagation.fields import FieldPoint, chief_ray_slopes, trace_from_object
-from ...propagation.sequential import SequentialTracer
+from ...tracing.fields import FieldPoint, chief_ray_slopes, trace_from_object
+from ...tracing.sequential import SequentialTracer
 
 
 def _solve_chief_ray(
@@ -87,10 +87,10 @@ def chief_ray_distortion(
 
     if field_unit not in ("mm", "deg"):
         raise ValueError(f"field_unit must be 'mm' or 'deg', got {field_unit!r}")
-    object_z = tracer.system.object_z
+    object_z = tracer.object_z
     if object_z is None:
         raise ValueError(
-            "system.object_z is unset; call sequential.solve_object_plane(tracer) "
+            "tracer.object_z is unset; call solve_object_plane(tracer) "
             "or assign it explicitly"
         )
 

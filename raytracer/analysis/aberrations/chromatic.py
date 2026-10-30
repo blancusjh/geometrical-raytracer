@@ -1,14 +1,13 @@
 """Axial and lateral color from tracing the same prescription at several
 wavelengths.
 
-``OpticalSystem.wavelength_um`` is a single fixed value — this package's
-tracer is fundamentally monochromatic per instance — so "chromatic
-aberration" here means literally rebuilding the system at each wavelength
-of interest (same surfaces, same fixed object plane) and comparing where
+A :class:`~raytracer.tracing.SequentialTracer` evaluates the media at one
+wavelength, so "chromatic aberration" here means one tracer per wavelength
+of interest (:meth:`~raytracer.tracing.SequentialTracer.at_wavelength`) (same surfaces, same fixed object plane) and comparing where
 rays land. That only produces something meaningful once a material's
 ``index()`` actually varies with wavelength, i.e. an
-:class:`~raytracer.optics.materials.AbbeMaterial` rather than a
-:class:`~raytracer.optics.materials.ConstantIndex` — the DUV materials in
+:class:`~raytracer.materials.AbbeMaterial` rather than a
+:class:`~raytracer.materials.ConstantIndex` — the DUV materials in
 this package are only ever evaluated at one wavelength and have no real
 dispersion to show.
 
@@ -18,7 +17,7 @@ Three classical quantities:
   shifts along z with wavelength, since the system's optical power itself
   is index-, hence wavelength-, dependent. Found from one differential ray
   per wavelength — the same technique
-  :func:`~raytracer.propagation.paraxial.differential_conjugates` uses to
+  :func:`~raytracer.tracing.paraxial.differential_conjugates` uses to
   recover an object plane, but solving for the *image*-side focus instead
   since here the object plane is fixed and known.
 - **Lateral color**: at the *reference* wavelength's paraxial image plane,
@@ -37,16 +36,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...propagation.fields import (
+from ...tracing.fields import (
     FieldPoint,
     PupilSampling,
     chief_ray_slopes,
     trace_from_object,
     trace_pupil,
 )
-from ...propagation.paraxial import direction_from_slopes
-from ...design.system import OpticalSystem
-from ...propagation.sequential import SequentialTracer
+from ...geometry.vectors import direction_from_slopes
+from ...tracing.sequential import SequentialTracer
 
 
 def _reference_index(wavelengths_um: np.ndarray, reference_wavelength_um: float) -> int:
@@ -104,20 +102,6 @@ class LateralColor:
         return (self.image_height_mm - self.image_height_mm[index]) * 1e3
 
 
-def _system_at_wavelength(system: OpticalSystem, wavelength_um: float) -> OpticalSystem:
-    """A same-prescription copy of *system*, rebuilt at a different wavelength.
-
-    The surface rows are deep-copied: ``OpticalSystem`` keeps a shallow
-    ``list(rows)``, so sharing them would let a later ``set_thickness`` on
-    one wavelength's copy silently mutate the caller's own system.
-    """
-
-    return OpticalSystem(
-        copy.deepcopy(system.rows), wavelength_um=wavelength_um,
-        object_space=system.object_space, object_z=system.object_z, name=system.name,
-    )
-
-
 def _paraxial_focus_z(tracer: SequentialTracer, *, probe_height_mm: float | None = None) -> float:
     """On-axis paraxial focus z, from one differential (near-axial) ray.
 
@@ -139,15 +123,16 @@ def _paraxial_focus_z(tracer: SequentialTracer, *, probe_height_mm: float | None
     all, to a small fraction of the object distance.
     """
 
-    system = tracer.system
-    object_z = system.object_z
+    object_z = tracer.object_z
     if object_z is None:
-        raise ValueError("system.object_z is unset")
+        raise ValueError("tracer.object_z is unset")
 
-    first_vertex = float(system.vertices[0])
+    first_vertex = tracer.step_z(0)
     reach = first_vertex - object_z
     if probe_height_mm is None:
-        semidiameters = [r.semidiameter for r in system.rows if r.semidiameter is not None]
+        semidiameters = [
+            s.face.clear_aperture.extent for s in tracer.steps if s.face.clear_aperture is not None
+        ]
         probe_height_mm = (
             0.005 * min(semidiameters) if semidiameters else 1e-4 * abs(reach)
         )
@@ -168,19 +153,19 @@ def _paraxial_focus_z(tracer: SequentialTracer, *, probe_height_mm: float | None
             "The differential ray leaves the system parallel to the axis, so it "
             "has no finite focus; an afocal system has no axial-color curve"
         )
-    return float(system.image_z - y2 / slope)
+    return float(tracer.image_z - y2 / slope)
 
 
 def axial_color(
-    system: OpticalSystem,
+    tracer: SequentialTracer,
     wavelengths_um,
     *,
     reference_wavelength_um: float,
 ) -> AxialColor:
     """Paraxial focus position vs. wavelength, object plane held fixed.
 
-    ``system.object_z`` must already be set (e.g. via
-    :func:`~raytracer.propagation.paraxial.solve_object_plane` at the
+    ``tracer.object_z`` must already be set (e.g. via
+    :func:`~raytracer.tracing.paraxial.solve_object_plane` at the
     reference wavelength) — the same physical object plane is reused for
     every wavelength; only the resulting focus position changes.
     """
@@ -188,7 +173,7 @@ def axial_color(
     wavelengths_um = np.asarray(wavelengths_um, dtype=float)
     focus_z = []
     for wl in wavelengths_um:
-        wl_tracer = SequentialTracer(_system_at_wavelength(system, float(wl)))
+        wl_tracer = tracer.at_wavelength(float(wl))
         focus_z.append(_paraxial_focus_z(wl_tracer))
 
     return AxialColor(
@@ -199,7 +184,7 @@ def axial_color(
 
 
 def lateral_color(
-    system: OpticalSystem,
+    tracer: SequentialTracer,
     wavelengths_um,
     *,
     field_height_mm: float,
@@ -222,8 +207,7 @@ def lateral_color(
     guess = None
     field = FieldPoint(y=float(field_height_mm))
     for wl in wavelengths_um:
-        wl_system = _system_at_wavelength(system, float(wl))
-        wl_tracer = SequentialTracer(wl_system)
+        wl_tracer = tracer.at_wavelength(float(wl))
         _, chief_slope = chief_ray_slopes(
             wl_tracer, field, stop_index=stop_index, initial_guess=guess
         )
@@ -283,7 +267,7 @@ class ChromaticSpots:
 
 
 def chromatic_spots(
-    system: OpticalSystem,
+    reference: SequentialTracer,
     wavelengths_um,
     *,
     na_object_sine: float,
@@ -314,7 +298,7 @@ def chromatic_spots(
     sampling = sampling or PupilSampling(kind="rings", radial=8, azimuth=32)
 
     def bundle(wavelength_um: float, guess):
-        tracer = SequentialTracer(_system_at_wavelength(system, wavelength_um))
+        tracer = reference.at_wavelength(wavelength_um)
         slopes = chief_ray_slopes(
             tracer, field, stop_index=stop_index, initial_guess=guess
         )

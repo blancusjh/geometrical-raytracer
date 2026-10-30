@@ -1,6 +1,6 @@
 """Stigmatic-train designs as data files.
 
-A :class:`~raytracer.design.stigmatic.StigmaticTrain` is a handful of
+A :class:`~raytracer.families.StigmaticTrain` is a handful of
 numbers plus media *names* — a finished design is data, and belongs next to
 the prescriptions (``data/optical_systems/<kind>/*.json``) rather than
 hard-coded in a notebook. The JSON stores media by name and conjugates at
@@ -11,7 +11,7 @@ loading against a material catalog whose dispersion has drifted fails
 loudly instead of silently rebuilding different surfaces.
 
 Media names resolve through a
-:class:`~raytracer.optics.materials.MaterialLibrary` — pass
+:class:`~raytracer.materials.MaterialLibrary` — pass
 ``default_materials()`` extended with any file catalogs the design uses
 (e.g. ``read_materials("data/materials/formlabs_resins.csv", into=...)``).
 Constant-index media are flagged as such in the file and rebuilt from the
@@ -25,8 +25,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..design.stigmatic import StigmaticTrain
-from ..optics.materials import ConstantIndex, Material, MaterialLibrary
+from ..families import StigmaticTrain
+from ..materials import ConstantIndex, Material, MaterialLibrary
 
 _KIND = "stigmatic_train"
 

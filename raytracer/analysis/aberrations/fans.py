@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...propagation.fields import FieldPoint, PupilSampling, trace_pupil
-from ...propagation.sequential import SequentialTracer
+from ...tracing.fields import FieldPoint, PupilSampling, trace_pupil
+from ...tracing.sequential import SequentialTracer
 
 
 @dataclass

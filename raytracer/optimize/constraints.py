@@ -1,6 +1,6 @@
 """Pluggable design constraints for stigmatic-train optimization.
 
-Every member of a :class:`~raytracer.design.stigmatic.StigmaticTrain`
+Every member of a :class:`~raytracer.families.StigmaticTrain`
 family is already exactly stigmatic; a *constraint* is one further property
 the optimizer buys with the free conjugates, expressed as a residual vector
 that is zero exactly when the property holds. Constraints compose: pass any
@@ -46,7 +46,7 @@ from ..analysis.aberrations.aplanatism import (
     aplanatic_image_surface,
     aplanatism_report,
 )
-from ..design.stigmatic import StigmaticTrain
+from ..families import StigmaticTrain
 
 #: Finite stand-in residual for a ray or bundle that failed to trace, so
 #: the solver backs away from singular walls instead of seeing NaN.
@@ -220,9 +220,7 @@ class AxialColor(Constraint):
         return len(self.wavelengths)
 
     def residuals(self, context: EvaluationContext) -> np.ndarray:
-        from ..design.system import OpticalSystem
-        from ..propagation.fields import trace_from_object
-        from ..propagation.sequential import SequentialTracer
+        from ..tracing.fields import trace_from_object
 
         train = context.train
         if not train.is_dispersive:
@@ -234,15 +232,7 @@ class AxialColor(Constraint):
         slope = sine / np.sqrt(1.0 - sine * sine)
         shifts = np.full(len(self.wavelengths), PENALTY)
         for i, wavelength in enumerate(self.wavelengths):
-            system = OpticalSystem(
-                train.rows(),
-                object_space=train.media[0],
-                object_z=train.conjugates[0],
-                wavelength_um=wavelength,
-            )
-            result = trace_from_object(
-                SequentialTracer(system), (0.0, 0.0), (0.0, slope)
-            )
+            result = trace_from_object(train.tracer(wavelength), (0.0, 0.0), (0.0, slope))
             direction = result.direction / np.linalg.norm(result.direction)
             if not result.ok or abs(direction[1]) < 1e-15:
                 continue

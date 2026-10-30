@@ -25,7 +25,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from ..optics.materials import (
+from ..materials import (
     AbbeMaterial,
     CauchyMaterial,
     ConstantIndex,

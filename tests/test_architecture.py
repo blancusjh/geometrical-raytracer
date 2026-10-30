@@ -25,11 +25,15 @@ PACKAGE = Path(__file__).resolve().parents[1] / "raytracer"
 
 #: The layer order the README documents, lowest first.
 LAYERS = [
-    "math",
-    "surfaces",
-    "optics",
-    "design",
-    "propagation",
+    "geometry",
+    "materials",
+    "coatings",
+    "interfaces",
+    "elements",
+    "system",
+    "sources",
+    "tracing",
+    "families",
     "io",
     "analysis",
     "optimize",
@@ -109,25 +113,22 @@ def test_imports_only_reach_downward(layer: str):
             )
 
 
-def test_math_depends_on_no_other_layer():
-    """The bottom of the chain: geometry with no optics in it."""
+def test_geometry_depends_on_no_other_layer():
+    """The bottom of the chain: shape and place, with no optics in it."""
 
-    for path in _modules_in("math"):
-        assert _imported_layers(path) <= {"math"}
-
-
-def test_surfaces_reaches_optics_only_for_annotations():
-    """A surface is hit-testable without knowing what a ray is."""
-
-    ray_annotation = PACKAGE / "surfaces" / "surface.py"
-    assert "optics" not in _imported_layers(ray_annotation)
-    assert "TYPE_CHECKING" in ray_annotation.read_text(encoding="utf-8")
+    for path in _modules_in("geometry"):
+        assert _imported_layers(path) <= {"geometry"}
 
 
-def test_design_reaches_io_only_from_inside_a_method():
-    """``from_prescription`` is a convenience on the data model; the data
-    model itself stays independent of any file format."""
+def test_elements_know_nothing_of_systems_or_engines():
+    """An element is a physical thing; how it is arranged or traced is not its business."""
 
-    system = PACKAGE / "design" / "system.py"
-    assert "io" not in _imported_layers(system)
-    assert "from ..io.prescription_csv import" in system.read_text(encoding="utf-8")
+    for path in _modules_in("elements"):
+        assert _imported_layers(path).isdisjoint({"system", "tracing", "sources"})
+
+
+def test_system_reaches_io_and_tracing_only_lazily():
+    """Builders defer to ``table``; the data model never imports an engine or a file format."""
+
+    for path in _modules_in("system"):
+        assert _imported_layers(path).isdisjoint({"tracing", "io", "analysis"})

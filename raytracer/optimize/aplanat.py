@@ -36,7 +36,7 @@ from ..analysis.aberrations.aplanatism import (
     aplanatic_image_surface,
     aplanatism_report,
 )
-from ..design.stigmatic import StigmaticTrain
+from ..families import StigmaticTrain
 from .constraints import PENALTY, Aplanatism, Constraint, EvaluationContext, FlatImageSurface
 
 _PENALTY = PENALTY

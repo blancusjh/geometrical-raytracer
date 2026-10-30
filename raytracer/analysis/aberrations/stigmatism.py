@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...propagation.fields import PupilTrace
+from ...tracing.fields import PupilTrace
 from ..imaging.spots import SpotData, spot_data
 from .wavefront import WavefrontSamples, exit_pupil_wavefront
 
@@ -48,32 +48,26 @@ class StigmatismReport:
 
 
 def point_line_distances(origins: np.ndarray, directions: np.ndarray, target: np.ndarray) -> np.ndarray:
-    """Perpendicular distance from *target* to each ray's infinite 2-D line.
+    """Perpendicular distance from *target* to each ray's infinite line (2-D or 3-D).
 
-    Verifies convergence to a point without needing a physical screen
-    intercept — useful for the 2-D non-sequential engine, where a screen
-    placed near the convergence point can occlude direct (unreflected/
-    unrefracted) rays before they even reach the stigmatic surface.
+    Verifies convergence to a point without needing a detector intercept —
+    useful for non-sequential traces, where a detector placed near the
+    convergence point can occlude direct rays before they even reach the
+    stigmatic surface.
     """
 
     origins = np.atleast_2d(np.asarray(origins, dtype=float))
     directions = np.atleast_2d(np.asarray(directions, dtype=float))
-    target = np.asarray(target, dtype=float)
-    to_target = target - origins
-    cross = to_target[:, 0] * directions[:, 1] - to_target[:, 1] * directions[:, 0]
-    norm = np.linalg.norm(directions, axis=1)
-    return np.abs(cross) / norm
+    to_target = np.asarray(target, dtype=float) - origins
+    along = np.einsum("ij,ij->i", to_target, directions) / np.einsum("ij,ij->i", directions, directions)
+    return np.linalg.norm(to_target - along[:, None] * directions, axis=1)
 
 
 def rays_by_generation(tree, generation: int) -> tuple[np.ndarray, np.ndarray]:
-    """Origins and directions of every node at *generation* in a 2-D ``RayTree``."""
+    """Starts and directions of every segment of *generation* in a non-sequential :class:`RayTree`."""
 
-    origins, directions = [], []
-    for node in tree.nodes():
-        if node.generation == generation:
-            origins.append(node.ray.origin)
-            directions.append(node.ray.direction)
-    return np.asarray(origins, dtype=float), np.asarray(directions, dtype=float)
+    keep = tree.generation == generation
+    return tree.start[keep], tree.direction[keep]
 
 
 def stigmatism_report(

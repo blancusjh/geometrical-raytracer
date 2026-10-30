@@ -45,8 +45,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...propagation.fields import FieldPoint, PupilSampling, chief_ray_slopes, trace_pupil
-from ...propagation.sequential import SequentialTracer
+from ...tracing.fields import FieldPoint, PupilSampling, chief_ray_slopes, trace_pupil
+from ...tracing.sequential import SequentialTracer
 from .zernike import fit_transverse
 
 
@@ -108,7 +108,7 @@ def seidel_coefficients(
     not identifiable otherwise. A field height of exactly 0 is fine and
     helps anchor the spherical/defocus fits.
 
-    ``wavelength_mm`` defaults to the traced system's own
+    ``wavelength_mm`` defaults to the tracer's own
     ``wavelength_um``; pass it only to override that deliberately, since a
     value inconsistent with the system actually being traced would silently
     rescale every "waves" figure below. Each field is independently traced
@@ -121,8 +121,8 @@ def seidel_coefficients(
     no such tuning and works unchanged across systems.
 
     Each field's chief ray is solved with the general 2-D solver
-    :func:`~raytracer.propagation.fields.chief_ray_slopes` and passed into
-    :func:`~raytracer.propagation.fields.trace_pupil` explicitly, rather
+    :func:`~raytracer.tracing.fields.chief_ray_slopes` and passed into
+    :func:`~raytracer.tracing.fields.trace_pupil` explicitly, rather
     than left for ``trace_pupil`` to solve internally: its default 1-D
     ``chief_ray_slope`` scans a fixed, comparatively coarse slope bracket
     that can come up empty for a huge finite-object stand-in for infinity
@@ -138,11 +138,11 @@ def seidel_coefficients(
             f"{field_heights_mm.size} height(s): {field_heights_mm}"
         )
     if wavelength_mm is None:
-        if tracer.system.wavelength_um is None:
+        if tracer.wavelength_um is None:
             raise ValueError(
-                "system.wavelength_um is unset; pass wavelength_mm explicitly"
+                "tracer.wavelength_um is unset; pass wavelength_mm explicitly"
             )
-        wavelength_mm = tracer.system.wavelength_um * 1e-3
+        wavelength_mm = tracer.wavelength_um * 1e-3
     sampling = sampling or PupilSampling(kind="rings", radial=10, azimuth=48)
 
     spherical, coma, astig, defocus = [], [], [], []

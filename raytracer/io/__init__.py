@@ -6,10 +6,21 @@ tables) and material catalogs (dispersion models as data files).
 """
 
 from .materials_csv import read_materials
-from .prescription_csv import FORMAT_READERS, FORMAT_WRITERS, read_csv, write_csv
+from .prescription_csv import (
+    FORMAT_READERS,
+    FORMAT_WRITERS,
+    Prescription,
+    read_csv,
+    read_prescription,
+    read_rows,
+    write_csv,
+)
 from .train_json import read_train, write_train
 
 __all__ = [
+    "Prescription",
+    "read_prescription",
+    "read_rows",
     "read_csv",
     "write_csv",
     "read_materials",

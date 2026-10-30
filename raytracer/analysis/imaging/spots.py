@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...propagation.fields import PupilTrace
+from ...tracing.fields import PupilTrace
 
 
 def weighted_mean(values: np.ndarray, weights: np.ndarray) -> float:
