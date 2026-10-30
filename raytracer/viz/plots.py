@@ -11,18 +11,15 @@ from typing import Iterable, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..propagation.fields import FieldPoint, chief_ray_slopes, trace_from_object
-from ..design.rows import SurfaceKind
-from ..design.system import OpticalSystem
-from ..propagation.sequential import SequentialTracer
 from ..analysis.aberrations.chromatic import AxialColor, ChromaticSpots, LateralColor
 from ..analysis.aberrations.distortion import DistortionGrid
 from ..analysis.aberrations.fans import FanData
 from ..analysis.aberrations.wavefront import WavefrontSamples
 from ..analysis.aberrations.zernike import ZernikeExpansion
 from ..analysis.imaging.spots import SpotData
-from .bodies import body_outlines, draw_system, index_color
-from .sag_drawing import beam_foci_from_paths, mirror_arcs_from_paths, sample_profile_curve
+from ..tracing import FieldPoint, SequentialTracer, chief_ray_slopes, trace_from_object
+from .bodies import draw_elements, draw_system, warn_outside_glass
+from .sag_drawing import beam_foci_from_paths, mirror_arcs_from_paths
 
 DEFAULT_MATERIAL_COLORS = {
     "SIO2": ("#bde0fe", "#2878b5"),
@@ -44,16 +41,21 @@ def layout_figure(
     figsize: tuple[float, float] = (14, 7),
     title: str | None = None,
 ) -> plt.Figure:
-    """Closed lens layout with filled bodies, mirrors, and meridional rays.
+    """Meridional layout of a sequential trace: filled bodies, mirrors, rays.
 
-    Bodies are deduced from the media sequence (every inter-surface gap
-    with index above 1) and colored by optical density via
-    :func:`raytracer.viz.bodies.index_color` — denser media draw darker,
-    automatically. ``material_colors`` overrides individual media by name
-    (``DEFAULT_MATERIAL_COLORS`` keeps the README's DUV palette). Where
-    each field's light focuses — the final convergence point of its traced
-    fan, and any genuine intermediate image — is marked in the field's
-    color (:func:`~raytracer.viz.sag_drawing.beam_foci_from_paths`).
+    *tracer* carries the system, the wavelength and the object plane. The
+    drawing is the y-z section of the 3-D model (see
+    :mod:`raytracer.viz.sag_drawing`). Bodies are the system's lenses (and
+    prisms), neighbours that interpenetrate cut apart
+    (:func:`raytracer.viz.bodies.body_outlines`), coloured by optical
+    density via :func:`raytracer.viz.bodies.index_color` — denser media
+    draw darker, automatically. ``material_colors`` overrides individual
+    media by name (``DEFAULT_MATERIAL_COLORS`` keeps the README's DUV
+    palette). Mirrors draw over the sub-aperture the traced fans use and
+    are labelled by element name. Where each field's light focuses — the
+    final convergence point of its traced fan, and any genuine
+    intermediate image — is marked in the field's colour
+    (:func:`~raytracer.viz.sag_drawing.beam_foci_from_paths`).
     """
 
     system = tracer.system
@@ -62,87 +64,51 @@ def layout_figure(
         colors.update(material_colors)
     fig, ax = plt.subplots(figsize=figsize)
 
-    solid_signatures: set[tuple[float, float]] = set()
-    for i, j, n, material, outline, _extents in body_outlines(system):
-        for k in (i, j):
-            solid_signatures.add(
-                (round(float(system.vertices[k]), 6), round(system.rows[k].radius, 6))
-            )
-        face, edge = colors.get(material.upper()) or index_color(n)
-        ax.fill(
-            outline[:, 0],
-            outline[:, 1],
-            facecolor=face,
-            edgecolor=edge,
-            lw=1.0,
-            alpha=0.66,
-            zorder=1,
-        )
+    traced: list[tuple[np.ndarray, str]] = []
+    bundles: list[tuple[list[np.ndarray], str]] = []
+    for field_y, color in zip(fields, FIELD_COLORS):
+        _, sy0 = chief_ray_slopes(tracer, FieldPoint(y=field_y))
+        bundle = []
+        for delta in np.linspace(-fan_half_slope, fan_half_slope, fan_count):
+            result = trace_from_object(tracer, (0.0, field_y), (0.0, sy0 + delta), keep_path=True)
+            if result.path is None:
+                continue
+            traced.append((result.path, color))
+            if result.ok:
+                bundle.append(result.path)
+        bundles.append((bundle, color))
 
-    # Bare refracting surfaces not part of a solid_elements() pair (e.g. a
-    # single dioptric surface with no matching second face) still need to be
-    # drawn, or they'd be invisible — plotted as an open curve, like a mirror.
-    # Skipped: index-matched dummy rows (no optical effect), and double-passed
-    # copies of surfaces already drawn as a solid element on a folded path
-    # (matched by the same geometric signature solid_elements() dedups with).
-    for i, row in enumerate(system.rows):
-        if row.kind is not SurfaceKind.REFRACT:
-            continue
-        if system.n_before[i] == system.n_after[i]:
-            continue
-        signature = (round(float(system.vertices[i]), 6), round(row.radius, 6))
-        if signature in solid_signatures:
-            continue
-        semi = row.semidiameter if row.semidiameter is not None else 50.0
-        z, h = sample_profile_curve(system, i, semidiameter=semi)
-        ax.plot(z, h, color="#3a6ea5", lw=2.0, zorder=2)
+    ok_paths = [p for b, _ in bundles for p in b]
+    paths = np.stack(ok_paths) if ok_paths else None
+    drawn = draw_elements(
+        ax,
+        system,
+        wavelength_um=tracer.wavelength_um,
+        material_colors=colors,
+        alpha=0.66,
+        paths=paths,
+        mirror_labels=mirror_labels,
+        sensors=False,
+    )
+    if paths is not None:
+        warn_outside_glass(system, paths, drawn)
 
-    for count, i in enumerate(system.mirror_indices, 1):
-        row = system.rows[i]
-        semi = row.semidiameter if row.semidiameter is not None else 50.0
-        z, h = sample_profile_curve(system, i, semidiameter=semi)
-        ax.plot(z, h, color="#202020", lw=3.0, zorder=2)
-        if mirror_labels:
-            ax.text(float(np.mean(z)), semi + 8, f"M{count}", ha="center", fontsize=9)
+    for path, color in traced:
+        finite = path[np.isfinite(path).all(axis=1)]
+        ax.plot(finite[:, 2], finite[:, 1], color=color, lw=0.65, alpha=0.72, zorder=3)
+    # where each field's light focuses: final and genuine intermediate
+    # convergence points of the traced fan
+    for bundle, color in bundles:
+        if bundle:
+            for z_f, y_f, _, _, _ in beam_foci_from_paths(np.stack(bundle)):
+                ax.plot([z_f], [y_f], "o", ms=4.5, mfc="white", mec=color, mew=1.2, zorder=6)
 
-    # Immersion / non-air image space.
-    if system.n_after[-1] != 1.0:
-        last = system.rows[-1]
-        semi = last.semidiameter if last.semidiameter is not None else 20.0
-        ax.fill_betweenx(
-            [-semi, semi], system.vertices[-1], system.image_z,
-            color="#f6bd60", alpha=0.24, zorder=0,
-        )
-
-    if fields:
-        for field_y, color in zip(fields, FIELD_COLORS):
-            _, sy0 = chief_ray_slopes(tracer, FieldPoint(y=field_y))
-            bundle = []
-            for delta in np.linspace(-fan_half_slope, fan_half_slope, fan_count):
-                result = trace_from_object(
-                    tracer, (0.0, field_y), (0.0, sy0 + delta), keep_path=True
-                )
-                if result.path is None:
-                    continue
-                if result.ok:
-                    bundle.append(result.path)
-                path = result.path[~np.isnan(result.path[:, 2])]
-                ax.plot(path[:, 2], path[:, 1], color=color, lw=0.65, alpha=0.72, zorder=3)
-            # where this field's light focuses: final and genuine
-            # intermediate convergence points of the traced fan
-            if bundle:
-                for z_f, y_f, _, _, _ in beam_foci_from_paths(np.stack(bundle)):
-                    ax.plot([z_f], [y_f], "o", ms=4.5, mfc="white", mec=color,
-                            mew=1.2, zorder=6)
-
-    if system.object_z is not None:
-        ax.axvline(system.object_z, color="black", ls="--", lw=1, label="object plane")
-    ax.axvline(system.image_z, color="black", ls="--", lw=1, label="image plane")
-    if system.stop_index is not None:
-        ax.axvline(
-            system.vertices[system.stop_index], color="#555555", ls=":", lw=1,
-            label="aperture stop",
-        )
+    if tracer.object_z is not None:
+        ax.axvline(tracer.object_z, color="black", ls="--", lw=1, label="object plane")
+    ax.axvline(tracer.image_z, color="black", ls="--", lw=1, label="image plane")
+    stop = system.stop_index
+    if stop is not None:
+        ax.axvline(tracer.step_z(stop), color="#555555", ls=":", lw=1, label="aperture stop")
     ax.axhline(0, color="#aaaaaa", lw=0.6)
     ax.set(
         xlabel="Global z (mm)",
@@ -387,8 +353,8 @@ def dispersion_figure(
     """Refractive index vs. wavelength for each material.
 
     Each material only needs an ``index(wavelength_um)`` method, so a
-    measured :class:`~raytracer.optics.materials.SellmeierMaterial` and an
-    approximate :class:`~raytracer.optics.materials.AbbeMaterial` plot the
+    measured :class:`~raytracer.materials.SellmeierMaterial` and an
+    approximate :class:`~raytracer.materials.AbbeMaterial` plot the
     same way; the legend names the model actually behind each curve, since
     the difference matters when reading the chromatic results downstream.
     """

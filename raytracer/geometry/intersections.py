@@ -123,13 +123,14 @@ def solve_quadric(
         t2 = np.where(linear, np.inf, c / np.where(q == 0.0, 1.0, q))
     real = alive & (linear | (disc >= 0.0))
     roots = np.stack([t1, t2], axis=1)
-    valid = np.stack(
-        [
-            real & np.isfinite(t1) & on_sheet(origins + t1[:, None] * directions),
-            real & np.isfinite(t2) & on_sheet(origins + t2[:, None] * directions),
-        ],
-        axis=1,
-    )
+    with np.errstate(invalid="ignore"):  # an infinite root (the linear case) is not on any sheet
+        valid = np.stack(
+            [
+                real & np.isfinite(t1) & on_sheet(origins + t1[:, None] * directions),
+                real & np.isfinite(t2) & on_sheet(origins + t2[:, None] * directions),
+            ],
+            axis=1,
+        )
     if mode == "forward":
         valid &= roots > t_min
         key = np.where(valid, roots, np.inf)

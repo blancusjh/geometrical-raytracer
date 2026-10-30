@@ -1,141 +1,142 @@
-"""2-D elements, instruments, and the design bridge."""
+"""Lenses and sensors at work: refraction to a focus, detection, and the
+agreement of the two engines.
+
+(Was the 2-D ``optics`` elements and ``Screen``, plus the 2-D bridge from a
+design to the branching tracer. In 3-D a screen is a :class:`Sensor` on a
+plane with a rectangular aperture, and no bridge is needed: the
+non-sequential tracer traces the same :class:`OpticalSystem` the sequential
+one does. Meridional (``fan="y"``) bundles reproduce the old 2-D pictures.)
+"""
 
 import numpy as np
 import pytest
 
-from raytracer.optics import Lens, ParallelSource, PointSource, Screen
-from raytracer.optics.ray import Ray
-from raytracer.propagation import BranchingTracer, TraceConfig
-from raytracer.surfaces.profile import AsphereProfile, ProfileSurface
-from raytracer.surfaces.segment import LineSegment
+from raytracer import OpticalSystem, TableRow
+from raytracer.elements import Lens, Sensor
+from raytracer.geometry.apertures import Rectangle
+from raytracer.geometry.surfaces import Plane, Sphere
+from raytracer.materials import ConstantIndex
+from raytracer.sources import CollimatedSource, PointSource, Rays
+from raytracer.tracing import (
+    NonSequentialTracer,
+    SequentialTracer,
+    solve_object_plane,
+    trace_from_object,
+)
 
 
-def test_segment_intersection_and_miss():
-    seg = LineSegment(p0=[0.0, -1.0], p1=[0.0, 1.0])
-    hit = seg.hit(Ray(origin=[-2.0, 0.5], direction=[1.0, 0.0]))
-    assert hit is not None
-    assert hit.distance == pytest.approx(2.0)
-    assert hit.point == pytest.approx([0.0, 0.5])
-    assert seg.hit(Ray(origin=[-2.0, 2.0], direction=[1.0, 0.0])) is None
+def single_ray(origin, direction) -> Rays:
+    return Rays([origin], [direction], np.nan, 1.0)
 
 
-def test_profile_face_matches_sphere_geometry():
-    R = 150.0
-    face = ProfileSurface(
-        profile=AsphereProfile.sphere(R), vertex=[10.0, 0.0], semidiameter=60.0
+def test_sensor_records_and_misses_outside_its_aperture():
+    screen = Sensor("S", aperture=Rectangle(1.0, 2.0))  # the old segment from y=-1 to y=1
+    system = OpticalSystem([screen])
+    tree = NonSequentialTracer(system).trace(single_ray([0.0, 0.5, -2.0], [0.0, 0.0, 1.0]))
+    hits = tree.hits("S")
+    assert len(hits) == 1
+    assert hits.points[0] == pytest.approx([0.0, 0.5, 0.0])
+    assert hits.local_points[0, 1] == pytest.approx(0.5)  # 3/4 of the way along the segment
+    assert hits.opl[0] == pytest.approx(2.0)
+
+    tree = NonSequentialTracer(system).trace(single_ray([0.0, 2.0, -2.0], [0.0, 0.0, 1.0]))
+    assert "S" not in tree.detectors
+    assert tree.escaped.all()
+
+
+def test_lens_face_matches_sphere_geometry():
+    R, n = 150.0, 1.5
+    lens = Lens(
+        "L", front=Sphere(R), back=Plane(), thickness=20.0,
+        material=ConstantIndex("G", n), semi_diameter=60.0, z=10.0,
     )
     y0 = 40.0
-    hit = face.hit(Ray(origin=[-100.0, y0], direction=[1.0, 0.0]))
-    assert hit is not None
+    tree = NonSequentialTracer(OpticalSystem([lens])).trace(single_ray([0.0, y0, -100.0], [0.0, 0.0, 1.0]))
+    assert tree.face[0] == "L.front"
     z_exact = 10.0 + R - np.sqrt(R * R - y0 * y0)
-    assert hit.point == pytest.approx([z_exact, y0], abs=1e-10)
+    assert tree.end[0] == pytest.approx([0.0, y0, z_exact], abs=1e-10)
 
 
 def test_single_refracting_face_paraxial_focus():
-    """Plano-convex air->glass face: f (from vertex) = n R / (n - 1)."""
+    """Air -> glass through a convex face: f (from the vertex) = n R / (n - 1)."""
 
     R, n = 50.0, 1.5
-    face = ProfileSurface(
-        profile=AsphereProfile.sphere(R), vertex=[0.0, 0.0],
-        semidiameter=10.0, n_exterior=1.0, n_interior=n, interaction="refract",
+    f_expected = n * R / (n - 1.0)  # 150 mm, inside the glass
+    lens = Lens(
+        "L", front=Sphere(R), back=Plane(), thickness=200.0,
+        material=ConstantIndex("G", n), semi_diameter=10.0,
     )
-    source = ParallelSource(
-        origin=np.array([-20.0, 0.0]), direction=np.array([1.0, 0.0]),
-        width=1.0, samples=11,
-    )
-    tree = BranchingTracer([face], TraceConfig(max_generations=2)).trace([source])
-    f_expected = n * R / (n - 1.0)  # 150 mm, measured from the vertex
+    source = CollimatedSource((0.0, 0.0, -20.0), beam_radius=0.5, rays=11, fan="y")
+    tree = NonSequentialTracer(OpticalSystem([lens]), split=False).trace(source)
 
-    crossings = []
-    for node in tree.nodes():
-        if node.generation != 2:
-            continue
-        origin, direction = node.ray.origin, node.ray.direction
-        if abs(direction[1]) < 1e-12:
-            continue  # axial ray
-        t = -origin[1] / direction[1]
-        crossings.append(origin[0] + t * direction[0])
-    assert len(crossings) >= 8
+    inside = (tree.generation == 2) & (np.abs(tree.direction[:, 1]) > 1e-12)  # skip the axial ray
+    assert inside.sum() >= 8
+    t = -tree.start[inside, 1] / tree.direction[inside, 1]
+    crossings = tree.start[inside, 2] + t * tree.direction[inside, 2]
     assert np.mean(crossings) == pytest.approx(f_expected, rel=1e-3)
 
 
-def test_lens2d_traces_and_screen_records():
-    lens = Lens.from_radii(
-        r1=60.0, r2=-60.0, thickness=8.0, semidiameter=15.0, n=1.5,
-        vertex=(0.0, 0.0), name="L1",
+def biconvex(name="L1", **placement) -> Lens:
+    return Lens(
+        name, front=Sphere(60.0), back=Sphere(-60.0), thickness=8.0,
+        material=ConstantIndex("G", 1.5), semi_diameter=15.0, **placement,
     )
-    # Thin-lens estimate f ~ R / (2 (n-1)) = 60 mm; screen near focus.
-    screen = Screen([58.0, -20.0], [58.0, 20.0])
-    source = ParallelSource(
-        origin=np.array([-30.0, 0.0]), direction=np.array([1.0, 0.0]),
-        width=16.0, samples=41,
-    )
-    tracer = BranchingTracer(
-        [*lens.surfaces(), screen], TraceConfig(max_generations=4)
-    )
-    tracer.trace([source])
-
-    assert len(screen.hits) >= 35  # nearly every ray lands on the screen
-    spread = np.ptp([hit.point[1] for hit in screen.hits])
-    assert spread < 3.0  # concentrated near focus (spherical aberration aside)
-    edges, values = screen.irradiance(bins=64)
-    assert values.sum() == pytest.approx(sum(h.intensity for h in screen.hits))
-    peak_bin = np.argmax(values)
-    # Peak near the axis (middle of the screen).
-    assert abs((edges[peak_bin] + edges[peak_bin + 1]) / 2 - 20.0) < 4.0
 
 
-def test_screen_absorbs_rays():
-    screen = Screen([5.0, -10.0], [5.0, 10.0])
-    source = PointSource(
-        origin=np.array([0.0, 0.0]), axis_direction=np.array([1.0, 0.0]),
-        aperture=np.deg2rad(30.0), samples=9,
-    )
-    tree = BranchingTracer([screen], TraceConfig(max_generations=5)).trace([source])
-    # All rays terminate at the screen: no children spawned.
-    assert all(not node.children for node in tree.nodes())
-    assert len(screen.hits) == 9
+def test_lens_focuses_a_parallel_fan_onto_a_sensor():
+    # Thin-lens estimate f ~ R / (2 (n-1)) = 60 mm; sensor near focus.
+    screen = Sensor("screen", aperture=Rectangle(40.0, 40.0), z=58.0)
+    system = OpticalSystem([biconvex(), screen])
+    source = CollimatedSource((0.0, 0.0, -30.0), beam_radius=8.0, rays=41, fan="y")
+    tree = NonSequentialTracer(system, split=False).trace(source)
+
+    hits = tree.hits("screen")
+    assert len(hits) >= 35  # nearly every ray lands on the screen
+    assert np.ptp(hits.local_points[:, 1]) < 3.0  # concentrated near focus (spherical aberration aside)
+    values, edges = hits.histogram(axis=1, bins=64, range=(-20.0, 20.0))
+    assert values.sum() == pytest.approx(hits.power.sum())
+    peak = np.argmax(values)
+    assert abs((edges[peak] + edges[peak + 1]) / 2) < 4.0  # peak near the axis
 
 
-def test_design_bridge_matches_sequential_trace():
-    """A dioptric doublet sliced to 2-D must land rays exactly where the
-    sequential 3-D propagation does (meridional rays are common to both)."""
+def test_sensor_absorbs_rays():
+    screen = Sensor("screen", aperture=Rectangle(20.0, 20.0), z=5.0)
+    source = PointSource((0.0, 0.0, 0.0), half_angle_deg=15.0, rays=9, fan="y")
+    tree = NonSequentialTracer(OpticalSystem([screen]), max_interactions=5).trace(source)
+    # Every ray ends on the sensor: no children are spawned.
+    assert (tree.generation == 1).all()
+    assert (tree.parent == -1).all()
+    assert len(tree.hits("screen")) == 9
+    assert tree.hits("screen").power.sum() == pytest.approx(1.0)
 
-    from raytracer.design import OpticalSystem, SurfaceRow, to_branching_surfaces
-    from raytracer.optics.materials import ConstantIndex
-    from raytracer.propagation import SequentialTracer, solve_object_plane, trace_from_object
+
+def test_sequential_and_non_sequential_land_rays_on_the_same_image_point():
+    """A cemented doublet: the meridional ray the sequential tracer follows
+    must reach the same image point non-sequentially (split=False), since
+    both read the same placed elements."""
 
     glass = ConstantIndex("BK7", 1.5168)
     flint = ConstantIndex("F2", 1.62)
     air = ConstantIndex("AIR", 1.0)
     rows = [
-        SurfaceRow.refracting(radius=60.0, thickness=8.0, material=glass, semidiameter=15.0),
-        SurfaceRow.refracting(radius=-45.0, thickness=3.0, material=flint, semidiameter=15.0),
-        SurfaceRow.refracting(radius=-120.0, thickness=95.0, material=air, semidiameter=15.0),
+        TableRow(Sphere(60.0), 8.0, glass, 15.0),
+        TableRow(Sphere(-45.0), 3.0, flint, 15.0),
+        TableRow(Sphere(-120.0), 95.0, air, 15.0),
     ]
-    system = OpticalSystem(rows)
-    tracer3d = SequentialTracer(system)
-    solve_object_plane(tracer3d)
+    system = OpticalSystem.from_table(rows)
+    assert system.face("L1.back").names == ("L1.back", "L2.front")  # cemented
+    tracer = SequentialTracer(system)
+    solve_object_plane(tracer)
 
-    # Sequential meridional ray from an off-axis object point.
     y_obj, slope = 5.0, -0.005
-
-    reference = trace_from_object(tracer3d, (0.0, y_obj), (0.0, slope))
+    reference = trace_from_object(tracer, (0.0, y_obj), (0.0, slope))
     assert reference.ok
 
-    # Same ray through the 2-D slice.
-    surfaces = to_branching_surfaces(system)
-    screen = Screen([system.image_z, -30.0], [system.image_z, 30.0])
-    from raytracer.optics.sources import RaySeed, Source
-
-    class SingleRay(Source):
-        def emit(self):
-            direction = np.array([1.0, slope]) / np.hypot(1.0, slope)
-            return [RaySeed(origin=np.array([system.object_z, y_obj]), direction=direction)]
-
-    tracer2d = BranchingTracer(
-        [*surfaces, screen], TraceConfig(max_generations=10)
-    )
-    tracer2d.trace([SingleRay()])
-    assert len(screen.hits) == 1
-    assert screen.hits[0].point[1] == pytest.approx(reference.image_point[1], abs=1e-6)
+    direction = np.array([0.0, slope, 1.0]) / np.hypot(1.0, slope)
+    tree = NonSequentialTracer(system, split=False).trace(single_ray([0.0, y_obj, tracer.object_z], direction))
+    hits = tree.hits("IMG")
+    assert len(hits) == 1
+    assert hits.points[0] == pytest.approx(reference.image_point, abs=1e-9)
+    # Both accumulate the same optical path (the sequential tracer's restart
+    # offset adds 1e-8 mm per boundary, hence the tolerance).
+    assert hits.opl[0] == pytest.approx(reference.opl, abs=1e-6)

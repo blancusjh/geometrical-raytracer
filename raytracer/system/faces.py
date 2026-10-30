@@ -81,10 +81,16 @@ class PhysicalFace:
 
 @dataclass(frozen=True)
 class Step:
-    """One visit of the sequential path: a boundary and what happens there."""
+    """One visit of the sequential path: a boundary and what happens there.
+
+    ``clear_aperture``, when set, is the clear aperture of this visit alone
+    — narrower than the boundary's own, as a prescription lists it for each
+    pass through a double-pass lens.
+    """
 
     face: PhysicalFace
     event: str
+    clear_aperture: Aperture | None = None
 
     @property
     def name(self) -> str:
@@ -190,7 +196,11 @@ def default_event(face: PhysicalFace) -> str | None:
 
 
 def parse_path(spec, faces: tuple[PhysicalFace, ...]) -> tuple[Step, ...]:
-    """Read ``["L1.front", "BS:reflect", ...]`` against the system's boundaries."""
+    """Read ``["L1.front", "BS:reflect", ...]`` against the system's boundaries.
+
+    An item may also be a pair ``("L3.front", aperture)`` giving the clear
+    aperture of that visit (see :class:`Step`).
+    """
 
     by_name = {n: f for f in faces for n in f.names}
     steps = []
@@ -198,6 +208,9 @@ def parse_path(spec, faces: tuple[PhysicalFace, ...]) -> tuple[Step, ...]:
         if isinstance(item, Step):
             steps.append(item)
             continue
+        visit_aperture = None
+        if isinstance(item, tuple):
+            item, visit_aperture = item
         name, _, event = str(item).partition(":")
         if name not in by_name:
             raise KeyError(f"path step {item!r}: no boundary named {name!r}; known: {sorted(by_name)}")
@@ -212,7 +225,7 @@ def parse_path(spec, faces: tuple[PhysicalFace, ...]) -> tuple[Step, ...]:
             )
         if event not in (TRANSMIT, REFLECT, STOP, DETECT):
             raise ValueError(f"path step {item!r}: unknown event {event!r}")
-        steps.append(Step(face, event))
+        steps.append(Step(face, event, visit_aperture))
     return tuple(steps)
 
 

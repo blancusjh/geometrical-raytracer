@@ -1,10 +1,10 @@
-"""Shared GOTS Cartesian-oval math (raytracer.surfaces.cartesian_oval)."""
+"""Shared GOTS Cartesian-oval math (raytracer.geometry.surfaces.cartesian)."""
 
 import numpy as np
 import pytest
 
-from raytracer.surfaces.cartesian_oval import (
-    CartesianOvalProfile,
+from raytracer.geometry.surfaces import CartesianSurface
+from raytracer.geometry.surfaces.cartesian import (
     cartesian_oval_implicit,
     cartesian_oval_parametric_curve,
     cartesian_oval_sag_and_slope,
@@ -60,7 +60,29 @@ def test_max_usable_height_is_the_r_of_rho_peak():
 def test_profile_curvature_matches_paraxial_limit():
     """Vertex curvature should equal O: z(h) ~ (O/2) h**2 near the axis."""
 
-    profile = CartesianOvalProfile(n0=N0, z0=Z0, ni=NI, zi=ZI)
+    profile = CartesianSurface(n0=N0, z0=Z0, ni=NI, zi=ZI)
     h = 1e-4
-    z = float(profile.sag(np.array([h]))[0])
+    z = float(profile.profile(np.array([h]))[0])
     assert z == pytest.approx(0.5 * profile.curvature * h * h, rel=1e-3)
+
+
+def test_surface_wraps_the_module_functions():
+    """CartesianSurface is the GOTS math with value semantics: its parameters,
+    usable radius and sag are the module functions' results."""
+
+    surface = CartesianSurface(N0, Z0, NI, ZI)
+    assert surface.gots == gots_params(N0, Z0, NI, ZI)
+    assert (surface.G, surface.O, surface.T, surface.S) == surface.gots
+    assert surface.max_radius == pytest.approx(max_usable_height(*surface.gots))
+    h = np.linspace(0.0, 4.0, 9)
+    z, dz = cartesian_oval_sag_and_slope(h, *surface.gots)
+    s, ds = surface.sag_and_slope(h)
+    np.testing.assert_array_equal(s, z)
+    np.testing.assert_array_equal(ds, dz)
+    # The 3-D sag is the profile swept about the axis.
+    phi = np.deg2rad(40.0)
+    np.testing.assert_allclose(surface.sag(h * np.cos(phi), h * np.sin(phi)), z, atol=1e-15)
+    assert surface == CartesianSurface(N0, Z0, NI, ZI)
+    with pytest.raises(AttributeError):
+        surface.z0 = -20.0
+    assert surface.replace(z0=-20.0).z0 == -20.0

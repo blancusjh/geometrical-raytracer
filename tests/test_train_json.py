@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from raytracer.design import StigmaticTrain
+from raytracer.families import StigmaticTrain
 from raytracer.io import read_materials, read_train, write_train
-from raytracer.optics.materials import (
+from raytracer.materials import (
     AIR,
     ConstantIndex,
     MaterialLibrary,
@@ -92,6 +92,10 @@ def test_non_train_file_is_rejected(tmp_path):
 )
 def test_shipped_designs_load_and_build(relative):
     train = read_train(DATA / relative, materials=full_library())
-    system = train.to_system()
-    assert len(system.rows) == train.n_surfaces
-    assert system.wavelength_um == train.wavelength_um
+    system = train.system()
+    # One step per surface, then the sensor at the image conjugate.
+    assert len(system.path) == train.n_surfaces + 1
+    assert system.path[-1].event == "detect"
+    tracer = train.tracer()
+    assert tracer.wavelength_um == train.wavelength_um
+    assert tracer.image_z == pytest.approx(train.conjugates[-1])

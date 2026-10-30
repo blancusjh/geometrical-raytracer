@@ -2,7 +2,7 @@
 
 import pytest
 
-from raytracer.optics.materials import (
+from raytracer.materials import (
     AbbeMaterial,
     SellmeierMaterial,
     _SELLMEIER_CATALOG,
@@ -55,7 +55,7 @@ def test_default_materials_includes_common_glass_catalog():
 
 
 def test_dispersive_materials_reject_a_missing_wavelength():
-    """OpticalSystem substitutes 0.0 when it has no wavelength_um. A
+    """A tracer evaluates the media at 0.0 when it has no wavelength_um. A
     dispersive curve evaluated there is meaningless — the Sellmeier form
     would silently return exactly 1.0, i.e. vacuum — so it must raise."""
 

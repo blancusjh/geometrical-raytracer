@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from raytracer.analysis import aplanatic_image_surface
-from raytracer.design import StigmaticTrain
+from raytracer.families import StigmaticTrain
 from raytracer.optimize import aplanatism_residuals, optimize_aplanat
 
 INF = float("inf")

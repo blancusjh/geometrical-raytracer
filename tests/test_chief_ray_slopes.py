@@ -13,8 +13,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.design import OpticalSystem
-from raytracer.propagation import (
+from raytracer.io import read_prescription
+from raytracer.tracing import (
     FieldPoint,
     SequentialTracer,
     chief_ray_slope,
@@ -30,8 +30,7 @@ CSV = Path(__file__).resolve().parents[1] / "data" / (
 
 @pytest.fixture(scope="module")
 def tracer() -> SequentialTracer:
-    system = OpticalSystem.from_prescription(CSV)
-    tracer = SequentialTracer(system)
+    tracer = read_prescription(CSV).tracer()
     solve_object_plane(tracer)
     return tracer
 

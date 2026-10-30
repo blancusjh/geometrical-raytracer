@@ -1,102 +1,91 @@
-"""Geometric ground truths for the 2-D conic surfaces."""
+"""Geometric ground truths for conic mirrors, traced non-sequentially.
+
+(The 2-D polar-form ``CircleSurface``/``EllipseSurface``/``ParabolaSurface``
+are gone: a conic mirror is a :class:`Mirror` carrying a conic surface,
+placed with a pose, and light finds it with the non-sequential tracer.)
+"""
 
 import numpy as np
 import pytest
 
-from raytracer import (
-    BranchingTracer,
-    CircleSurface,
-    EllipseSurface,
-    ParabolaSurface,
-    ParallelSource,
-    PointSource,
-    Ray,
-    TraceConfig,
-)
+from raytracer.elements import Mirror, Sensor
+from raytracer.geometry.apertures import Rectangle
+from raytracer.geometry.surfaces import Ellipsoid, Paraboloid, Sphere
+from raytracer.sources import CollimatedSource, PointSource, Rays
+from raytracer.system import OpticalSystem
+from raytracer.tracing import NonSequentialTracer
+from raytracer.tracing.nonsequential import REFLECTED
 
 
-def test_circle_intersection_distance():
-    circle = CircleSurface(radius=2.0)
-    ray = Ray(origin=[-5.0, 0.0], direction=[1.0, 0.0])
-    hit = circle.hit(ray)
-    assert hit is not None
-    assert hit.distance == pytest.approx(3.0, abs=1e-12)
-    assert hit.point == pytest.approx(np.array([-2.0, 0.0]), abs=1e-12)
-    assert abs(hit.normal @ np.array([1.0, 0.0])) == pytest.approx(1.0, abs=1e-12)
+def distance_to_lines(point, origins, directions) -> np.ndarray:
+    """Perpendicular distance from *point* to each ray line."""
+
+    v = np.asarray(point) - origins
+    return np.linalg.norm(np.cross(v, directions), axis=1)
 
 
-def test_ellipse_focus_to_focus_reflection():
-    """Rays from one ellipse focus reflect through the other focus."""
+def test_sphere_mirror_intersection_distance_and_normal():
+    mirror = Mirror("M", surface=Sphere(2.0), aperture=1.9)
+    tree = NonSequentialTracer(OpticalSystem([mirror])).trace(
+        Rays([[0.0, 0.0, -5.0]], [[0.0, 0.0, 1.0]], np.nan, 1.0)
+    )
+    first = np.flatnonzero(tree.generation == 1)[0]
+    assert tree.end[first] == pytest.approx([0.0, 0.0, 0.0], abs=1e-12)
+    assert np.linalg.norm(tree.end[first] - tree.start[first]) == pytest.approx(5.0, abs=1e-12)
+    normal = mirror.surface.normal(tree.end[first][None, :])[0]
+    assert abs(normal @ np.array([0.0, 0.0, 1.0])) == pytest.approx(1.0, abs=1e-12)
+    # Reflected straight back.
+    child = np.flatnonzero(tree.parent == first)
+    assert tree.direction[child[0]] == pytest.approx([0.0, 0.0, -1.0], abs=1e-12)
+
+
+def test_ellipsoid_focus_to_focus_reflection():
+    """Rays from one focus of an ellipsoidal mirror reflect through the other."""
 
     a, b = 4.0, 2.5
     c = np.sqrt(a**2 - b**2)
-    # ConicSurface places the *focus* argument at the polar-form origin.
-    ellipse = EllipseSurface(semi_major=a, semi_minor=b, focus=[0.0, 0.0])
-    other_focus = np.array([-2.0 * c, 0.0])
+    # Vertex at the origin, opening toward -z: foci at z = -(a - c) and -(a + c).
+    mirror = Mirror("M", surface=Ellipsoid.from_semi_axes(-a, b), aperture=b)
+    near, far = np.array([0.0, 0.0, -(a - c)]), np.array([0.0, 0.0, -(a + c)])
 
-    source = PointSource(
-        origin=np.array([0.0, 0.0]),
-        axis_direction=np.array([1.0, 0.0]),
-        aperture=np.deg2rad(300.0),
-        samples=41,
-    )
-    tree = BranchingTracer([ellipse], TraceConfig(max_generations=2)).trace([source])
+    source = PointSource(near, half_angle_deg=75.0, rays=61)  # full 3-D bundle
+    tree = NonSequentialTracer(OpticalSystem([mirror]), max_interactions=2).trace(source)
 
-    checked = 0
-    for node in tree.nodes():
-        if node.generation != 2 or node.intersection is None:
-            continue
-        # Reflected ray should pass through the other focus: the segment
-        # origin->hit must be collinear with origin->other_focus.
-        to_hit = node.intersection.point - node.ray.origin
-        to_focus = other_focus - node.ray.origin
-        cross = to_hit[0] * to_focus[1] - to_hit[1] * to_focus[0]
-        assert abs(cross) < 1e-7 * np.linalg.norm(to_hit) * np.linalg.norm(to_focus)
-        checked += 1
-    assert checked > 10
+    reflected = (tree.generation == 2) & (tree.kind == REFLECTED)
+    assert reflected.sum() > 10
+    d = distance_to_lines(far, tree.start[reflected], tree.direction[reflected])
+    assert np.max(d) < 1e-7
 
 
-def test_parabola_focuses_collimated_beam():
-    """A collimated beam along the axis reflects through the parabola focus."""
+def test_paraboloid_focuses_collimated_beam():
+    """A collimated beam along the axis reflects through the paraboloid's focus."""
 
-    p = 2.0  # semi-latus rectum; focus at origin in polar form
-    parabola = ParabolaSurface(p=p)
-    source = ParallelSource(
-        origin=np.array([-6.0, 0.0]),
-        direction=np.array([1.0, 0.0]),
-        width=2.5,
-        samples=21,
-    )
-    tree = BranchingTracer([parabola], TraceConfig(max_generations=2)).trace([source])
+    f = 2.0
+    mirror = Mirror("M", surface=Paraboloid(f=-f), aperture=3.0)  # opening toward -z
+    source = CollimatedSource((0.0, 0.0, -6.0), beam_radius=2.5, rays=61)
+    tree = NonSequentialTracer(OpticalSystem([mirror]), max_interactions=2).trace(source)
 
-    checked = 0
-    for node in tree.nodes():
-        if node.generation != 2:
-            continue
-        # Reflected ray must pass through the focus (origin).
-        origin, direction = node.ray.origin, node.ray.direction
-        # Perpendicular distance from origin-point to the ray line:
-        perp = abs(-direction[1] * origin[0] + direction[0] * origin[1])
-        assert perp < 1e-9
-        checked += 1
-    assert checked > 10
+    reflected = (tree.generation == 2) & (tree.kind == REFLECTED)
+    assert reflected.sum() > 10
+    focus = np.array([0.0, 0.0, -f])
+    assert np.max(distance_to_lines(focus, tree.start[reflected], tree.direction[reflected])) < 1e-9
 
 
-def test_semidiameter_clips_rays_beyond_the_aperture():
-    """A ray that would hit the conic outside its clear aperture must miss."""
+def test_aperture_clips_rays_beyond_the_mirror():
+    """A ray that would meet the conic outside its aperture passes by."""
 
-    circle = CircleSurface(radius=5.0, center=np.array([10.0, 0.0]), semidiameter=2.0)
-
-    within = Ray(origin=[0.0, 1.0], direction=[1.0, 0.0])
-    assert circle.hit(within) is not None
-
-    beyond = Ray(origin=[0.0, 3.0], direction=[1.0, 0.0])
-    assert circle.hit(beyond) is None
+    mirror = Mirror("M", surface=Sphere(5.0), aperture=2.0, z=10.0)
+    rays = Rays([[0.0, 1.0, 0.0], [0.0, 3.0, 0.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], np.nan, 1.0)
+    tree = NonSequentialTracer(OpticalSystem([mirror])).trace(rays)
+    primaries = tree.generation == 1
+    assert [tree.face[i] for i in np.flatnonzero(primaries)] == ["M", None]
 
 
-def test_unset_semidiameter_does_not_clip():
-    """Default (None) semidiameter keeps the old, unclipped behaviour."""
+def test_sensor_without_aperture_does_not_clip():
+    """An unbounded detector (aperture=None) records every ray that crosses its plane."""
 
-    circle = CircleSurface(radius=5.0, center=np.array([10.0, 0.0]))
-    ray = Ray(origin=[0.0, 4.9], direction=[1.0, 0.0])
-    assert circle.hit(ray) is not None
+    sensor = Sensor("S", z=10.0)
+    bounded = Sensor("S", z=10.0, aperture=Rectangle(2.0, 2.0))
+    rays = Rays([[0.0, 0.5, 0.0], [0.0, 400.0, 0.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], np.nan, 1.0)
+    assert len(NonSequentialTracer(OpticalSystem([sensor])).trace(rays).hits("S")) == 2
+    assert len(NonSequentialTracer(OpticalSystem([bounded])).trace(rays).hits("S")) == 1

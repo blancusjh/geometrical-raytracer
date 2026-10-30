@@ -1,4 +1,4 @@
-"""Stigmatic ovoid lens trains (``raytracer.design.stigmatic``).
+"""Stigmatic ovoid lens trains (``raytracer.families.stigmatic``).
 
 The train is stigmatic *by construction* for any intermediate conjugates, so
 the tests here are analytic identities: infinite-conjugate GOTS limits, the
@@ -10,15 +10,16 @@ import numpy as np
 import pytest
 
 from raytracer.analysis import spot_data
-from raytracer.design import StigmaticTrain
-from raytracer.propagation import (
+from raytracer.families import StigmaticTrain
+from raytracer.geometry.surfaces import CartesianSurface
+from raytracer.geometry.surfaces.cartesian import gots_params
+from raytracer.tracing import (
     FieldPoint,
     PupilSampling,
     SequentialTracer,
     trace_from_object,
     trace_pupil,
 )
-from raytracer.surfaces.cartesian_oval import CartesianOvalProfile, gots_params
 
 INF = float("inf")
 
@@ -49,24 +50,24 @@ def test_gots_object_at_infinity_matches_the_finite_limit():
 
 def test_gots_doubly_collimated_is_the_plane():
     assert gots_params(1.5, INF, 1.0, -INF) == (0.0, 0.0, 0.0, 0.0)
-    profile = CartesianOvalProfile(n0=1.5, z0=INF, ni=1.0, zi=-INF)
+    profile = CartesianSurface(n0=1.5, z0=INF, ni=1.0, zi=-INF)
     assert profile.is_plane
-    np.testing.assert_allclose(profile.sag(np.array([0.0, 2.0, 5.0])), 0.0)
+    np.testing.assert_allclose(profile.profile(np.array([0.0, 2.0, 5.0])), 0.0)
 
 
 def test_collimating_surface_emits_parallel_rays():
     """Object at -60 into glass with the image conjugate at infinity: every
     emergent ray direction is parallel to the axis, at any real aperture."""
 
-    from raytracer.design import OpticalSystem, SurfaceRow
-    from raytracer.optics.materials import AIR, ConstantIndex
+    from raytracer import OpticalSystem, TableRow
+    from raytracer.materials import ConstantIndex
 
-    profile = CartesianOvalProfile(n0=1.0, z0=-60.0, ni=1.5, zi=INF)
-    row = SurfaceRow(
-        profile=profile, thickness=30.0, material_after=ConstantIndex("N1.5", 1.5)
-    )
-    system = OpticalSystem([row], object_space=AIR, object_z=-60.0)
-    tracer = SequentialTracer(system)
+    profile = CartesianSurface(n0=1.0, z0=-60.0, ni=1.5, zi=INF)
+    # The old row had no clear aperture; a lens body needs one now. 30 mm is
+    # beyond the steepest ray here (sine 0.35 from 60 mm reaches ~22 mm).
+    row = TableRow(profile, 30.0, ConstantIndex("N1.5", 1.5), 30.0)
+    system = OpticalSystem.from_table([row])
+    tracer = SequentialTracer(system, object_z=-60.0)
     for sine in (0.05, 0.2, 0.35):
         slope = sine / np.sqrt(1.0 - sine * sine)
         result = trace_from_object(tracer, (0.0, 0.0), (0.0, slope))
@@ -82,10 +83,10 @@ def test_mirrored_conjugates_negate_the_sag():
     """The surface imaging (n1, -z1) -> (n0, -z0) is the mirror image of the
     one imaging (n0, z0) -> (n1, z1): its sag is the negated sag."""
 
-    forward = CartesianOvalProfile(n0=1.0, z0=-30.0, ni=1.5, zi=20.0)
-    mirrored = CartesianOvalProfile(n0=1.5, z0=-20.0, ni=1.0, zi=30.0)
+    forward = CartesianSurface(n0=1.0, z0=-30.0, ni=1.5, zi=20.0)
+    mirrored = CartesianSurface(n0=1.5, z0=-20.0, ni=1.0, zi=30.0)
     h = np.linspace(0.0, 3.0, 40)
-    np.testing.assert_allclose(mirrored.sag(h), -forward.sag(h), atol=1e-12)
+    np.testing.assert_allclose(mirrored.profile(h), -forward.profile(h), atol=1e-12)
 
 
 # -- validation --------------------------------------------------------------
@@ -142,7 +143,7 @@ def test_symmetric_singlet_has_unit_magnitude_magnification():
 
 
 def _rms_spot_um(train: StigmaticTrain, *, na: float) -> float:
-    tracer = SequentialTracer(train.to_system())
+    tracer = train.tracer()
     pupil = trace_pupil(
         tracer,
         FieldPoint(y=0.0),
@@ -181,5 +182,39 @@ def test_flat_interior_surface_train_is_stigmatic():
         conjugates=(-60.0, INF, INF, 70.0),
         semidiameter=6.0,
     )
-    assert [p.is_plane for p in train.profiles] == [False, True, False]
+    assert [p.is_plane for p in train.surfaces] == [False, True, False]
     assert _rms_spot_um(train, na=0.08) < 1e-9
+
+
+# -- the member system ---------------------------------------------------------
+
+
+def test_member_system_is_cemented_lenses_and_a_sensor():
+    """Each medium between two surfaces is a lens; neighbouring glasses are in
+    contact at the surface they share; the sensor sits at the image conjugate."""
+
+    train = StigmaticTrain(
+        media=(1.0, 1.5, 1.7, 1.0),
+        vertices=(0.0, 8.0, 12.0),
+        conjugates=(-60.0, INF, INF, 70.0),
+        semidiameter=6.0,
+    )
+    system = train.system()
+    assert [type(e).__name__ for e in system.elements] == ["Lens", "Lens", "Sensor"]
+    contact = system.face("L1.back")
+    assert set(contact.names) == {"L1.back", "L2.front"}
+    assert (contact.medium_minus.index(0.5), contact.medium_plus.index(0.5)) == (1.5, 1.7)
+    assert [s.face.surface for s in system.path[:-1]] == list(train.surfaces)
+    tracer = train.tracer()
+    assert tracer.object_z == -60.0 and tracer.image_z == pytest.approx(70.0)
+
+
+def test_unset_semidiameter_clips_at_the_usable_height():
+    """With no semidiameter the train is clear out to the largest height every
+    surface supports (the old system had no clip there at all)."""
+
+    train = StigmaticTrain.singlet(n=1.5, d0=-60.0, d1=300.0, d2=60.0, thickness=8.0)
+    limit = train.max_semidiameter
+    assert limit == pytest.approx(min(s.max_radius for s in train.surfaces))
+    system = train.system()
+    assert all(s.face.clear_aperture.extent == pytest.approx(limit) for s in system.path[:-1])

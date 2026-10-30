@@ -19,9 +19,9 @@ from raytracer.analysis import (
     normal_axis_crossing,
 )
 from raytracer.analysis.aberrations.aplanatism import _inverse_vc_geometric
-from raytracer.design import StigmaticTrain
-from raytracer.propagation import PupilSampling
-from raytracer.surfaces.cartesian_oval import CartesianOvalProfile
+from raytracer.families import StigmaticTrain
+from raytracer.geometry.surfaces import CartesianSurface
+from raytracer.tracing import PupilSampling
 
 INF = float("inf")
 
@@ -30,7 +30,7 @@ INF = float("inf")
 
 
 def test_normal_axis_crossing_tends_to_the_paraxial_radius():
-    profile = CartesianOvalProfile(n0=1.0, z0=-45.0, ni=1.62, zi=33.0)
+    profile = CartesianSurface(n0=1.0, z0=-45.0, ni=1.62, zi=33.0)
     vc = normal_axis_crossing(profile, np.array([1e-9]))
     assert vc[0] == pytest.approx(1.0 / profile.O, rel=1e-9)
 
@@ -38,16 +38,16 @@ def test_normal_axis_crossing_tends_to_the_paraxial_radius():
 @pytest.mark.parametrize(
     "profile",
     [
-        CartesianOvalProfile(n0=1.0, z0=-45.0, ni=1.62, zi=33.0),
-        CartesianOvalProfile(n0=1.5, z0=-12.0, ni=1.0, zi=80.0),
-        CartesianOvalProfile(n0=1.0, z0=-60.0, ni=1.5, zi=INF),  # collimator: S = 0
+        CartesianSurface(n0=1.0, z0=-45.0, ni=1.62, zi=33.0),
+        CartesianSurface(n0=1.5, z0=-12.0, ni=1.0, zi=80.0),
+        CartesianSurface(n0=1.0, z0=-60.0, ni=1.5, zi=INF),  # collimator: S = 0
     ],
 )
 def test_eq24_equals_the_geometric_normal_crossing(profile):
     """The paper's Eq. (24) and the direct geometric construction (normal at
     the hit point extended to the axis) are the same quantity."""
 
-    h = np.linspace(1e-3, 0.6 * min(profile.max_usable_height, 20.0), 30)
+    h = np.linspace(1e-3, 0.6 * min(profile.max_radius, 20.0), 30)
     z, _ = profile.sag_and_slope(h)
     rho = np.sqrt(h * h + z * z)
     vc_eq24 = normal_axis_crossing(profile, rho)
@@ -56,7 +56,7 @@ def test_eq24_equals_the_geometric_normal_crossing(profile):
 
 
 def test_eq24_refuses_its_singular_cases():
-    plane = CartesianOvalProfile(n0=1.5, z0=INF, ni=1.0, zi=-INF)
+    plane = CartesianSurface(n0=1.5, z0=INF, ni=1.0, zi=-INF)
     with pytest.raises(ValueError, match="singular"):
         normal_axis_crossing(plane, np.array([1.0]))
 

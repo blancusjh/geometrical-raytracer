@@ -13,8 +13,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.design import OpticalSystem
-from raytracer.propagation import (
+from raytracer.io import read_prescription
+from raytracer.system import OpticalSystem
+from raytracer.tracing import (
     FieldPoint,
     ParaxialModel,
     SequentialTracer,
@@ -27,32 +28,39 @@ CSV = Path(__file__).resolve().parents[1] / "data" / "optical_systems/photograph
 
 
 @pytest.fixture(scope="module")
-def system() -> OpticalSystem:
-    return OpticalSystem.from_prescription(CSV)
+def prescription():
+    return read_prescription(CSV)
 
 
 @pytest.fixture(scope="module")
-def tracer(system) -> SequentialTracer:
-    return SequentialTracer(system)
+def system(prescription) -> OpticalSystem:
+    return prescription.system
 
 
-def test_prescription_loads(system):
-    assert len(system) == 7
+@pytest.fixture(scope="module")
+def tracer(prescription) -> SequentialTracer:
+    return prescription.tracer()
+
+
+def test_prescription_loads(system, tracer):
+    # 7 surfaces, then the image plane: the path has 8 steps.
+    assert len(system.path) == 8
+    assert system.stop == "STO"
     assert system.stop_index == 4
-    assert system.mirror_indices == []
-    assert system.image_z == pytest.approx(59.95)
-    assert system.n_image == pytest.approx(1.0)
+    assert [i for i, step in enumerate(system.path) if step.event == "reflect"] == []
+    assert tracer.image_z == pytest.approx(59.95)
+    assert tracer.n_image == pytest.approx(1.0)
 
 
 def test_paraxial_focal_length_matches_design(tracer):
     solve_object_plane(tracer)
-    efl = ParaxialModel(tracer.system).effective_focal_length()
+    efl = ParaxialModel(tracer).effective_focal_length()
     assert efl == pytest.approx(50.0, rel=2e-3)
 
 
 def chief_distortion_um(tracer, object_z, stop_index, magnification, angle_deg):
     y = abs(object_z) * np.tan(np.deg2rad(angle_deg))
-    z_stop = tracer.system.vertices[stop_index]
+    z_stop = tracer.step_z(stop_index)
     estimate = -y / (z_stop - object_z)
     slope = chief_ray_slope(
         tracer, FieldPoint(y=y), stop_index=stop_index,

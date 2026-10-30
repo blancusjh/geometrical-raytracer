@@ -6,16 +6,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.design import StigmaticTrain
+from raytracer.families import StigmaticTrain
 from raytracer.io import read_materials
-from raytracer.optics.materials import (
+from raytracer.materials import (
     AIR,
     CauchyMaterial,
     MaterialLibrary,
     default_materials,
     sellmeier_glass,
 )
-from raytracer.propagation import SequentialTracer, trace_from_object
+from raytracer.tracing import trace_from_object
 
 DATA = Path(__file__).resolve().parents[1] / "data"
 FORMLABS = DATA / "materials/formlabs_resins.csv"
@@ -84,10 +84,7 @@ def bk7_train() -> StigmaticTrain:
 
 
 def _axial_focus_z(train: StigmaticTrain, wavelength_um: float) -> float:
-    system = train.to_system()
-    system.wavelength_um = wavelength_um
-    system._rebuild()
-    result = trace_from_object(SequentialTracer(system), (0.0, 0.0), (0.0, 0.05))
+    result = trace_from_object(train.tracer(wavelength_um), (0.0, 0.0), (0.0, 0.05))
     d = result.direction / np.linalg.norm(result.direction)
     return float(result.image_point[2] - result.image_point[1] * d[2] / d[1])
 
@@ -97,7 +94,7 @@ def test_indices_are_derived_at_the_design_wavelength(bk7_train):
         sellmeier_glass("N-BK7").index(0.58756)
     )
     assert bk7_train.is_dispersive
-    assert bk7_train.to_system().wavelength_um == 0.58756
+    assert bk7_train.tracer().wavelength_um == 0.58756
 
 
 def test_material_train_is_exact_at_design_wavelength_and_chromatic_off_it(bk7_train):
@@ -114,7 +111,7 @@ def test_with_conjugates_preserves_the_media(bk7_train):
 
 
 def test_float_media_normalize_to_constant_index():
-    from raytracer.optics.materials import ConstantIndex
+    from raytracer.materials import ConstantIndex
 
     train = StigmaticTrain(
         media=(1.0, 1.5, 1.0), vertices=(0.0, 8.0), conjugates=(-60.0, 300.0, 60.0)

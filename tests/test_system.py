@@ -1,0 +1,356 @@
+"""The optical system: placed elements, the media between them, and the path.
+
+The media on each side of every boundary and the sequential path are
+derived from the placed elements (``raytracer.system``); these tests state
+what must be derived for the configurations a designer actually builds:
+cemented contact, immersion, a double-pass lens, a virtual stop, folded
+and beam-splitting layouts, and prescription tables in both directions.
+"""
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from raytracer import AIR, OpticalSystem, Pose, Rotation, TableRow
+from raytracer.elements import BeamSplitter, Lens, Mirror, Sensor, Stop
+from raytracer.geometry.apertures import Circle
+from raytracer.geometry.surfaces import Plane, Sphere
+from raytracer.io import read_prescription
+from raytracer.materials import ConstantIndex
+from raytracer.sources import Rays
+from raytracer.system import Assembly, Gap
+from raytracer.tracing import NonSequentialTracer, ParaxialModel, SequentialTracer, TraceStatus
+
+DATA = Path(__file__).resolve().parents[1] / "data" / "optical_systems"
+COOKE = DATA / "photographic/cooke_triplet_prescription.csv"
+US7557996 = DATA / "lithography/US7557996_Fig3_Table3_prescription.csv"
+
+G1, G2 = ConstantIndex("G1", 1.5), ConstantIndex("G2", 1.7)
+WATER = ConstantIndex("WATER", 1.33)
+
+
+def meridional_rays(z=-100.0):
+    o = np.array([[0.0, 3.0, z], [1.0, -2.0, z], [0.0, 0.0, z]])
+    d = np.array([[0.0, -0.02, 1.0], [0.01, 0.03, 1.0], [0.0, 0.01, 1.0]])
+    return o, d / np.linalg.norm(d, axis=1, keepdims=True)
+
+
+# -- what the system derives ------------------------------------------------------
+
+
+def test_lenses_sharing_a_face_are_one_cemented_boundary():
+    l1 = Lens("L1", front=Sphere(40.0), back=Sphere(-30.0), thickness=6.0, material=G1, semi_diameter=10.0)
+    l2 = Lens("L2", front=Sphere(-30.0), back=Plane(), thickness=2.0, material=G2, semi_diameter=10.0, z=6.0)
+    system = OpticalSystem([l1, l2, Sensor("IMG", z=60.0)])
+    contact = system.face("L1.back")
+    assert contact is system.face("L2.front")
+    assert set(contact.names) == {"L1.back", "L2.front"}
+    assert (contact.medium_minus, contact.medium_plus) == (G1, G2)
+    optical = [f for f in system.faces if f.role != "edge"]
+    assert len(optical) == 4  # front, the cemented face, back, sensor
+    assert [s.event for s in system.path] == ["transmit"] * 3 + ["detect"]
+    # The element order does not matter: the path follows the axis.
+    shuffled = OpticalSystem([l2, Sensor("IMG", z=60.0), l1])
+    assert [s.face.pose.position[2] for s in shuffled.path] == [0.0, 6.0, 8.0, 60.0]
+
+
+def test_compose_places_touching_lenses_in_contact():
+    l1 = Lens("L1", front=Sphere(40.0), back=Sphere(-30.0), thickness=6.0, material=G1, semi_diameter=10.0)
+    l2 = Lens("L2", front=Sphere(-30.0), back=Plane(), thickness=2.0, material=G2, semi_diameter=10.0)
+    system = OpticalSystem.compose(l1, l2, Gap(50.0), Sensor("IMG"))
+    assert system.pose_of("L2").position.tolist() == [0.0, 0.0, 6.0]
+    assert system.face("L2.front").medium_minus == G1
+    with pytest.raises(ValueError, match="share the contact surface"):
+        OpticalSystem.compose(l1, l2.replace(front=Sphere(-31.0)), Sensor("IMG"))
+
+
+def test_overlapping_bodies_are_rejected():
+    lens = Lens("A", front=Sphere(40.0), back=Plane(), thickness=6.0, material=G1, semi_diameter=10.0)
+    with pytest.raises(ValueError, match="overlap"):
+        OpticalSystem([lens, lens.replace(name="B", thickness=3.0)]).faces
+
+
+def test_immersion_layer_and_a_detector_at_its_back():
+    """A liquid is a lens of liquid: in contact with the glass in front of it,
+    and with the sensor at its back face, so the image space is the liquid."""
+
+    system = OpticalSystem([
+        Lens("L", front=Sphere(10.0), back=Plane(), thickness=5.0, material=G1, semi_diameter=4.0),
+        Lens("W", front=Plane(), back=Plane(), thickness=2.0, material=WATER, semi_diameter=4.0, z=5.0),
+        Sensor("IMG", z=7.0),
+    ])
+    assert (system.face("W.front").medium_minus, system.face("W.front").medium_plus) == (G1, WATER)
+    image = system.face("IMG")
+    assert set(image.names) == {"W.back", "IMG"} and image.role == "detector"
+    assert len(system.path) == 3 and system.path[-1].event == "detect"
+    tracer = SequentialTracer(system)
+    assert tracer.n_image == pytest.approx(1.33)
+    # An immersion objective: the system may also be immersed as a whole.
+    immersed = system.replace(ambient=WATER)
+    assert immersed.face("L.front").medium_minus == WATER
+    assert SequentialTracer(immersed).n_object == pytest.approx(1.33)
+
+
+def test_double_pass_lens_from_a_prescription_table():
+    """Lens, flat mirror, back through the same lens: the table's repeated
+    surfaces are one physical lens, visited twice, and the folded trace
+    equals the unfolded one (the mirror image of the lens behind a gap of 2d)."""
+
+    R1, R2, t, d, s = 80.0, -200.0, 6.0, 30.0, 40.0
+    folded = OpticalSystem.from_table([
+        TableRow(Sphere(R1), t, G2, 15.0),
+        TableRow(Sphere(R2), d, AIR, 15.0),
+        TableRow(Plane(), -d, None, 15.0, "mirror"),
+        TableRow(Sphere(R2), -t, G2, 15.0),
+        TableRow(Sphere(R1), -s, AIR, 15.0),
+    ])
+    assert [e.name for e in folded.elements] == ["L1", "M1", "IMG"]
+    assert [s.name for s in folded.path] == ["L1.front", "L1.back", "M1", "L1.back", "L1.front", "IMG"]
+    assert folded.path[1].face is folded.path[3].face
+    assert folded.path[2].event == "reflect"
+
+    unfolded = OpticalSystem.from_table([
+        TableRow(Sphere(R1), t, G2, 15.0),
+        TableRow(Sphere(R2), 2 * d, AIR, 15.0),
+        TableRow(Sphere(-R2), t, G2, 15.0),
+        TableRow(Sphere(-R1), s, AIR, 15.0),
+    ])
+    o, dirs = meridional_rays()
+    a = SequentialTracer(folded, restart_offset=0.0).trace_batch(o, dirs)
+    b = SequentialTracer(unfolded, restart_offset=0.0).trace_batch(o, dirs)
+    assert a.valid.all() and b.valid.all()
+    np.testing.assert_allclose(a.image_points[:, :2], b.image_points[:, :2], atol=1e-12)
+    np.testing.assert_allclose(a.opl, b.opl, atol=1e-10)
+    assert ParaxialModel(SequentialTracer(folded)).effective_focal_length() == pytest.approx(
+        ParaxialModel(SequentialTracer(unfolded)).effective_focal_length(), rel=1e-12
+    )
+
+
+def test_double_pass_keeps_each_pass_clear_aperture():
+    """US 7,557,996 lists a narrower clear semi-diameter for the first pass
+    through its CaF2 lens than for the second; the physical surface is the
+    larger, the first visit is clipped at its own."""
+
+    system = read_prescription(US7557996).system
+    first, second = system.path[4], system.path[8]
+    assert first.face is second.face
+    assert first.clear_aperture == Circle(53.189)
+    assert second.clear_aperture is None and second.face.clear_aperture == Circle(67.241)
+    # The cemented HIINDEX1|HIINDEX2 face keeps its own 18.135 mm, not its lens's 58.621 mm.
+    cemented = system.face("L21.back")
+    assert set(cemented.names) == {"L21.back", "L22.front"}
+    assert cemented.clear_aperture == Circle(18.135)
+    assert system["L21"].semi_diameter == 58.621
+
+
+def test_virtual_stop_inside_a_lens():
+    """A table may put the stop plane inside a lens: it is then a reference
+    plane only — the sequential trace clips there, light does not."""
+
+    rows = [
+        TableRow(Sphere(50.0), 10.0, G1, 12.0),
+        TableRow(Plane(), -4.0, AIR, 12.0),
+        TableRow(Plane(), 44.0, AIR, 3.0, kind="stop"),
+    ]
+    system = OpticalSystem.from_table(rows)
+    assert system["STO"].virtual
+    assert system.stop == "STO" and system.stop_index == 2
+    assert system.pose_of("STO").position[2] == pytest.approx(6.0)
+
+    rays = Rays([[0.0, 1.0, -20.0], [0.0, 8.0, -20.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], np.nan, 1.0)
+    batch = SequentialTracer(system).trace_batch(rays.origins, rays.directions)
+    assert batch.status.tolist() == [TraceStatus.OK, TraceStatus.VIGNETTED]
+    assert batch.failed_step[1] == 2
+    tree = NonSequentialTracer(system, split=False).trace(rays)
+    assert "STO" not in tree.face
+    assert len(tree.hits("IMG")) == 2
+
+
+def test_a_real_stop_blocks_light_non_sequentially():
+    system = OpticalSystem.compose(Stop("S", aperture=2.0), Gap(10.0), Sensor("IMG"))
+    rays = Rays([[0.0, 1.0, -5.0], [0.0, 3.0, -5.0], [0.0, 5.0, -5.0]], [[0, 0, 1]] * 3, np.nan, 1.0)
+    tree = NonSequentialTracer(system).trace(rays)
+    assert tree.face == ["IMG", "S", "IMG"]  # through the opening, on the blade, around it
+    assert len(tree) == 3  # the blade absorbs: no children
+    assert tree.hits("IMG").points[:, 1].tolist() == [1.0, 5.0]
+
+
+# -- the path ---------------------------------------------------------------------
+
+
+def test_path_inference_along_a_tilted_common_axis():
+    axis = np.array([0.0, np.sin(0.3), np.cos(0.3)])
+    lens = Lens("L", front=Sphere(40.0), back=Sphere(-40.0), thickness=4.0, material=G1, semi_diameter=8.0, axis=axis)
+    sensor = Sensor("IMG", pos=50.0 * axis, axis=axis)
+    stop = Stop("S", aperture=5.0, pos=-5.0 * axis, axis=axis)
+    system = OpticalSystem([sensor, lens, stop])
+    assert [s.name for s in system.path] == ["S", "L.front", "L.back", "IMG"]
+    assert [s.event for s in system.path] == ["stop", "transmit", "transmit", "detect"]
+    assert system.stop_index == 0 and not system.has_stated_path
+
+
+@pytest.mark.parametrize(
+    "extra, message",
+    [
+        (Mirror("M", surface=Plane(), aperture=5.0, z=20.0), "reflects"),
+        (BeamSplitter("BS", aperture=5.0, z=20.0), "reflects"),
+        (Sensor("IMG", z=60.0, rot=(5.0, 0.0, 0.0)), "share one axis"),
+        (Sensor("IMG", pos=(1.0, 0.0, 60.0)), "centred on one axis"),
+    ],
+    ids=["folded", "beam-splitter", "tilted", "decentred"],
+)
+def test_path_inference_refuses_what_it_cannot_order(extra, message):
+    lens = Lens("L", front=Sphere(40.0), back=Sphere(-40.0), thickness=4.0, material=G1, semi_diameter=8.0)
+    system = OpticalSystem([lens, extra])
+    with pytest.raises(ValueError, match=message):
+        system.path
+
+
+def beam_splitter_bench():
+    """A 45-degree beam splitter at z=20: the transmitted arm continues along
+    +z, the reflected arm leaves along -y."""
+
+    bs = BeamSplitter("BS", aperture=8.0, z=20.0, normal=(0.0, 1.0, 1.0))
+    straight = Sensor("CAM_T", z=60.0)
+    side = Sensor("CAM_R", pos=(0.0, -40.0, 20.0), normal=(0.0, -1.0, 0.0))
+    return [bs, straight, side]
+
+
+def test_stated_paths_choose_the_beam_splitter_branch():
+    parts = beam_splitter_bench()
+    reflect = OpticalSystem(parts, path=["BS:reflect", "CAM_R"])
+    transmit = OpticalSystem(parts, path=["BS:transmit", "CAM_T"])
+    assert [s.event for s in reflect.path] == ["reflect", "detect"]
+    o = np.array([[0.0, 1.0, 0.0], [2.0, -1.0, 0.0]])
+    d = np.tile([0.0, 0.0, 1.0], (2, 1))
+    r = SequentialTracer(reflect).trace_batch(o, d)
+    t = SequentialTracer(transmit).trace_batch(o, d)
+    assert r.valid.all() and t.valid.all()
+    # Reflection about the 45-degree plane swaps the roles of y and z.
+    np.testing.assert_allclose(r.image_points, [[0.0, -40.0, 19.0], [2.0, -40.0, 21.0]], atol=1e-12)
+    np.testing.assert_allclose(t.image_points, [[0.0, 1.0, 60.0], [2.0, -1.0, 60.0]], atol=1e-12)
+    np.testing.assert_allclose(r.directions, np.tile([0.0, -1.0, 0.0], (2, 1)), atol=1e-12)
+    # The non-sequential tracer finds both branches at once, half the power each.
+    tree = NonSequentialTracer(OpticalSystem(parts)).trace(Rays(o, d, np.nan, 0.5))
+    np.testing.assert_allclose(tree.hits("CAM_R").points, r.image_points, atol=1e-6)
+    np.testing.assert_allclose(tree.hits("CAM_T").points, t.image_points, atol=1e-6)
+    assert tree.hits("CAM_R").power.sum() == pytest.approx(0.5)
+
+
+def test_stated_path_errors():
+    parts = beam_splitter_bench()
+    with pytest.raises(ValueError, match="say which branch"):
+        OpticalSystem(parts, path=["BS", "CAM_R"]).path
+    with pytest.raises(KeyError, match="no boundary named"):
+        OpticalSystem(parts, path=["BX:reflect", "CAM_R"]).path
+    with pytest.raises(ValueError, match="unknown event"):
+        OpticalSystem(parts, path=["BS:bounce", "CAM_R"]).path
+    lens = Lens("L", front=Sphere(40.0), back=Sphere(-40.0), thickness=4.0, material=G1, semi_diameter=8.0)
+    with pytest.raises(ValueError, match="edge"):
+        OpticalSystem([lens], path=["L.edge"]).path
+    with pytest.raises(ValueError, match="detector"):
+        SequentialTracer(OpticalSystem(parts, path=["BS:reflect"]))
+
+
+def test_folding_mirror_with_a_stated_path():
+    lens = Lens("L", front=Sphere(50.0), back=Sphere(-50.0), thickness=5.0, material=G1, semi_diameter=10.0)
+    fold = Mirror("FOLD", surface=Plane(), aperture=12.0, z=30.0, normal=(0.0, 1.0, 1.0))
+    straight = OpticalSystem.compose(lens, Gap(100.0), Sensor("IMG"))
+    # The folded twin: the mirror plane y + z = 30 turns the axis onto -y,
+    # and the image plane with it.
+    sensor = Sensor("IMG", pos=(0.0, 30.0 - 105.0, 30.0), normal=(0.0, -1.0, 0.0))
+    folded = OpticalSystem([lens, fold, sensor], path=["L.front", "L.back", "FOLD:reflect", "IMG"])
+    o, d = meridional_rays()
+    a = SequentialTracer(straight, restart_offset=0.0).trace_batch(o, d)
+    b = SequentialTracer(folded, restart_offset=0.0).trace_batch(o, d)
+    assert a.valid.all() and b.valid.all()
+    # Unfold: the mirror maps (x, y, z) to (x, 30 - z, 30 - y).
+    np.testing.assert_allclose(b.image_points[:, 0], a.image_points[:, 0], atol=1e-11)
+    np.testing.assert_allclose(30.0 - b.image_points[:, 2], a.image_points[:, 1], atol=1e-11)
+    np.testing.assert_allclose(30.0 - b.image_points[:, 1], a.image_points[:, 2], atol=1e-11)
+    np.testing.assert_allclose(b.opl, a.opl, atol=1e-10)
+
+
+# -- prescription tables ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("csv", [COOKE, US7557996], ids=["cooke", "us7557996"])
+def test_table_round_trip(csv):
+    system = read_prescription(csv).system
+    rows = system.table()
+    again = OpticalSystem.from_table(rows)
+    assert again == system
+    assert again.table() == rows
+
+
+def test_table_rows_describe_the_path():
+    rows = read_prescription(COOKE).system.table()
+    assert [r.kind for r in rows] == ["refract"] * 4 + ["stop"] + ["refract"] * 2
+    assert sum(r.gap for r in rows) == pytest.approx(59.95)
+    assert rows[4].semi_diameter == pytest.approx(read_prescription(COOKE).system["STO"].aperture.radius)
+
+
+def test_table_rejects_a_lens_with_no_semi_diameter():
+    with pytest.raises(ValueError, match="semi-diameter"):
+        OpticalSystem.from_table([TableRow(Sphere(50.0), 5.0, G1), TableRow(Plane(), 20.0, AIR)])
+
+
+def test_air_rows_that_change_nothing_are_dropped():
+    rows = [
+        TableRow(Plane(), 5.0, AIR, 10.0),  # air to air: nothing there
+        TableRow(Sphere(50.0), 5.0, G1, 10.0),
+        TableRow(Plane(), 20.0, AIR, 10.0),
+    ]
+    system = OpticalSystem.from_table(rows)
+    assert [s.name for s in system.path] == ["L1.front", "L1.back", "IMG"]
+    assert system.pose_of("L1").position[2] == 5.0
+
+
+# -- rigid motions ---------------------------------------------------------------------
+
+
+def test_a_moved_system_traces_identically_after_moving_the_rays():
+    prescription = read_prescription(COOKE)
+    system = prescription.system
+    axis, angle, pivot, shift = (1.0, 2.0, -0.5), 37.0, (3.0, -4.0, 20.0), (10.0, 5.0, -7.0)
+    moved = system.rotated(angle, axis, about=pivot).translated(shift)
+    motion = Pose(shift) @ Pose(pivot) @ Pose(None, Rotation.axis_angle(axis, angle)) @ Pose(-np.asarray(pivot))
+    for element in system.elements:
+        assert moved.pose_of(element.name).isclose(motion @ system.pose_of(element.name), atol=1e-12)
+
+    o, d = meridional_rays()
+    a = prescription.tracer().trace_batch(o, d)
+    b = SequentialTracer(moved, wavelength_um=prescription.wavelength_um).trace_batch(
+        motion.to_world(o), motion.direction_to_world(d)
+    )
+    assert a.valid.all() and b.valid.all()
+    np.testing.assert_allclose(b.image_points, motion.to_world(a.image_points), atol=1e-11)
+    np.testing.assert_allclose(b.directions, motion.direction_to_world(a.directions), atol=1e-13)
+    np.testing.assert_allclose(b.opl, a.opl, atol=1e-10)
+
+
+def test_an_assembly_moves_its_elements_together():
+    system = read_prescription(COOKE).system
+    pose = Pose((1.0, 2.0, 3.0), Rotation.euler(10.0, 20.0, 30.0))
+    grouped = OpticalSystem([Assembly("triplet", system.components, pose=pose)], path=[s.name for s in system.path])
+    for element in system.elements:
+        assert grouped.pose_of(element.name).isclose(pose @ system.pose_of(element.name), atol=1e-12)
+    o, d = meridional_rays()
+    a = SequentialTracer(system, wavelength_um=0.5876).trace_batch(o, d)
+    b = SequentialTracer(grouped, wavelength_um=0.5876).trace_batch(pose.to_world(o), pose.direction_to_world(d))
+    np.testing.assert_allclose(b.image_points, pose.to_world(a.image_points), atol=1e-11)
+
+
+def test_systems_are_values():
+    system = read_prescription(COOKE).system
+    assert system == read_prescription(COOKE).system
+    with pytest.raises(AttributeError):
+        system.ambient = G1
+    thicker = system.with_component("L2", system["L2"].replace(thickness=1.5))
+    assert thicker["L2"].thickness == 1.5 and system["L2"].thickness == 1.0
+    assert thicker != system
+    with pytest.raises(KeyError):
+        system.with_component("nope", system["L2"])
+    with pytest.raises(ValueError, match="unique"):
+        OpticalSystem([Sensor("A"), Sensor("A", z=1.0)])

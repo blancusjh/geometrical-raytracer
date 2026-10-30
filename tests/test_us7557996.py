@@ -5,8 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.design import OpticalSystem
-from raytracer.propagation import (
+from raytracer.io import read_prescription
+from raytracer.system import OpticalSystem
+from raytracer.tracing import (
     FieldPoint,
     ParaxialModel,
     PupilSampling,
@@ -25,24 +26,38 @@ REDUCTION = 4.0
 
 
 @pytest.fixture(scope="module")
-def system() -> OpticalSystem:
-    return OpticalSystem.from_prescription(CSV)
+def prescription():
+    return read_prescription(CSV)
 
 
 @pytest.fixture(scope="module")
-def tracer(system) -> SequentialTracer:
-    tracer = SequentialTracer(system)
+def system(prescription) -> OpticalSystem:
+    return prescription.system
+
+
+@pytest.fixture(scope="module")
+def tracer(prescription) -> SequentialTracer:
+    tracer = prescription.tracer()
     solve_object_plane(tracer)
     return tracer
 
 
-def test_prescription_loads(system):
-    assert len(system) == 48
-    assert system.wavelength_um == pytest.approx(0.193368)
+def test_prescription_loads(prescription, system, tracer):
+    # The table's air-to-air dummy row is dropped and the last two rows
+    # (the cemented HIINDEX1|HIINDEX2 face and the immersion layer ending on
+    # the wafer) merge with the faces they coincide with, so the 48-step path
+    # visits 47 distinct boundaries plus the image; the double-pass CaF2 lens
+    # (L3) is crossed twice.
+    assert len(system.path) == 48
+    assert prescription.wavelength_um == pytest.approx(0.193368)
+    assert tracer.wavelength_um == pytest.approx(0.193368)
     assert system.stop_index == 34
-    assert system.mirror_indices == [6, 9]
-    assert system.image_z == pytest.approx(1423.077700, abs=1e-6)
-    assert system.n_image == pytest.approx(1.59667693)
+    assert system.step_index("STO") == 34
+    assert system["STO"].virtual  # the patent puts the stop plane inside L15
+    assert [i for i, step in enumerate(system.path) if step.event == "reflect"] == [6, 9]
+    assert system.path[7].face is system.path[5].face  # L3.back, second pass
+    assert tracer.image_z == pytest.approx(1423.077700, abs=1e-6)
+    assert tracer.n_image == pytest.approx(1.59667693)
 
 
 def test_recovered_conjugates_match_reference(tracer):
@@ -53,7 +68,7 @@ def test_recovered_conjugates_match_reference(tracer):
 
 def test_paraxial_matrix_agrees_with_differential(system, tracer):
     exact = differential_conjugates(tracer)
-    model = ParaxialModel(system)
+    model = ParaxialModel(tracer)
     analytic = model.solve_object_plane()
     assert analytic.object_z == pytest.approx(exact.object_z, abs=1e-3)
     assert analytic.magnification == pytest.approx(exact.magnification, abs=1e-6)
@@ -61,7 +76,7 @@ def test_paraxial_matrix_agrees_with_differential(system, tracer):
 
 def test_field_traces_match_reference_image_heights(tracer):
     # Reference: object y=56 -> image y=14.000000; y=62 -> 15.499997; y=67 -> 16.749999
-    from raytracer.propagation import chief_ray_slope, trace_from_object
+    from raytracer.tracing import chief_ray_slope, trace_from_object
 
     expected = {56.0: 14.000000, 62.0: 15.499997, 67.0: 16.749999}
     for y_obj, y_img in expected.items():
@@ -79,7 +94,7 @@ def test_pupil_na_and_ray_count(tracer):
         na_object_sine=NA_IMAGE / REDUCTION,
         sampling=PupilSampling(kind="rings", radial=12, azimuth=72),
     )
-    n_image = tracer.system.n_image
+    n_image = tracer.n_image
     na = n_image * np.hypot(pupil.directions[:, 0], pupil.directions[:, 1])
     assert pupil.valid.sum() == 754  # reference: unvignetted rays
     assert na.max() == pytest.approx(1.197703, abs=1e-4)
@@ -99,8 +114,8 @@ def test_zernike_regression(tracer):
     expansion = fit_transverse(
         pupil,
         na_image=NA_IMAGE,
-        n_image=tracer.system.n_image,
-        wavelength_mm=tracer.system.wavelength_um * 1e-3,
+        n_image=tracer.n_image,
+        wavelength_mm=tracer.wavelength_um * 1e-3,
         max_order=6,
     )
     assert expansion.rms_no_tilt_nm == pytest.approx(21.0048, rel=1e-2)

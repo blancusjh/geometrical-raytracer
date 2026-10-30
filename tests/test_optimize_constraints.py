@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from raytracer.design import StigmaticTrain
+from raytracer.families import StigmaticTrain
 from raytracer.optimize import (
     Aplanatism,
     Constraint,

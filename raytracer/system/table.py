@@ -209,6 +209,10 @@ def from_table(
         interface = face["interface"]
         if face["on_glass"]:
             interface = interface.replace(coating=PerfectMirror())
+        if face["sd"] > 0.0 and interface.clear_aperture is None:
+            # The row's clear semi-diameter belongs to this surface, not to the
+            # larger body that carries it (a cemented face, a lens's smaller side).
+            interface = interface.replace(clear_aperture=Circle(face["sd"]))
         return interface
 
     elements: list[Element] = []
@@ -266,9 +270,13 @@ def from_table(
         if f is None:
             continue
         step = names[f] + (":reflect" if r.kind == MIRROR else "")
-        if path and path[-1] == step:
+        if path and (path[-1][0] if isinstance(path[-1], tuple) else path[-1]) == step:
             continue
-        path.append(step)
+        if r.semi_diameter and r.semi_diameter < faces[f]["sd"]:
+            # A surface met twice keeps the narrower clear aperture listed for this pass.
+            path.append((step, Circle(r.semi_diameter)))
+        else:
+            path.append(step)
     path.append(image_name)
     return cls(elements, name=name, ambient=ambient, path=path, stop=stop)
 
@@ -300,7 +308,10 @@ def to_table(system) -> list[TableRow]:
             kind, medium = STOP, arriving
         else:
             kind, medium = REFRACT, face.medium_plus if sign > 0 else face.medium_minus
-        region = face.interface.clear_aperture if step.event == "stop" else face.clear_aperture
+        if step.clear_aperture is not None:
+            region = step.clear_aperture
+        else:
+            region = face.interface.clear_aperture if step.event == "stop" else face.clear_aperture
         semi = None if region is None else region.extent
         gap = float(following.face.pose.position[2] - pose.position[2])
         rows.append(TableRow(face.interface, gap, medium, semi, kind, step.name))

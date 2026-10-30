@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..elements import BLADE, DETECTOR, EDGE
+from ..elements import BLADE, DETECTOR, EDGE, Sensor
 from ..interfaces import reflect, refract
 from ..sources import Rays, Source
 from ..system import OpticalSystem, PhysicalFace
@@ -115,6 +115,13 @@ class NonSequentialTracer:
         self.escape_length = float(escape_length)
         self.t_min = float(t_min)
         self.faces: list[PhysicalFace] = [f for f in system.faces if not f.virtual]
+        # A detector is recorded under its sensor's name, also where the sensor
+        # coincides with another element's face (a detector on a lens's back).
+        self._detector_names = {
+            k: next((n for n, e in zip(f.names, f.elements) if isinstance(system[e], Sensor)), f.name)
+            for k, f in enumerate(self.faces)
+            if f.role == DETECTOR
+        }
 
     def _indices(self, face: PhysicalFace, wavelength: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         wl = np.where(np.isnan(wavelength), self.wavelength_um if self.wavelength_um is not None else np.nan, wavelength)
@@ -209,7 +216,7 @@ class NonSequentialTracer:
                 n2 = np.where(going_plus, n_plus, n_minus)
                 seg_opl[m] = n1 * t[m]
                 if face.role == DETECTOR:
-                    hits_by_detector.setdefault(face.name, []).append(
+                    hits_by_detector.setdefault(self._detector_names[k], []).append(
                         (end[m], ql, d[m], power[m], wl[m], opl[m] + n1 * t[m], generation[m])
                     )
                     continue
@@ -242,7 +249,9 @@ class NonSequentialTracer:
                     new["gen"].append(generation[m][keep] + 1)
                     new["parent"].append(ids[m][keep])
                     new["kind"].append(np.full(int(keep.sum()), code))
-                    new["opl"].append(opl[m][keep] + n1[keep] * t[m][keep])
+                    # The child starts t_min past the hit, in the medium it travels in.
+                    n_child = n1 if code == REFLECTED else n2
+                    new["opl"].append(opl[m][keep] + n1[keep] * t[m][keep] + n_child[keep] * self.t_min)
 
             record["start"].append(o)
             record["end"].append(end)

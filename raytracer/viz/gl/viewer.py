@@ -1,8 +1,12 @@
 """Interactive OpenGL viewer with HDR ray accumulation.
 
-Public API is backward compatible with the previous ``visualization_opengl``
-module: ``RenderConfig``, ``OpenGLViewer.draw_surfaces / draw_rays /
-draw_markers / update_visual_params_only / run / close``.
+The viewer draws the meridional drawing plane ``(z, y)`` of the 3-D model
+(:mod:`raytracer.viz.sag_drawing`): ``draw_system`` / ``draw_elements``
+for the optics, ``draw_rays`` for a non-sequential
+:class:`~raytracer.tracing.RayTree`, ``draw_ray_segments`` /
+``draw_polyline`` / ``draw_filled_polygon`` / ``draw_markers`` for raw
+drawing-plane data, and the neutral :class:`~raytracer.viz.scene.Drawing`
+through :class:`~raytracer.viz.protocol.GLBackend`.
 
 Rendering pipeline per frame:
 
@@ -17,7 +21,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Callable, Optional, Sequence
 
 import numpy as np
 from vispy import app
@@ -134,118 +137,107 @@ class OpenGLViewer(app.Canvas):
 
     # -- public drawing API --------------------------------------------------
 
-    def draw_surfaces(
+    def draw_system(
         self,
-        surfaces: Sequence,
+        system,
         *,
-        color: object = "white",
-        width: float = 2.0,
-        samples: int = 800,
+        wavelength_um: float | None = None,
+        material_colors: dict | None = None,
+        tree=None,
     ) -> None:
-        rgba = Color(color).rgba
-        for surface in surfaces:
-            try:
-                polyline = np.asarray(surface.polyline(samples), dtype=float)
-            except Exception:
-                logger.warning(
-                    "Surface %s does not provide a polyline; skipped",
-                    getattr(surface, "surface_id", surface),
-                )
-                continue
-            if polyline.shape[0] < 2:
-                logger.warning(
-                    "Surface %s produced an empty polyline",
-                    getattr(surface, "surface_id", surface),
-                )
-                continue
-            self._ensure_scene_center(np.nanmean(polyline, axis=0))
-            self._surface_renderers.append(
-                PolylineRenderer(polyline - self._scene_center, rgba, width)
-            )
-        self.update()
+        """Draw every element of an :class:`~raytracer.system.OpticalSystem`.
+
+        The meridional section of each element (see
+        :mod:`raytracer.viz.sag_drawing`): lens bodies filled by index,
+        mirrors, stops, sensors — with what each sensor recorded when the
+        traced *tree* is given.
+        """
+
+        from ..protocol import populate_viewer
+        from ..scene import Drawing
+
+        drawing = Drawing().add_system(system, wavelength_um=wavelength_um, material_colors=material_colors, tree=tree)
+        populate_viewer(self, drawing)
+
+    def draw_elements(self, elements, *, wavelength_um: float | None = None) -> None:
+        """Draw loose elements at their own poses (or ``(element, pose)`` pairs)."""
+
+        from ..protocol import populate_viewer
+        from ..scene import Drawing
+
+        populate_viewer(self, Drawing().add_elements(elements, wavelength_um=wavelength_um))
 
     def draw_rays(
         self,
         tree,
         *,
-        tail_length: float = 12.0,  # kept for API compat; escapes now reach the view edge
-        color_resolver: Optional[Callable] = None,
-        intensity_resolver: Optional[Callable] = None,
+        color_resolver=None,
+        intensity_resolver=None,
         show_misses: bool = True,
         marker_color: object = None,
         marker_size: float = 6.0,
-        leaf_extension: Optional[Callable] = None,
+        escape_length: float | None = None,
+        select: np.ndarray | None = None,
     ) -> None:
-        del tail_length  # legacy parameter; escaping rays are view-extended
-        starts, ends, colors, intensities = [], [], [], []
-        escaping, directions, markers = [], [], []
+        """Draw a non-sequential :class:`~raytracer.tracing.RayTree`, projected on ``(z, y)``.
 
-        for node in tree.nodes():
-            origin = np.asarray(node.ray.origin, dtype=float)
-            direction = np.asarray(node.ray.direction, dtype=float)
-            hit = node.intersection
-            if hit is not None:
-                end = np.asarray(hit.point, dtype=float)
-                is_escaping = False
-                markers.append(end)
-            else:
-                if not show_misses:
-                    continue
-                if leaf_extension is not None:
-                    end = np.asarray(leaf_extension(node), dtype=float)
-                    is_escaping = False
-                else:
-                    end = origin + direction  # placeholder; extended per view
-                    is_escaping = True
+        ``color_resolver`` is an ``(M, 4)`` array or a callable
+        ``tree -> (M, 4)`` (default white); ``intensity_resolver`` likewise
+        ``(M,)`` (default: ``config.default_intensity`` times each segment's
+        power). Segments that left the system extend to the edge of the
+        view, or end ``escape_length`` mm from their start when given;
+        ``show_misses=False`` drops them. ``marker_color`` marks where the
+        other segments end on a boundary. ``select`` is an optional boolean
+        mask of the segments to draw.
+        """
 
-            if color_resolver is not None:
-                rgba = tuple(color_resolver(node))
-            else:
-                rgba = (1.0, 1.0, 1.0, 1.0)
-            if intensity_resolver is not None:
-                intensity = float(intensity_resolver(node))
-            else:
-                intensity = self.config.default_intensity * float(
-                    getattr(node, "intensity", 1.0)
-                )
-
-            starts.append(origin)
-            ends.append(end)
-            colors.append(rgba)
-            intensities.append(intensity)
-            escaping.append(is_escaping)
-            directions.append(direction)
-
-        if not starts:
+        n = len(tree)
+        if n == 0:
             return
-        starts = np.asarray(starts)
-        ends = np.asarray(ends)
-        self._ensure_scene_center(starts.mean(axis=0))
-        center = self._scene_center
+        starts = np.asarray(tree.start, dtype=float)[:, [2, 1]]
+        ends = np.asarray(tree.end, dtype=float)[:, [2, 1]]
+        directions = np.asarray(tree.direction, dtype=float)[:, [2, 1]]
+        norms = np.linalg.norm(directions, axis=1, keepdims=True)
+        directions = directions / np.where(norms == 0.0, 1.0, norms)
+        escaping = np.asarray(tree.escaped, dtype=bool).copy()
 
-        segments_rel = np.column_stack([starts - center, ends - center]).astype(np.float32)
-        self._append_ray_batch(
-            segments_rel,
-            np.asarray(colors, dtype=np.float32),
-            np.asarray(intensities, dtype=np.float32),
-            np.asarray(escaping, dtype=bool),
-            np.asarray(directions, dtype=np.float32),
+        colors = color_resolver(tree) if callable(color_resolver) else color_resolver
+        colors = np.tile([1.0, 1.0, 1.0, 1.0], (n, 1)) if colors is None else np.asarray(colors, dtype=float)
+        intensities = intensity_resolver(tree) if callable(intensity_resolver) else intensity_resolver
+        if intensities is None:
+            intensities = self.config.default_intensity * np.asarray(tree.power, dtype=float)
+        intensities = np.broadcast_to(np.asarray(intensities, dtype=float), (n,))
+
+        keep = np.ones(n, dtype=bool) if select is None else np.asarray(select, dtype=bool).copy()
+        if not show_misses:
+            keep &= ~escaping
+        if escape_length is not None:
+            ends = np.where(escaping[:, None], starts + float(escape_length) * directions, ends)
+            escaping[:] = False
+        if not keep.any():
+            return
+        segments = np.stack([starts, ends], axis=1)[keep]
+        self.draw_ray_segments(
+            segments,
+            colors=colors[keep],
+            intensities=intensities[keep],
+            escaping=escaping[keep],
+            directions=directions[keep],
         )
-        if marker_color is not None and markers:
-            self.draw_markers(np.asarray(markers), color=marker_color, size=marker_size)
-        self._exposure_dirty = True
-        self.update()
+        hit = keep & ~np.asarray(tree.escaped, dtype=bool)
+        if marker_color is not None and hit.any():
+            self.draw_markers(ends[hit], color=marker_color, size=marker_size)
 
     def draw_ray_segments(
         self,
-        segments: np.ndarray,  # (N, 2, 2) world endpoints
+        segments: np.ndarray,  # (N, 2, 2) drawing-plane endpoints (z, y)
         *,
         colors: np.ndarray | None = None,  # (N, 4)
         intensities: np.ndarray | None = None,  # (N,)
         escaping: np.ndarray | None = None,  # (N,) bool
         directions: np.ndarray | None = None,  # (N, 2), required with escaping
     ) -> None:
-        """Scene-level entry point: draw raw ray segments (no RayTree needed)."""
+        """Draw raw drawing-plane ray segments (no RayTree needed); the Drawing entry point."""
 
         segments = np.asarray(segments, dtype=float)
         n = segments.shape[0]
@@ -327,7 +319,7 @@ class OpenGLViewer(app.Canvas):
         self.update()
 
     def draw_polyline(self, polyline, *, color="white", width: float = 2.0) -> None:
-        """Draw a raw polyline overlay (surfaces, screens, outlines)."""
+        """Draw a raw drawing-plane polyline overlay (surfaces, sensors, outlines)."""
 
         polyline = np.asarray(polyline, dtype=float)
         if polyline.shape[0] < 2:

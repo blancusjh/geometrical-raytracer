@@ -1,13 +1,30 @@
-"""3-D visualization of sequential systems (vispy.scene).
+"""3-D visualization of optical systems and traces (vispy.scene).
 
-Lens elements are lathed from the shared :class:`AsphereProfile` sag. By default
-each element is a closed solid of revolution; with ``section="half"`` it is a
-**cutaway** (half torus + flat cut faces at the y=0 plane) so the interior and
-the traced rays are visible without translucent-barrel overlap.
+Everything is drawn where the system places it: each element's faces are
+meshed in the element's local frame and carried to the world by its pose
+(``system.walk()`` / ``system.pose_of(name)``), so tilted, decentred and
+folded systems render as built. World axes are the package's: the optical
+axis is z, the meridional plane y-z, and the turntable camera keeps +y up.
 
-Lighting is a **headlight** (the light direction follows the camera, so no side
-stays fixed in shadow while orbiting). Press ``w`` to toggle a wireframe overlay.
-Elements are coloured by material. The camera is an orthographic turntable.
+- Lenses are closed solids (front face, back face, cylindrical rim) lathed
+  from their surfaces' sag ``s(x, y)`` — any surface, revolution-symmetric
+  or not — out to the semi-diameter, each face clamped to its
+  single-valued branch and the faces joined where they cross (the same
+  extents the 2-D outlines use, :func:`raytracer.viz.bodies.element_outline`;
+  the inter-lens cuts of the 2-D drawing are not applied in 3-D). With
+  ``section="half"`` each element is a **cutaway** (half solid with flat
+  cut faces on the y = 0 plane) so the interior and the traced rays show
+  without translucent overlap.
+- Mirrors, beam splitters, diaphragm blades and sensors are their faces
+  over their apertures; prisms are their facets.
+- Rays come from sequential pupil bundles (:meth:`Viewer3D.add_field_bundles`),
+  polylines (:meth:`Viewer3D.add_paths`) or a non-sequential
+  :class:`~raytracer.tracing.RayTree` (:meth:`Viewer3D.add_tree`).
+
+Lighting is a **headlight** (the light direction follows the camera, so no
+side stays fixed in shadow while orbiting). Press ``w`` to toggle a
+wireframe overlay. Glass is coloured by material name, else by index on the
+celestial ramp of :func:`raytracer.viz.bodies.index_color`.
 
 The mesh generators (:func:`lathe`, :func:`lathe_solid`) are pure numpy and
 testable headless.
@@ -18,11 +35,17 @@ from __future__ import annotations
 import numpy as np
 from vispy.color import Color
 
-from ..surfaces.profile import AsphereProfile
+from ..elements import BeamSplitter, Lens, Mirror, Prism, Sensor, Stop
+from ..geometry.apertures import Annulus, Aperture, Circle, Rectangle
+from ..geometry.surfaces import Plane
+from ..geometry.transforms import Pose
+from .bodies import element_outline, index_color, medium_index, system_extent
 from .plots import DEFAULT_MATERIAL_COLORS
 
 TWO_PI = 2.0 * np.pi
 MIRROR_COLOR = (0.62, 0.66, 0.72, 1.0)
+STOP_COLOR = (0.18, 0.18, 0.20, 1.0)
+SENSOR_COLOR = (0.85, 0.72, 0.30, 1.0)
 # Glass uses standard alpha translucency: stacked surfaces get DENSER (as real
 # glass does), never brighter. Safe now that the depth-mask clear bug is fixed.
 # Light (the beam modes) is what adds; glass is not.
@@ -90,12 +113,13 @@ def _angles(angle_range, n):
     return np.linspace(a0, a1, n, endpoint=not closed), closed
 
 
-def _ring_grid(profile, radii, angles, vertex_z):
-    sag = profile.sag(radii)
+def _ring_grid(surface, radii, angles, z_offset=0.0):
+    """Local points of *surface* on a polar grid: rings of *radii* (outer index) by *angles*."""
+
     rr, aa = np.meshgrid(radii, angles, indexing="ij")
-    zz = np.repeat(sag[:, None], len(angles), axis=1) + vertex_z
-    return np.column_stack([(rr * np.cos(aa)).ravel(),
-                            (rr * np.sin(aa)).ravel(), zz.ravel()])
+    x, y = rr * np.cos(aa), rr * np.sin(aa)
+    z = z_offset + surface.sag(x, y)
+    return np.column_stack([x.ravel(), y.ravel(), np.asarray(z, dtype=float).ravel()])
 
 
 def _surface_faces(offset, R, A, closed):
@@ -112,27 +136,50 @@ def _surface_faces(offset, R, A, closed):
     return faces
 
 
-def lathe(profile, semidiameter, *, vertex_z=0.0, radial_samples=24,
-          angular_samples=96, inner_radius=0.0, angle_range=(0.0, TWO_PI)):
-    """Revolve a single profile into an (open) triangle mesh over ``angle_range``."""
+def _to_world(vertices: np.ndarray, pose: Pose | None) -> np.ndarray:
+    return vertices if pose is None else pose.to_world(vertices)
+
+
+def lathe(surface, semidiameter, *, pose: Pose | None = None, radial_samples=24,
+          angular_samples=96, inner_radius=0.0, angle_range=(0.0, TWO_PI),
+          aperture: Aperture | None = None):
+    """Mesh one face over a polar grid out to *semidiameter* (an open sheet).
+
+    The grid lives in the face's local frame (``z = s(x, y)``, any surface)
+    and is carried to the world by *pose*. ``inner_radius`` leaves a central
+    hole (an annular mirror, a diaphragm blade); an *aperture* other than a
+    centred circle drops the triangles reaching outside it.
+    """
+
     radii = np.linspace(inner_radius, semidiameter, radial_samples)
     angles, closed = _angles(angle_range, angular_samples)
-    vertices = _ring_grid(profile, radii, angles, vertex_z)
-    faces = _surface_faces(0, radial_samples, len(angles), closed)
-    return vertices.astype(np.float32), np.asarray(faces, dtype=np.int32)
+    vertices = _ring_grid(surface, radii, angles)
+    faces = np.asarray(_surface_faces(0, radial_samples, len(angles), closed), dtype=np.int32)
+    if aperture is not None and not (isinstance(aperture, Circle) and aperture.center == (0.0, 0.0)):
+        inside = aperture.contains(vertices[:, 0], vertices[:, 1], slack=1e-9)
+        faces = faces[inside[faces].all(axis=1)]
+    return _to_world(vertices, pose).astype(np.float32), faces.astype(np.int32)
 
 
-def lathe_solid(front, back, semidiameter, *, z_front, z_back,
-                radial_samples=22, angular_samples=96, angle_range=(0.0, TWO_PI)):
-    """Closed lens body (front + back + rim). If ``angle_range`` < 2π, adds flat
-    cut faces at the two end meridians → a watertight cutaway half-solid."""
+def lathe_solid(front, back, semidiameter, *, thickness, pose: Pose | None = None,
+                back_semidiameter=None, radial_samples=22, angular_samples=96,
+                angle_range=(0.0, TWO_PI)):
+    """Closed lens body: front face, back face at ``z = thickness``, and the rim.
+
+    Each face runs to its own extent (``semidiameter`` for the front,
+    ``back_semidiameter`` — default the same — for the back); the rim joins
+    their outer rings. If ``angle_range`` < 2π, flat cut faces close the two
+    end meridians → a watertight cutaway half-solid. Built in the lens frame
+    and carried to the world by *pose*.
+    """
+
     R = radial_samples
-    radii = np.linspace(0.0, semidiameter, R)
     angles, closed = _angles(angle_range, angular_samples)
     A = len(angles)
+    back_semi = semidiameter if back_semidiameter is None else back_semidiameter
 
-    front_v = _ring_grid(front, radii, angles, z_front)
-    back_v = _ring_grid(back, radii, angles, z_back)
+    front_v = _ring_grid(front, np.linspace(0.0, semidiameter, R), angles)
+    back_v = _ring_grid(back, np.linspace(0.0, back_semi, R), angles, z_offset=thickness)
     vertices = np.vstack([front_v, back_v])
     back_off = R * A
 
@@ -150,13 +197,29 @@ def lathe_solid(front, back, semidiameter, *, z_front, z_back,
                 f0, f1 = i * A + c, (i + 1) * A + c
                 b0, b1 = back_off + i * A + c, back_off + (i + 1) * A + c
                 faces += [[f0, f1, b0], [f1, b1, b0]]
-    return vertices.astype(np.float32), np.asarray(faces, dtype=np.int32)
+    return _to_world(vertices, pose).astype(np.float32), np.asarray(faces, dtype=np.int32)
 
 
-def _material_color(material, alpha=1.0):
-    # bright face tone: additive layers build a luminous crystal glow while the
-    # hue keeps the media distinguishable (SIO2 blue / CAF2 green / HIINDEX amber)
-    entry = DEFAULT_MATERIAL_COLORS.get(material, ("#c9c9c9", "#8a8a8a"))
+def _rectangle_sheet(surface, rect: Rectangle, pose: Pose | None, samples: int = 12):
+    """A face over a rectangular aperture, as a grid of quads."""
+
+    cx, cy = rect.center
+    x = np.linspace(cx - rect.width / 2, cx + rect.width / 2, samples)
+    y = np.linspace(cy - rect.height / 2, cy + rect.height / 2, samples)
+    xx, yy = np.meshgrid(x, y, indexing="ij")
+    vertices = np.column_stack([xx.ravel(), yy.ravel(), np.asarray(surface.sag(xx, yy)).ravel()])
+    faces = np.asarray(_surface_faces(0, samples, samples, False), dtype=np.int32)
+    return _to_world(vertices, pose).astype(np.float32), faces
+
+
+def _material_color(material, alpha=1.0, wavelength_um=None):
+    """Glass tone: a name-keyed palette entry (SIO2 blue / CAF2 green / ...), else by index."""
+
+    name = (getattr(material, "name", material) or "")
+    entry = DEFAULT_MATERIAL_COLORS.get(str(name).upper())
+    if entry is None and not isinstance(material, str):
+        entry = index_color(medium_index(material, wavelength_um))
+    entry = entry or ("#c9c9c9", "#8a8a8a")
     r, g, b = Color(entry[0]).rgb
     return (float(r), float(g), float(b), alpha)
 
@@ -475,46 +538,68 @@ class Viewer3D:
         self._bounds.append(vertices)
         return mesh
 
-    def add_lens(self, front, back, semidiameter, *, z_front, z_back, color,
-                 section="full", style="glass"):
+    def add_lens(self, lens: Lens, pose: Pose | None = None, *, color=None,
+                 section="full", style="glass", wavelength_um=None):
+        """A lens body at its world *pose* (default: its own pose)."""
+
+        pose = lens.pose if pose is None else pose
+        _, (e_front, e_back), _ = element_outline(lens, Pose())  # radial extents, Ω-joined
         rng = (0.0, np.pi) if section == "half" else (0.0, TWO_PI)
-        v, f = lathe_solid(front, back, semidiameter, z_front=z_front, z_back=z_back,
-                           angle_range=rng)
+        v, f = lathe_solid(lens.front.surface, lens.back.surface, e_front, thickness=lens.thickness,
+                           back_semidiameter=e_back, pose=pose, angle_range=rng)
+        color = color if color is not None else _material_color(lens.material, wavelength_um=wavelength_um)
         self._add_mesh(v, f, color, style=style)
 
-    def add_surface(self, profile, semidiameter, *, vertex_z, color, section="full",
-                    angular_samples=96, style="opaque"):
+    def add_surface(self, surface, aperture, *, pose: Pose | None = None, color,
+                    section="full", angular_samples=96, style="opaque", hole=None):
+        """One face over its *aperture* (a radius or an aperture), placed by *pose*."""
+
+        aperture = Aperture.coerce(aperture)
+        if isinstance(aperture, Rectangle) and hole is None:
+            v, f = _rectangle_sheet(surface, aperture, pose)
+            self._add_mesh(v, f, color, style=style)
+            return
+        inner = 0.0
+        if isinstance(aperture, Annulus):
+            inner = aperture.inner
+        if hole is not None:
+            inner = max(inner, Aperture.coerce(hole).extent)
         rng = (0.0, np.pi) if section == "half" else (0.0, TWO_PI)
-        v, f = lathe(profile, semidiameter, vertex_z=vertex_z,
-                     angular_samples=angular_samples, angle_range=rng)
+        v, f = lathe(surface, aperture.extent, pose=pose, inner_radius=inner,
+                     angular_samples=angular_samples, angle_range=rng, aperture=aperture)
         self._add_mesh(v, f, color, style=style)
 
-    def add_system(self, system, *, section="full", angular_samples: int = 64) -> None:
-        """Render lens elements (coloured by material) + mirrors as full closed
-        solids by default; ``section='half'`` gives a cutaway."""
-        from ..design.rows import SurfaceKind
+    def add_system(self, system, *, section="full", angular_samples: int = 64,
+                   wavelength_um: float | None = None) -> None:
+        """Every element of *system* at its world pose: lenses coloured by
+        material, mirrors opaque, beam splitters glassy, blades dark, sensors
+        dim. Closed solids by default; ``section='half'`` gives a cutaway."""
 
-        covered: set[int] = set()
-        for i, j, material in system.solid_elements():
-            ri, rj = system.rows[i], system.rows[j]
-            semi = max(ri.semidiameter or 50.0, rj.semidiameter or 50.0)
-            self.add_lens(ri.profile, rj.profile, semi,
-                          z_front=float(system.vertices[i]), z_back=float(system.vertices[j]),
-                          color=_material_color(material), section=section)
-            covered.update((i, j))
-        for i in system.mirror_indices:
-            row = system.rows[i]
-            self.add_surface(row.profile, row.semidiameter or 50.0,
-                             vertex_z=float(system.vertices[i]), color=MIRROR_COLOR,
-                             section=section, angular_samples=angular_samples)
-            covered.add(i)
-        for i, row in enumerate(system.rows):
-            if i in covered or row.kind is not SurfaceKind.REFRACT:
-                continue
-            self.add_surface(row.profile, row.semidiameter or 50.0,
-                             vertex_z=float(system.vertices[i]),
-                             color=_material_color("SIO2"), section=section,
-                             style="glass")
+        scale = system_extent(system)
+        for element, pose in system.walk():
+            if isinstance(element, Lens):
+                self.add_lens(element, pose, section=section, wavelength_um=wavelength_um)
+            elif isinstance(element, Mirror):
+                self.add_surface(element.surface, element.aperture, pose=pose, color=MIRROR_COLOR,
+                                 section=section, angular_samples=angular_samples)
+            elif isinstance(element, BeamSplitter):
+                self.add_surface(element.interface.surface, element.aperture, pose=pose,
+                                 color=_material_color("SIO2"), section=section, style="glass")
+            elif isinstance(element, Stop) and not element.virtual:
+                self.add_surface(Plane(), element.outer_radius, pose=pose, color=STOP_COLOR,
+                                 section=section, angular_samples=angular_samples, hole=element.aperture)
+            elif isinstance(element, Sensor):
+                aperture = element.aperture if element.aperture is not None else Circle(scale)
+                self.add_surface(element.surface, aperture, pose=pose, color=SENSOR_COLOR,
+                                 section=section, angular_samples=angular_samples)
+            elif isinstance(element, Prism):
+                for facet_pose, outline in element.solid.facets():
+                    corners = np.asarray(outline.vertices, dtype=float)
+                    local = np.column_stack([corners, np.zeros(len(corners))])
+                    v = (pose @ facet_pose).to_world(local).astype(np.float32)
+                    k = np.arange(1, len(corners) - 1)
+                    f = np.column_stack([np.zeros_like(k), k, k + 1]).astype(np.int32)
+                    self._add_mesh(v, f, _material_color(element.material, wavelength_um=wavelength_um), style="glass")
 
     # -- rays ------------------------------------------------------------
     def add_paths(self, paths, *, color=None, width: float = 1.4,
@@ -561,6 +646,49 @@ class Viewer3D:
         self._ray_groups.setdefault(group, []).append(line)
         self._bounds.append(positions)
 
+    def add_tree(self, tree, *, color=None, width: float = 1.0, group: str = "lines",
+                 additive: bool = False, select: np.ndarray | None = None,
+                 escape_length: float | None = None) -> None:
+        """Add the segments of a non-sequential :class:`~raytracer.tracing.RayTree`.
+
+        ``color`` is one RGBA for every segment, an ``(M, 4)`` array, or
+        ``None`` for the first ray colour with alpha scaled by power. Rays
+        that left the system are cut to ``escape_length`` mm when given;
+        ``select`` is an optional boolean mask of segments to draw.
+        """
+
+        n = len(tree)
+        if n == 0:
+            return
+        start = np.asarray(tree.start, dtype=float)
+        end = np.asarray(tree.end, dtype=float)
+        if escape_length is not None:
+            escaped = np.asarray(tree.escaped, dtype=bool)
+            end = np.where(escaped[:, None], start + float(escape_length) * tree.direction, end)
+        keep = np.ones(n, dtype=bool) if select is None else np.asarray(select, dtype=bool)
+        if color is None:
+            power = np.asarray(tree.power, dtype=float)
+            peak = power.max() if power.size and power.max() > 0 else 1.0
+            rgba = np.tile(np.asarray(RAY_COLORS[0], dtype=float), (n, 1))
+            rgba[:, 3] = np.clip(RAY_COLORS[0][3] * power / peak, 0.03, 1.0)
+        else:
+            rgba = np.asarray(color, dtype=float)
+            rgba = np.tile(rgba, (n, 1)) if rgba.ndim == 1 else rgba
+        positions = np.stack([start[keep], end[keep]], axis=1).reshape(-1, 3).astype(np.float32)
+        colors = np.repeat(rgba[keep], 2, axis=0).astype(np.float32)
+        if positions.shape[0] == 0:
+            return
+        line = self._scene.visuals.Line(pos=positions, connect="segments", color=colors, width=width,
+                                        parent=self.view.scene, method="gl", antialias=True)
+        if additive:
+            line.set_gl_state(blend=True, depth_test=True, depth_mask=False, blend_func=("one", "one"))
+        else:
+            line.set_gl_state(blend=True, depth_test=True)
+        line.order = ORDER_RAYS
+        line.visible = group == self._ray_mode
+        self._ray_groups.setdefault(group, []).append(line)
+        self._bounds.append(positions)
+
     def add_field_bundles(self, tracer, fields, *, na_object_sine, radial=6, azimuth=32,
                           stop_index=None, mode: str = "lines",
                           wavelength_nm: float | None = None,
@@ -579,12 +707,12 @@ class Viewer3D:
             different wavelengths overlap, colors sum colorimetrically
             (CIE 1931 -> linear sRGB, as in diffractsim) -> white at the image.
         """
-        from ..propagation.fields import FieldPoint, PupilSampling, trace_pupil
+        from ..tracing import FieldPoint, PupilSampling, trace_pupil
 
         if beam:  # backward-compat flag
             mode = "beam"
         if mode == "beam" and wavelength_nm is None:
-            wavelength_nm = float(getattr(tracer.system, "wavelength_um", 0.55)) * 1e3
+            wavelength_nm = float(tracer.wavelength_um if tracer.wavelength_um is not None else 0.55) * 1e3
         if mode == "spectrum" and wavelengths_nm is None:
             wavelengths_nm = (633.0, 532.0, 473.0)
 

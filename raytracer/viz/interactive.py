@@ -1,14 +1,23 @@
-"""Interactive editing: drag sources/elements and tune parameters live.
+"""Interactive editing: drag sources and elements, tune parameters live.
 
 The model layer (:class:`Parameter`, :class:`Handle`, adapters, and
 :class:`InteractiveSession`) is toolkit-agnostic and fully testable headless;
 the GL front end wires it to mouse/keyboard events on the OpenGL viewer:
 
-- **drag** a handle (source origin, lens vertex, screen endpoint) to move it;
+- **drag** a handle (a source's origin, a lens or mirror vertex, a sensor's
+  end points) to move it in the drawing plane ``(z, y)``;
 - **Tab** cycles the editable parameters; **←/→** adjust the active one
   (Shift for coarse steps); the window title shows the live value;
-- every edit retraces the scene (a 2-D trace of hundreds of rays takes
-  milliseconds) and refreshes the display in place.
+- every edit retraces the system with the
+  :class:`~raytracer.tracing.NonSequentialTracer` (a meridional fan of a few
+  hundred rays takes milliseconds) and refreshes the display in place.
+
+Elements and systems are immutable values, so an edit never mutates them:
+it rebuilds the element (``element.replace(...)`` / ``.placed(pose)``) and
+swaps it into a new :class:`~raytracer.system.OpticalSystem`
+(``system.with_component``), which the session then traces. Element
+editables therefore address their element *by name* through the session;
+sources are plain emitters and are edited in place.
 
 In notebooks, :func:`ipywidgets_panel` builds sliders from the same
 Parameter objects for use with the matplotlib backend.
@@ -17,14 +26,23 @@ Parameter objects for use with the matplotlib backend.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable, Optional, Sequence
 
 import numpy as np
 
-from ..optics.instruments import Screen
-from ..optics.elements import Lens, Mirror
-from ..propagation.branching import BranchingTracer, TraceConfig
-from .scene import Scene
+from ..elements import Lens, Mirror, Sensor
+from ..geometry.apertures import Rectangle
+from ..geometry.surfaces import Conic, Plane, Sphere
+from ..geometry.transforms import Pose, Rotation
+from ..materials import ConstantIndex
+from ..sources import CollimatedSource, PointSource
+from ..system import OpticalSystem
+from ..tracing import NonSequentialTracer
+from .bodies import COLOR_WAVELENGTH_UM, medium_index
+from .scene import Drawing
+
+if TYPE_CHECKING:  # pragma: no cover
+    from ..tracing import RayTree
 
 
 @dataclass
@@ -47,7 +65,7 @@ class Parameter:
 
 @dataclass
 class Handle:
-    """A draggable world-space point."""
+    """A draggable point of the drawing plane, ``(z, y)``."""
 
     label: str
     get: Callable[[], np.ndarray]
@@ -56,7 +74,12 @@ class Handle:
 
 @dataclass
 class Editable:
-    """An object exposed to interaction: its handles and parameters."""
+    """An object exposed to interaction: its handles and parameters.
+
+    ``obj`` is the source itself, or the *name* of an element of the
+    session's system (elements are immutable; the session holds the
+    current one).
+    """
 
     obj: object
     label: str
@@ -64,181 +87,237 @@ class Editable:
     parameters: list[Parameter] = field(default_factory=list)
 
 
+# -- the drawing plane <-> poses ----------------------------------------------
+
+
+def _zy(point3) -> np.ndarray:
+    return np.array([float(point3[2]), float(point3[1])])
+
+
+def _with_zy(point3, zy) -> np.ndarray:
+    return np.array([float(point3[0]), float(zy[1]), float(zy[0])])
+
+
+def tilt_deg(rotation: Rotation) -> float:
+    """Angle of a frame's +z axis in the drawing plane, from +z toward +y (degrees)."""
+
+    axis = rotation.axis
+    return float(np.degrees(np.arctan2(axis[1], axis[2])))
+
+
+def tilt_rotation(angle_deg: float) -> Rotation:
+    """The rotation about x that turns +z by *angle_deg* toward +y."""
+
+    return Rotation.axis_angle((1.0, 0.0, 0.0), -float(angle_deg))
+
+
+def _with_radius(surface, radius: float):
+    """The same conic family with a new vertex radius (``inf`` is a plane)."""
+
+    if not np.isfinite(radius) or radius == 0.0:
+        return Plane()
+    if isinstance(surface, Sphere) or isinstance(surface, Plane):
+        return Sphere(radius)
+    return Conic(radius, surface.k).classify()
+
+
+def _sensor_pose_from_segment(p0, p1) -> tuple[Pose, float]:
+    """Pose (centre, local +y along p0→p1, local x = world x) and length of a drawn segment."""
+
+    a = np.array([0.0, float(p0[1]), float(p0[0])])
+    b = np.array([0.0, float(p1[1]), float(p1[0])])
+    span = b - a
+    length = float(np.linalg.norm(span))
+    if length == 0.0:
+        raise ValueError("a sensor segment has two distinct end points")
+    e_y = span / length
+    e_x = np.array([1.0, 0.0, 0.0])
+    e_z = np.cross(e_x, e_y)
+    return Pose(0.5 * (a + b), Rotation(np.column_stack([e_x, e_y, e_z]))), length
+
+
+def _sensor_ends(sensor: Sensor, pose: Pose) -> tuple[np.ndarray, np.ndarray]:
+    half = sensor.aperture.height / 2 if isinstance(sensor.aperture, Rectangle) else (
+        sensor.aperture.extent if sensor.aperture is not None else 10.0
+    )
+    p0 = pose.to_world(np.array([0.0, -half, 0.0]))
+    p1 = pose.to_world(np.array([0.0, half, 0.0]))
+    return _zy(p0), _zy(p1)
+
+
 # -- adapters -----------------------------------------------------------------
 
 
-def _rebuild_lens(lens: Lens, **overrides) -> None:
-    """Rebuild a lens in place from its current geometry plus overrides."""
-
-    front = lens.front
-    back = lens.back
-    axis = np.array([np.cos(front.angle), np.sin(front.angle)])
-    current = {
-        "r1": front.profile.radius,
-        "r2": back.profile.radius,
-        "thickness": float((back.vertex - front.vertex) @ axis),
-        "semidiameter": front.semidiameter,
-        "n": front.n_interior,
-        "n_ambient": front.n_exterior,
-        "vertex": front.vertex.copy(),
-        "angle": front.angle,
-        "name": lens.name,
-    }
-    current.update(overrides)
-    rebuilt = Lens.from_radii(**current)
-    lens.front = rebuilt.front
-    lens.back = rebuilt.back
-    lens.rims = rebuilt.rims
-
-
-def editable_for(obj) -> Editable:
-    """Build the default Editable wrapper for a known scene object."""
-
-    from ..optics.sources import ParallelSource, PointSource
-
+def _source_editable(obj) -> Editable:
     if isinstance(obj, PointSource):
+
         def move(p, o=obj):
-            o.origin = np.asarray(p, dtype=float)
+            o.position = _with_zy(o.position, p)
 
         def set_angle(v, o=obj):
-            o.axis_direction = np.array([np.cos(v), np.sin(v)])
+            o.direction = tilt_rotation(v).apply(np.array([0.0, 0.0, 1.0]))
 
         return Editable(
             obj=obj,
             label="source",
-            handles=[Handle("origin", lambda o=obj: np.asarray(o.origin), move)],
+            handles=[Handle("origin", lambda o=obj: _zy(o.position), move)],
             parameters=[
                 Parameter(
-                    "aperture_deg",
-                    lambda o=obj: float(np.rad2deg(o.aperture)),
-                    lambda v, o=obj: setattr(o, "aperture", float(np.deg2rad(v))),
-                    1.0, 178.0, 1.0,
+                    "half_angle_deg",
+                    lambda o=obj: float(o.half_angle_deg),
+                    lambda v, o=obj: setattr(o, "half_angle_deg", float(v)),
+                    0.5, 89.0, 0.5,
                 ),
                 Parameter(
                     "axis_angle_deg",
-                    lambda o=obj: float(
-                        np.rad2deg(np.arctan2(o.axis_direction[1], o.axis_direction[0]))
-                    ),
-                    lambda v, o=obj: set_angle(np.deg2rad(v)),
+                    lambda o=obj: float(np.degrees(np.arctan2(o.direction[1], o.direction[2]))),
+                    set_angle,
                     -180.0, 180.0, 1.0,
                 ),
                 Parameter(
-                    "samples",
-                    lambda o=obj: float(o.samples),
-                    lambda v, o=obj: setattr(o, "samples", max(3, int(round(v)))),
+                    "rays",
+                    lambda o=obj: float(o.rays),
+                    lambda v, o=obj: setattr(o, "rays", max(3, int(round(v)))),
                     3, 5000, 10,
                 ),
             ],
         )
 
-    if isinstance(obj, ParallelSource):
+    if isinstance(obj, CollimatedSource):
+
         def move(p, o=obj):
-            o.origin = np.asarray(p, dtype=float)
+            o.origin = _with_zy(o.origin, p)
 
         return Editable(
             obj=obj,
             label="beam",
-            handles=[Handle("origin", lambda o=obj: np.asarray(o.origin), move)],
+            handles=[Handle("origin", lambda o=obj: _zy(o.origin), move)],
             parameters=[
                 Parameter(
-                    "width",
-                    lambda o=obj: float(o.width),
-                    lambda v, o=obj: setattr(o, "width", float(v)),
-                    0.1, 500.0, 0.5,
+                    "beam_radius",
+                    lambda o=obj: float(o.beam_radius),
+                    lambda v, o=obj: setattr(o, "beam_radius", float(v)),
+                    0.05, 250.0, 0.25,
                 ),
             ],
         )
+    raise TypeError(f"No editable adapter for {type(obj).__name__}")
 
-    if isinstance(obj, Lens):
-        def move(p, lens=obj):
-            _rebuild_lens(lens, vertex=np.asarray(p, dtype=float))
 
-        return Editable(
-            obj=obj,
-            label=obj.name,
-            handles=[
-                Handle("vertex", lambda lens=obj: lens.front.vertex.copy(), move)
-            ],
-            parameters=[
-                Parameter(
-                    "r1",
-                    lambda lens=obj: lens.front.profile.radius,
-                    lambda v, lens=obj: _rebuild_lens(lens, r1=float(v)),
-                    -1000.0, 1000.0, 1.0,
-                ),
-                Parameter(
-                    "r2",
-                    lambda lens=obj: lens.back.profile.radius,
-                    lambda v, lens=obj: _rebuild_lens(lens, r2=float(v)),
-                    -1000.0, 1000.0, 1.0,
-                ),
-                Parameter(
-                    "thickness",
-                    lambda lens=obj: float(
-                        (lens.back.vertex - lens.front.vertex)
-                        @ np.array([np.cos(lens.front.angle), np.sin(lens.front.angle)])
-                    ),
-                    lambda v, lens=obj: _rebuild_lens(lens, thickness=max(0.1, float(v))),
-                    0.1, 100.0, 0.5,
-                ),
-                Parameter(
-                    "n",
-                    lambda lens=obj: lens.front.n_interior,
-                    lambda v, lens=obj: _rebuild_lens(lens, n=float(v)),
-                    1.0, 3.0, 0.01,
-                ),
-                Parameter(
-                    "angle_deg",
-                    lambda lens=obj: float(np.rad2deg(lens.front.angle)),
-                    lambda v, lens=obj: _rebuild_lens(lens, angle=float(np.deg2rad(v))),
-                    -90.0, 90.0, 1.0,
-                ),
-            ],
-        )
+def _element_editable(element, session: "InteractiveSession") -> Editable:
+    name = element.name
 
-    if isinstance(obj, Mirror):
-        def move(p, m=obj):
-            m.face.vertex = np.asarray(p, dtype=float)
-            m.face.__post_init__()
+    def current():
+        return session.system[name]
 
-        def set_radius(v, m=obj):
-            from ..surfaces.profile import AsphereProfile
+    def world_pose() -> Pose:
+        return session.system.pose_of(name)
 
-            m.face.profile = AsphereProfile.from_radius(
-                float(v), m.face.profile.conic, m.face.profile.coefficients
-            )
+    def place(world: Pose) -> None:
+        session.place(name, world)
 
-        return Editable(
-            obj=obj,
-            label=obj.name,
-            handles=[Handle("vertex", lambda m=obj: m.face.vertex.copy(), move)],
-            parameters=[
+    def change(**kwargs) -> None:
+        session.replace_element(name, current().replace(**kwargs))
+
+    def move_vertex(p) -> None:
+        pose = world_pose()
+        place(Pose(_with_zy(pose.position, p), pose.rotation))
+
+    def set_tilt(v) -> None:
+        pose = world_pose()
+        place(Pose(pose.position, tilt_rotation(v)))
+
+    tilt = Parameter("angle_deg", lambda: tilt_deg(world_pose().rotation), set_tilt, -180.0, 180.0, 1.0)
+    vertex = Handle("vertex", lambda: _zy(world_pose().position), move_vertex)
+
+    if isinstance(element, Lens):
+        parameters = []
+        for side in ("front", "back"):
+            if isinstance(getattr(element, side).surface, Conic):
+                parameters.append(
+                    Parameter(
+                        "r1" if side == "front" else "r2",
+                        lambda side=side: float(getattr(current(), side).surface.radius),
+                        lambda v, side=side: change(
+                            **{side: getattr(current(), side).replace(surface=_with_radius(getattr(current(), side).surface, v))}
+                        ),
+                        -1000.0, 1000.0, 1.0,
+                    )
+                )
+        parameters += [
+            Parameter(
+                "thickness",
+                lambda: float(current().thickness),
+                lambda v: change(thickness=max(0.1, float(v))),
+                0.1, 100.0, 0.5,
+            ),
+            Parameter(
+                "n",
+                lambda: medium_index(current().material, session.wavelength_um),
+                lambda v: change(material=ConstantIndex(getattr(current().material, "name", "glass"), float(v))),
+                1.0, 3.0, 0.01,
+            ),
+            tilt,
+        ]
+        return Editable(obj=name, label=name, handles=[vertex], parameters=parameters)
+
+    if isinstance(element, Mirror):
+        parameters = []
+        if isinstance(element.surface, Conic):
+            parameters.append(
                 Parameter(
                     "radius",
-                    lambda m=obj: m.face.profile.radius,
-                    set_radius,
+                    lambda: float(current().surface.radius),
+                    lambda v: change(surface=current().interface.replace(surface=_with_radius(current().surface, v))),
                     -2000.0, 2000.0, 5.0,
-                ),
-            ],
-        )
+                )
+            )
+        parameters.append(tilt)
+        return Editable(obj=name, label=name, handles=[vertex], parameters=parameters)
 
-    if isinstance(obj, Screen):
-        def move0(p, s=obj):
-            s.p0 = np.asarray(p, dtype=float)
+    if isinstance(element, Sensor):
 
-        def move1(p, s=obj):
-            s.p1 = np.asarray(p, dtype=float)
+        def end(k):
+            return _sensor_ends(current(), world_pose())[k]
+
+        def move_end(k, p) -> None:
+            ends = list(_sensor_ends(current(), world_pose()))
+            ends[k] = np.asarray(p, dtype=float)
+            pose, length = _sensor_pose_from_segment(*ends)
+            sensor = current()
+            width = sensor.aperture.width if isinstance(sensor.aperture, Rectangle) else length
+            session.replace_element(name, sensor.replace(aperture=Rectangle(width, length)), world=pose)
 
         return Editable(
-            obj=obj,
-            label="screen",
+            obj=name,
+            label=name,
             handles=[
-                Handle("p0", lambda s=obj: s.p0.copy(), move0),
-                Handle("p1", lambda s=obj: s.p1.copy(), move1),
+                Handle("p0", lambda: end(0), lambda p: move_end(0, p)),
+                Handle("p1", lambda: end(1), lambda p: move_end(1, p)),
             ],
             parameters=[],
         )
+    raise TypeError(f"No editable adapter for {type(element).__name__}")
 
+
+def editable_for(obj, session: "InteractiveSession | None" = None) -> Editable:
+    """Build the default Editable for a source, or for an element of *session*'s system.
+
+    Sources (:class:`~raytracer.sources.PointSource`,
+    :class:`~raytracer.sources.CollimatedSource`) are edited in place.
+    Elements (:class:`~raytracer.elements.Lens`, :class:`~raytracer.elements.Mirror`,
+    :class:`~raytracer.elements.Sensor`, or an element's name) need the
+    *session* whose system they belong to: every edit rebuilds the element
+    and the system.
+    """
+
+    if isinstance(obj, (PointSource, CollimatedSource)):
+        return _source_editable(obj)
+    if session is not None and isinstance(obj, (str, Lens, Mirror, Sensor)):
+        element = session.system[obj] if isinstance(obj, str) else obj
+        return _element_editable(element, session)
+    if isinstance(obj, (Lens, Mirror, Sensor)):
+        raise TypeError(f"editing {type(obj).__name__} {obj.name!r} needs the session that holds its system")
     raise TypeError(f"No editable adapter for {type(obj).__name__}")
 
 
@@ -246,64 +325,90 @@ def editable_for(obj) -> Editable:
 
 
 class InteractiveSession:
-    """Editable optical scene with live retrace.
+    """An editable optical system with live non-sequential retrace.
 
-    The session owns sources, elements (lenses/mirrors/raw surfaces), and
-    screens; ``retrace()`` rebuilds the ray tree and the neutral Scene.
-    Attach a display with ``run()`` (OpenGL) or drive it headless/from
-    widgets by calling ``retrace()`` after edits.
+    The session owns the sources and the current
+    :class:`~raytracer.system.OpticalSystem`; every edit replaces the system
+    with a rebuilt one. ``retrace()`` traces the sources through it with a
+    :class:`~raytracer.tracing.NonSequentialTracer` (``split=False``
+    follows the one branch a sequential trace would take — refraction
+    through glass, reflection off mirrors — the clean picture for drawing;
+    ``split=True`` follows every Fresnel branch) and rebuilds the neutral
+    :class:`~raytracer.viz.scene.Drawing`. Attach a display with ``run()``
+    (OpenGL) or drive it headless / from widgets by calling ``retrace()``
+    after edits. Sources are best given a meridional fan (``fan="y"``);
+    ``wavelength_um`` is where dispersive media are evaluated for rays
+    whose source names no wavelength (the d line by default).
     """
 
     def __init__(
         self,
         *,
         sources: Sequence,
-        elements: Sequence = (),
-        screens: Sequence[Screen] = (),
-        trace_config: TraceConfig | None = None,
+        system: OpticalSystem,
+        split: bool = False,
+        max_interactions: int = 6,
+        wavelength_um: float | None = None,
         editables: Optional[Iterable[Editable]] = None,
-        on_update: Optional[Callable[[Scene], None]] = None,
+        on_update: Optional[Callable[[Drawing], None]] = None,
     ) -> None:
         self.sources = list(sources)
-        self.elements = list(elements)
-        self.screens = list(screens)
-        self.trace_config = trace_config or TraceConfig(max_generations=6)
+        self.system = system
+        self.split = bool(split)
+        self.max_interactions = int(max_interactions)
+        self.wavelength_um = wavelength_um
         self.on_update = on_update
         if editables is None:
-            editables = [
-                editable_for(obj)
-                for obj in (*self.sources, *self.elements, *self.screens)
+            editables = [editable_for(source) for source in self.sources]
+            editables += [
+                editable_for(element.name, self)
+                for element in system.elements
+                if isinstance(element, (Lens, Mirror, Sensor))
             ]
         self.editables = list(editables)
-        self.scene: Scene | None = None
-        self.tree = None
+        self.drawing: Drawing | None = None
+        self.tree: "RayTree | None" = None
         self._selection = 0  # flat index over (editable, parameter) pairs
+
+    # -- editing the system ------------------------------------------------
+
+    def replace_element(self, name: str, element, *, world: Pose | None = None) -> None:
+        """Swap element *name* for *element* (at world pose *world* when given)."""
+
+        if world is not None:
+            parent = self.system.pose_of(name) @ self.system[name].pose.inverse()
+            element = element.placed(parent.inverse() @ world)
+        self.system = self.system.with_component(name, element)
+
+    def place(self, name: str, world: Pose) -> None:
+        """Move element *name* to the world pose *world* (its assembly, if any, stays put)."""
+
+        self.replace_element(name, self.system[name], world=world)
 
     # -- tracing ---------------------------------------------------------
 
-    def _surfaces(self):
-        surfaces = []
-        for element in self.elements:
-            if hasattr(element, "surfaces"):
-                surfaces.extend(element.surfaces())
-            else:
-                surfaces.append(element)
-        surfaces.extend(self.screens)
-        return surfaces
+    def tracer(self) -> NonSequentialTracer:
+        return NonSequentialTracer(
+            self.system,
+            wavelength_um=self.wavelength_um if self.wavelength_um is not None else COLOR_WAVELENGTH_UM,
+            split=self.split,
+            max_interactions=self.max_interactions,
+        )
 
-    def retrace(self) -> Scene:
-        for screen in self.screens:
-            screen.clear()
-        tracer = BranchingTracer(self._surfaces(), self.trace_config)
-        self.tree = tracer.trace(self.sources)
+    def hits(self, sensor: str):
+        """What *sensor* recorded in the last trace (``None`` when nothing reached it)."""
 
-        scene = Scene()
-        scene.add_elements([*self.elements, *self.screens])
-        scene.add_tree(self.tree, intensity_resolver=lambda n: n.intensity)
-        self.scene = scene
+        return None if self.tree is None else self.tree.detectors.get(sensor)
+
+    def retrace(self) -> Drawing:
+        self.tree = self.tracer().trace(self.sources)
+        drawing = Drawing()
+        drawing.add_system(self.system, wavelength_um=self.wavelength_um, tree=self.tree)
+        drawing.add_tree(self.tree)
+        self.drawing = drawing
         if self.on_update is not None:
-            self.on_update(scene)
-        return scene
+            self.on_update(drawing)
+        return drawing
 
     # -- selection / parameters -------------------------------------------
 
@@ -381,7 +486,7 @@ class InteractiveSession:
 
         self.retrace()
         backend = GLBackend(**viewer_kwargs)
-        viewer = backend.render(self.scene)
+        viewer = backend.render(self.drawing)
         base_title = "raytracer interactive"
         viewer.title = f"{base_title} — {self.status()}"
         drag_state: dict = {"handle": None}
@@ -394,7 +499,7 @@ class InteractiveSession:
                 viewer.draw_markers(points, color="cyan", size=9.0)
 
         def full_refresh():
-            backend.update(self.scene)
+            backend.update(self.drawing)
             refresh_handles()
             viewer.title = f"{base_title} — {self.status()}"
 
@@ -472,9 +577,9 @@ def ipywidgets_panel(session: InteractiveSession, *, backend=None):
 
             def _on_change(change, parameter=parameter):
                 parameter.set(change["new"])
-                scene = session.retrace()
+                drawing = session.retrace()
                 if backend is not None:
-                    backend.update(scene)
+                    backend.update(drawing)
                     backend.fig.canvas.draw_idle()
 
             slider.observe(_on_change, names="value")

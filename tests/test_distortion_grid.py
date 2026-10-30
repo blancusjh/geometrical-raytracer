@@ -5,17 +5,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.design import OpticalSystem
-from raytracer.propagation import SequentialTracer, solve_object_plane
 from raytracer.analysis import distortion_grid
+from raytracer.io import read_prescription
+from raytracer.tracing import SequentialTracer, solve_object_plane
 
 CSV = Path(__file__).resolve().parents[1] / "data" / "optical_systems/photographic/cooke_triplet_prescription.csv"
 
 
 @pytest.fixture(scope="module")
 def tracer() -> SequentialTracer:
-    system = OpticalSystem.from_prescription(CSV)
-    return SequentialTracer(system)
+    return read_prescription(CSV).tracer()
 
 
 @pytest.fixture(scope="module")

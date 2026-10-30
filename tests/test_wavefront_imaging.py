@@ -11,20 +11,26 @@ from raytracer.analysis.imaging import (
     scalar_psf,
 )
 from raytracer.analysis.aberrations.wavefront import exit_pupil_wavefront
-from raytracer.optics.materials import AIR, ConstantIndex
-from raytracer.design import OpticalSystem, SurfaceRow
-from raytracer.propagation import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
+from raytracer import OpticalSystem, TableRow
+from raytracer.geometry.surfaces import CartesianSurface, Ellipsoid
+from raytracer.materials import ConstantIndex
+from raytracer.tracing import FieldPoint, PupilSampling, SequentialTracer, trace_pupil
 
 
-def test_eikonal_opd_is_zero_for_stigmatic_conjugates():
+def _ellipsoid_relay(image_offset_mm: float = 0.0) -> SequentialTracer:
+    """Ellipsoidal mirror at z=0: object at the near focus, image plane at the far one."""
+
     a, b = 1000.0, 600.0
     c = np.sqrt(a * a - b * b)
     near, far = -(a - c), -(a + c)
+    rows = [TableRow(Ellipsoid.from_semi_axes(-a, b), far + image_offset_mm, None, 500.0, "mirror")]
+    system = OpticalSystem.from_table(rows)
+    return SequentialTracer(system, object_z=near, restart_offset=0.0)
+
+
+def test_eikonal_opd_is_zero_for_stigmatic_conjugates():
     # Object at the near focus; single mirror at z=0; image plane at far focus.
-    rows = [SurfaceRow.mirror(radius=-(b * b) / a, thickness=far, conic=-((c / a) ** 2))]
-    system = OpticalSystem(rows)
-    system.object_z = near
-    tracer = SequentialTracer(system, restart_offset=0.0)
+    tracer = _ellipsoid_relay()
 
     pupil = trace_pupil(
         tracer,
@@ -44,16 +50,14 @@ def test_eikonal_opd_is_zero_for_stigmatic_conjugates():
 
 
 def test_cartesian_oval_3d_is_stigmatic():
-    """The 3-D GOTS Cartesian oval (SurfaceRow.cartesian_oval) must give OPD ~ 0,
-    same as the 2-D implicit oval it shares its math with."""
+    """The GOTS Cartesian surface must give OPD ~ 0: the implicit Descartes
+    condition it is built from says every path has the same length."""
 
     n0, z0, ni, zi = 1.0, -30.0, 1.7, 10.0
     glass = ConstantIndex("TEST_GLASS", ni)
-    row = SurfaceRow.cartesian_oval(
-        n0=n0, z0=z0, ni=ni, zi=zi, thickness=zi, material=glass, semidiameter=3.0
-    )
-    system = OpticalSystem([row], object_space=AIR, object_z=z0)
-    tracer = SequentialTracer(system, restart_offset=0.0)
+    row = TableRow(CartesianSurface(n0, z0, ni, zi), zi, glass, 3.0)
+    system = OpticalSystem.from_table([row])
+    tracer = SequentialTracer(system, object_z=z0, restart_offset=0.0)
 
     pupil = trace_pupil(
         tracer, FieldPoint(y=0.0), na_object_sine=0.1,
@@ -104,14 +108,8 @@ def test_defocused_reference_sphere_gives_defocus():
 
     from raytracer.analysis.aberrations.zernike import fit_opd
 
-    a, b = 1000.0, 600.0
-    c = np.sqrt(a * a - b * b)
-    near, far = -(a - c), -(a + c)
     defocus_mm = 0.5
-    rows = [SurfaceRow.mirror(radius=-(b * b) / a, thickness=far + defocus_mm, conic=-((c / a) ** 2))]
-    system = OpticalSystem(rows)
-    system.object_z = near
-    tracer = SequentialTracer(system, restart_offset=0.0)
+    tracer = _ellipsoid_relay(defocus_mm)
 
     pupil = trace_pupil(
         tracer, FieldPoint(y=0.0), na_object_sine=0.15,

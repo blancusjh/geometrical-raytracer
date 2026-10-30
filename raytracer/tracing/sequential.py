@@ -234,7 +234,10 @@ class SequentialTracer:
             t = np.where(alive, hits.t, 0.0)
             ql = pl + t[:, None] * dl
 
-            region = face.interface.clear_aperture if step.event == STOP else face.clear_aperture
+            if step.clear_aperture is not None:
+                region = step.clear_aperture
+            else:
+                region = face.interface.clear_aperture if step.event == STOP else face.clear_aperture
             if self.clip_apertures and region is not None:
                 fail(~region.contains(ql[:, 0], ql[:, 1], slack=self.aperture_slack), TraceStatus.VIGNETTED, i)
 

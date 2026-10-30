@@ -1,4 +1,7 @@
-"""Matplotlib backend for the neutral 2-D scene (publication-style)."""
+"""Matplotlib backend for the neutral 2-D drawing (publication-style).
+
+Drawing coordinates are ``(z, y)``: the optical axis runs horizontally.
+"""
 
 from __future__ import annotations
 
@@ -8,17 +11,17 @@ from matplotlib.collections import LineCollection
 from matplotlib.patches import Polygon
 
 from .scene import (
+    Drawing,
     LensBodyItem,
     MarkerItem,
     RaySegmentsItem,
-    Scene,
-    ScreenItem,
+    SensorItem,
     SurfaceItem,
 )
 
 
 class MplBackend:
-    """Renders a :class:`Scene` into a matplotlib figure.
+    """Renders a :class:`~raytracer.viz.scene.Drawing` into a matplotlib figure.
 
     Ray intensity maps to line alpha (normalized to the brightest ray), so a
     few hundred rays stay readable; for dense caustic fields use the OpenGL
@@ -30,30 +33,30 @@ class MplBackend:
         *,
         figsize: tuple[float, float] = (11, 7),
         background: str = "white",
-        show_screen_hits: bool = True,
+        show_sensor_hits: bool = True,
     ) -> None:
         self.figsize = figsize
         self.background = background
-        self.show_screen_hits = show_screen_hits
+        self.show_sensor_hits = show_sensor_hits
         self.fig = None
         self.ax = None
 
-    def render(self, scene: Scene):
+    def render(self, drawing: Drawing):
         self.fig, self.ax = plt.subplots(figsize=self.figsize)
         self.fig.patch.set_facecolor(self.background)
         self.ax.set_facecolor(self.background)
-        self.update(scene)
+        self.update(drawing)
         return self.fig
 
-    def update(self, scene: Scene):
+    def update(self, drawing: Drawing):
         ax = self.ax
         ax.clear()
-        x_lims, y_lims = scene.bounds()
+        x_lims, y_lims = drawing.bounds()
         reach = 2.0 * max(
             x_lims[1] - x_lims[0], y_lims[1] - y_lims[0]
         )
 
-        for item in scene.items:
+        for item in drawing.items:
             if isinstance(item, RaySegmentsItem):
                 segments = item.segments.copy()
                 if item.escaping.any():
@@ -93,18 +96,17 @@ class MplBackend:
                         zorder=1,
                     )
                 )
-            elif isinstance(item, ScreenItem):
+            elif isinstance(item, SensorItem):
                 ax.plot(
-                    [item.p0[0], item.p1[0]],
-                    [item.p0[1], item.p1[1]],
+                    item.polyline[:, 0],
+                    item.polyline[:, 1],
                     color=self._vis_color(item.color),
                     lw=item.width,
                     zorder=4,
                 )
-                if self.show_screen_hits and item.screen is not None and item.screen.hits:
-                    points = np.array([hit.point for hit in item.screen.hits])
+                if self.show_sensor_hits and item.hits is not None and len(item.hits):
                     ax.scatter(
-                        points[:, 0], points[:, 1], s=6, color="#d62728", zorder=5
+                        item.hits[:, 0], item.hits[:, 1], s=6, color="#d62728", zorder=5
                     )
             elif isinstance(item, MarkerItem):
                 ax.scatter(
@@ -119,7 +121,7 @@ class MplBackend:
         ax.set_ylim(*y_lims)
         ax.set_aspect("equal")
         ax.grid(alpha=0.15)
-        ax.set_xlabel("x (mm)")
+        ax.set_xlabel("z (mm)")
         ax.set_ylabel("y (mm)")
         return self.fig
 

@@ -12,8 +12,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.design import OpticalSystem
-from raytracer.propagation import (
+from raytracer.io import read_prescription
+from raytracer.system import OpticalSystem
+from raytracer.tracing import (
     FieldPoint,
     ParaxialModel,
     SequentialTracer,
@@ -26,26 +27,33 @@ CSV = Path(__file__).resolve().parents[1] / "data" / "optical_systems/photograph
 
 
 @pytest.fixture(scope="module")
-def system() -> OpticalSystem:
-    return OpticalSystem.from_prescription(CSV)
+def prescription():
+    return read_prescription(CSV)
 
 
 @pytest.fixture(scope="module")
-def tracer(system) -> SequentialTracer:
-    return SequentialTracer(system)
+def system(prescription) -> OpticalSystem:
+    return prescription.system
 
 
-def test_prescription_loads(system):
-    assert len(system) == 9
+@pytest.fixture(scope="module")
+def tracer(prescription) -> SequentialTracer:
+    return prescription.tracer()
+
+
+def test_prescription_loads(system, tracer):
+    # 9 surfaces, then the image plane: the path has 10 steps.
+    assert len(system.path) == 10
+    assert system.stop == "STO"
     assert system.stop_index == 4
-    assert system.mirror_indices == []
-    assert system.image_z == pytest.approx(113.18)
-    assert system.n_image == pytest.approx(1.0)
+    assert [i for i, step in enumerate(system.path) if step.event == "reflect"] == []
+    assert tracer.image_z == pytest.approx(113.18)
+    assert tracer.n_image == pytest.approx(1.0)
 
 
 def test_paraxial_focal_length_in_expected_range(tracer):
     solve_object_plane(tracer)
-    efl = ParaxialModel(tracer.system).effective_focal_length()
+    efl = ParaxialModel(tracer).effective_focal_length()
     # ~100mm class design (rayopt-notebooks reports a 23.348mm optical
     # track and an 89.832mm back focal distance for this prescription).
     assert 90.0 < efl < 110.0
@@ -53,7 +61,7 @@ def test_paraxial_focal_length_in_expected_range(tracer):
 
 def chief_distortion_ppm(tracer, object_z, stop_index, magnification, angle_deg):
     y = abs(object_z) * np.tan(np.deg2rad(angle_deg))
-    z_stop = tracer.system.vertices[stop_index]
+    z_stop = tracer.step_z(stop_index)
     estimate = -y / (z_stop - object_z)
     slope = chief_ray_slope(
         tracer, FieldPoint(y=y), stop_index=stop_index,
@@ -83,11 +91,10 @@ def test_less_relative_distortion_than_triplet_at_matching_field(tracer):
     """The symmetric stop position should give markedly less distortion
     than the Cooke triplet's asymmetric one, at the same field angle."""
 
-    from raytracer.design import OpticalSystem as _OpticalSystem
-
     triplet_csv = Path(__file__).resolve().parents[1] / "data" / "optical_systems/photographic/cooke_triplet_prescription.csv"
-    triplet_system = _OpticalSystem.from_prescription(triplet_csv)
-    triplet_tracer = SequentialTracer(triplet_system)
+    triplet_prescription = read_prescription(triplet_csv)
+    triplet_system = triplet_prescription.system
+    triplet_tracer = triplet_prescription.tracer()
     triplet_conjugate = solve_object_plane(triplet_tracer)
 
     conjugate = solve_object_plane(tracer)

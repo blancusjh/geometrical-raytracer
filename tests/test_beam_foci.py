@@ -3,9 +3,8 @@
 import numpy as np
 import pytest
 
-from raytracer.design import StigmaticTrain
-from raytracer.propagation.fields import trace_from_object
-from raytracer.propagation.sequential import SequentialTracer
+from raytracer.families import StigmaticTrain
+from raytracer.tracing import trace_from_object
 from raytracer.viz.sag_drawing import beam_foci_from_paths
 
 
@@ -22,9 +21,8 @@ def relay_train():
 
 
 def trace_fan(train, *, height=0.0, na=0.08, rays=7):
-    system = train.to_system()
-    tracer = SequentialTracer(system)
-    chief = (0.0 - height) / (0.0 - system.object_z)
+    tracer = train.tracer()
+    chief = (0.0 - height) / (0.0 - tracer.object_z)
     paths = []
     for s in np.linspace(-na, na, rays):
         r = trace_from_object(tracer, (0.0, height), (0.0, chief + s),
@@ -41,6 +39,21 @@ def test_relay_reports_intermediate_and_final_focus():
     assert len(finals) == 1 and finals[0][0] == pytest.approx(180.0, abs=1e-6)
     assert len(mids) == 1 and mids[0][0] == pytest.approx(60.0, abs=1e-6)
     assert mids[0][2] < 1e-9  # the stigmatic pinch is exact
+
+
+def test_focus_after_a_fold_is_found_along_the_new_direction():
+    """A beam travelling along +y (after a fold mirror) focuses where its lines meet,
+    though z barely changes along the leg."""
+
+    focus = np.array([0.0, 50.0, 10.0])
+    starts = np.array([[0.0, 0.0, 10.0 + dz] for dz in np.linspace(-4.0, 4.0, 7)])
+    ends = starts + 1.6 * (focus - starts)  # past the focus
+    paths = np.stack([np.zeros_like(starts), starts, ends], axis=1)
+    paths[:, 0] = starts - [0.0, 10.0, 0.0]
+    ((z, y, blur, leg, final),) = beam_foci_from_paths(paths)
+    assert final and leg == 1
+    assert (z, y) == pytest.approx((10.0, 50.0), abs=1e-9)
+    assert blur < 1e-9
 
 
 def test_collimated_beam_reports_no_focus():

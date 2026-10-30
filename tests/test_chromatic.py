@@ -5,10 +5,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer.optics.materials import AbbeMaterial
-from raytracer.design import OpticalSystem
-from raytracer.propagation import SequentialTracer, solve_object_plane
 from raytracer.analysis import axial_color, lateral_color
+from raytracer.io import read_prescription
+from raytracer.materials import AbbeMaterial
+from raytracer.tracing import SequentialTracer, solve_object_plane
 
 TRIPLET_CSV = Path(__file__).resolve().parents[1] / "data" / (
     "optical_systems/photographic/cooke_triplet_prescription.csv"
@@ -36,15 +36,18 @@ def test_abbe_material_matches_nd_and_principal_dispersion():
 
 @pytest.fixture(scope="module")
 def triplet_tracer():
-    system = OpticalSystem.from_prescription(TRIPLET_CSV)
-    tracer = SequentialTracer(system)
+    tracer = read_prescription(TRIPLET_CSV).tracer()
     solve_object_plane(tracer)
     return tracer
 
 
+def singlet_tracer() -> SequentialTracer:
+    return read_prescription(SINGLET_CSV).tracer(object_z=SINGLET_OBJECT_Z)
+
+
 def test_axial_color_zero_at_reference_wavelength(triplet_tracer):
     result = axial_color(
-        triplet_tracer.system, [F_LINE, D_LINE, C_LINE], reference_wavelength_um=D_LINE
+        triplet_tracer, [F_LINE, D_LINE, C_LINE], reference_wavelength_um=D_LINE
     )
     assert np.all(np.isfinite(result.focus_z_mm))
     shift = result.focus_shift_mm
@@ -57,7 +60,7 @@ def test_lateral_color_zero_at_reference_wavelength(triplet_tracer):
     conjugate = solve_object_plane(triplet_tracer)
     y_field = abs(conjugate.object_z) * np.tan(np.deg2rad(6.0))
     result = lateral_color(
-        triplet_tracer.system, [F_LINE, D_LINE, C_LINE],
+        triplet_tracer, [F_LINE, D_LINE, C_LINE],
         field_height_mm=y_field, reference_wavelength_um=D_LINE,
     )
     assert np.all(np.isfinite(result.image_height_mm))
@@ -72,11 +75,10 @@ def test_constant_index_system_shows_no_axial_color():
     US7557996's DUV glasses) has no real dispersion, so tracing it at
     different nominal wavelengths should give the identical focus."""
 
-    system = OpticalSystem.from_prescription(US7557996_CSV)
-    tracer = SequentialTracer(system)
+    tracer = read_prescription(US7557996_CSV).tracer()
     solve_object_plane(tracer)
 
-    result = axial_color(system, [F_LINE, D_LINE, C_LINE], reference_wavelength_um=D_LINE)
+    result = axial_color(tracer, [F_LINE, D_LINE, C_LINE], reference_wavelength_um=D_LINE)
     np.testing.assert_allclose(result.focus_shift_mm, 0.0, atol=1e-9)
 
 
@@ -86,10 +88,8 @@ def test_chromatic_spots_share_one_reference_frame():
 
     from raytracer.analysis import chromatic_spots
 
-    system = OpticalSystem.from_prescription(SINGLET_CSV)
-    system.object_z = SINGLET_OBJECT_Z
     result = chromatic_spots(
-        system, [F_LINE, D_LINE, C_LINE], na_object_sine=SINGLET_NA,
+        singlet_tracer(), [F_LINE, D_LINE, C_LINE], na_object_sine=SINGLET_NA,
         reference_wavelength_um=D_LINE,
     )
     assert len(result.offsets_um) == 3
@@ -104,11 +104,9 @@ def test_chromatic_spots_share_one_reference_frame():
 def test_chromatic_spots_rejects_unsampled_reference():
     from raytracer.analysis import chromatic_spots
 
-    system = OpticalSystem.from_prescription(SINGLET_CSV)
-    system.object_z = SINGLET_OBJECT_Z
     with pytest.raises(ValueError, match="not among the sampled wavelengths"):
         chromatic_spots(
-            system, [F_LINE, C_LINE], na_object_sine=SINGLET_NA,
+            singlet_tracer(), [F_LINE, C_LINE], na_object_sine=SINGLET_NA,
             reference_wavelength_um=0.2,
         )
 
@@ -117,20 +115,28 @@ def test_axial_color_probe_survives_a_very_distant_object():
     """A fixed differential *slope* overflows the aperture once the object
     is far away; the probe must be specified by ray height instead."""
 
-    system = OpticalSystem.from_prescription(SINGLET_CSV)
-    system.object_z = SINGLET_OBJECT_Z  # 100 m: a 1e-4 slope would be 10 mm high
-    result = axial_color(system, [F_LINE, D_LINE, C_LINE], reference_wavelength_um=D_LINE)
+    tracer = singlet_tracer()  # 100 m: a 1e-4 slope would be 10 mm high
+    result = axial_color(tracer, [F_LINE, D_LINE, C_LINE], reference_wavelength_um=D_LINE)
     assert np.all(np.isfinite(result.focus_z_mm))
     # A dense flint singlet focuses blue decidedly shorter than red.
     assert result.focus_z_mm[0] < result.focus_z_mm[2]
 
 
-def test_system_at_wavelength_does_not_share_mutable_rows():
-    from raytracer.analysis.aberrations.chromatic import _system_at_wavelength
+def test_tracer_at_wavelength_leaves_the_original_untouched():
+    """The old test guarded against the per-wavelength copy sharing mutable
+    rows with the original. Systems are immutable values now; what remains
+    to check is that the per-wavelength tracer is a new tracer of the same
+    system and object plane, and that the original keeps its wavelength."""
 
-    system = OpticalSystem.from_prescription(SINGLET_CSV)
-    system.object_z = SINGLET_OBJECT_Z
-    original = system.rows[-1].thickness
-    copy_at_f = _system_at_wavelength(system, F_LINE)
-    copy_at_f.set_thickness(len(copy_at_f.rows) - 1, original + 5.0)
-    assert system.rows[-1].thickness == original
+    tracer = singlet_tracer()
+    at_f = tracer.at_wavelength(F_LINE)
+    assert at_f is not tracer
+    assert at_f.system is tracer.system
+    assert at_f.object_z == tracer.object_z == SINGLET_OBJECT_Z
+    assert at_f.wavelength_um == F_LINE
+    assert tracer.wavelength_um == pytest.approx(0.5876)
+    # The glass index is evaluated at each tracer's own wavelength.
+    lens = tracer.system.step_index("L1.front")
+    assert at_f._n[lens][1] > tracer._n[lens][1]
+    with pytest.raises(AttributeError):
+        tracer.system.name = "changed"

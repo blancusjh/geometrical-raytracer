@@ -3,44 +3,49 @@
 import numpy as np
 import pytest
 
-from raytracer.optics import ImageSource, Lens, Screen
-from raytracer.propagation import BranchingTracer, TraceConfig
+from raytracer.elements import Lens, Sensor
+from raytracer.geometry.apertures import Rectangle
+from raytracer.geometry.surfaces import Sphere
+from raytracer.materials import ConstantIndex
+from raytracer.sources import ImageSource
+from raytracer.system import OpticalSystem
+from raytracer.tracing import NonSequentialTracer
 
 
 def _relay(profile, *, object_height=6.0, rays_per_point=41):
-    lens = Lens.from_radii(
-        r1=60.0, r2=-60.0, thickness=9.0, semidiameter=16.0, n=1.5168,
-        vertex=(0.0, 0.0), name="relay",
+    """A biconvex relay imaging a 1-D object profile at z = -90 onto a sensor at 171.4.
+
+    The old 2-D frame (axis +x, height y) maps to the meridional y-z plane;
+    the old full fan aperture of 8 degrees is a 4 degree half-angle.
+    """
+
+    lens = Lens(
+        "relay", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
+        material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0,
     )
+    screen = Sensor("screen", aperture=Rectangle(40.0, 40.0), z=171.4)
     source = ImageSource(
-        profile=np.asarray(profile, dtype=float),
-        p0=np.array([-90.0, -object_height]),
-        p1=np.array([-90.0, object_height]),
-        axis_direction=np.array([1.0, 0.0]),
-        aperture=np.deg2rad(8.0),
+        np.asarray(profile, dtype=float),
+        p0=(0.0, -object_height, -90.0),
+        p1=(0.0, object_height, -90.0),
+        half_angle_deg=4.0,
         rays_per_point=rays_per_point,
     )
-    screen = Screen([171.4, -20.0], [171.4, 20.0])
-    tracer = BranchingTracer([*lens.surfaces(), screen], TraceConfig(max_generations=4))
-    tracer.trace([source])
-    return screen
+    tree = NonSequentialTracer(OpticalSystem([lens, screen]), split=False).trace(source)
+    return tree.hits("screen")
 
 
 def test_two_point_object_images_inverted_and_magnified():
     profile = np.zeros(101)
     profile[20] = 1.0  # object point at y = -3.6 mm
     profile[80] = 1.0  # object point at y = +3.6 mm
-    screen = _relay(profile)
+    hits = _relay(profile)
 
-    positions = screen.coordinates() - screen.length / 2.0
-    weights = screen.intensities()
+    positions = hits.local_points[:, 1]
+    weights = hits.power
     # Split arrivals by sign and locate both image points.
-    upper = positions[positions > 0]
-    lower = positions[positions < 0]
-    w_up = weights[positions > 0]
-    w_lo = weights[positions < 0]
-    y_up = np.average(upper, weights=w_up)
-    y_lo = np.average(lower, weights=w_lo)
+    y_up = np.average(positions[positions > 0], weights=weights[positions > 0])
+    y_lo = np.average(positions[positions < 0], weights=weights[positions < 0])
 
     # Nominal conjugates: object 90 -> image ~171.4 behind the lens.
     # Paraxial magnification ~ -1.83: object at -3.6 -> image at +6.6.
@@ -53,11 +58,10 @@ def test_image_intensity_scales_with_pixel_value():
     profile = np.zeros(101)
     profile[30] = 1.0
     profile[70] = 0.4
-    screen = _relay(profile)
-    positions = screen.coordinates() - screen.length / 2.0
-    weights = screen.intensities()
-    bright = weights[positions > 0].sum()  # pixel 30 (lower object) -> upper image
-    dim = weights[positions < 0].sum()
+    hits = _relay(profile)
+    positions = hits.local_points[:, 1]
+    bright = hits.power[positions > 0].sum()  # pixel 30 (lower object) -> upper image
+    dim = hits.power[positions < 0].sum()
     assert dim / bright == pytest.approx(0.4, abs=0.03)
 
 
