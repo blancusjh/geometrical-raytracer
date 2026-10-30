@@ -13,7 +13,7 @@ from raytracer.geometry.surfaces import Plane, Sphere
 from raytracer.io import read_train
 from raytracer.materials import ConstantIndex, default_materials
 from raytracer.viz.bodies import body_outlines, body_overlaps, draw_system, index_color
-from raytracer.viz.sag_drawing import face_section, is_meridional, lens_outline
+from raytracer.viz.section import face_section, is_meridional, lens_outline
 
 DATA = Path(__file__).resolve().parents[1] / "data"
 GLASS = ConstantIndex("G", 1.5)

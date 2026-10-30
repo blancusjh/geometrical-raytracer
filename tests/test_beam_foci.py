@@ -1,11 +1,11 @@
-"""Where the light focuses (``raytracer.viz.sag_drawing.beam_foci_from_paths``)."""
+"""Where the light focuses (``raytracer.viz.section.beam_foci_from_paths``)."""
 
 import numpy as np
 import pytest
 
 from raytracer.families import StigmaticTrain
 from raytracer.tracing import trace_from_object
-from raytracer.viz.sag_drawing import beam_foci_from_paths
+from raytracer.viz.section import beam_foci_from_paths
 
 
 def relay_train():

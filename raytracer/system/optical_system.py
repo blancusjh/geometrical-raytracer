@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterator, Sequence
 
-from ..elements import EDGE, Element, Stop
+from ..elements import Element, Stop
 from ..geometry.transforms import Pose
 from ..materials import AIR, Material
 from .assembly import Assembly, Component

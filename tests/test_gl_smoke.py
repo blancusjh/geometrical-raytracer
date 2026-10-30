@@ -76,7 +76,6 @@ def test_accumulation_is_linear_additive():
 
 
 def test_display_never_saturates_with_many_overlapping_rays():
-    from vispy import gloo
 
     viewer = _make_canvas()
     viewer.config.auto_exposure = True

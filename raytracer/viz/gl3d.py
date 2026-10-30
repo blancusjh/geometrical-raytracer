@@ -4,7 +4,7 @@ Each element is meshed in its own frame and carried to the world by its pose, so
 systems render as built; the optical axis is z and the turntable camera keeps +y up.
 
 - A lens is a closed solid lathed from its surfaces' sag ``s(x, y)`` — any surface — out to the extents of its
-  2-D outline (:func:`~raytracer.viz.sag_drawing.lens_outline`: each face's single-valued branch, the Ω join;
+  2-D outline (:func:`~raytracer.viz.section.lens_outline`: each face's single-valued branch, the Ω join;
   the cuts between neighbours are not applied). ``section="half"`` cuts every element away below ``y = 0``.
 - Mirrors, beam splitters, diaphragm blades and sensors are their faces over their apertures; prisms their facets.
 - Rays come from sequential pupil bundles (:meth:`Viewer3D.add_field_bundles`), polylines
@@ -24,7 +24,7 @@ from ..geometry.transforms import Pose
 from .bodies import DEFAULT_MATERIAL_COLORS, glass_colors, medium_index
 from .color import hex_rgba, spectral_rgb
 from .gl import shaders
-from .sag_drawing import facet_corners, fan_faces, lens_outline
+from .section import facet_corners, fan_faces, lens_outline
 
 TWO_PI = 2.0 * np.pi
 MIRROR_COLOR = (0.62, 0.66, 0.72, 1.0)

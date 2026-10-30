@@ -28,8 +28,8 @@ from ..sources import CollimatedSource, PointSource
 from ..system import OpticalSystem
 from ..tracing import NonSequentialTracer
 from .bodies import COLOR_WAVELENGTH_UM, medium_index
-from .sag_drawing import to_drawing
-from .scene import Drawing
+from .section import to_drawing
+from .drawing import Drawing
 
 
 @dataclass
@@ -73,7 +73,7 @@ class InteractiveSession:
 
     The session owns the sources and the current :class:`~raytracer.system.OpticalSystem`. :meth:`retrace`
     traces them (``split=False`` follows the one branch a sequential trace would take — the clean picture;
-    ``split=True`` every Fresnel branch) and rebuilds the :class:`~raytracer.viz.scene.Drawing`. Sources are
+    ``split=True`` every Fresnel branch) and rebuilds the :class:`~raytracer.viz.drawing.Drawing`. Sources are
     best given a meridional fan (``fan="y"``); ``wavelength_um`` is where dispersive media are read for rays
     whose source names no wavelength (default: the d line).
     """
@@ -323,7 +323,7 @@ def _element_editable(element, session: InteractiveSession) -> Editable:
         parameters = [tilt]
         if isinstance(element.surface, Conic):
             radius = Parameter("radius", lambda: float(current().surface.radius),
-                               lambda v: change(surface=current().interface.replace(surface=_with_radius(current().surface, v))),
+                               lambda v: change(surface=_with_radius(current().surface, v)),
                                -2000.0, 2000.0, 5.0)
             parameters.insert(0, radius)
         return Editable(name, name, [vertex], parameters)

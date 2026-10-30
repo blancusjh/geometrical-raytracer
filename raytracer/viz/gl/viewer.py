@@ -1,6 +1,6 @@
 """Interactive OpenGL viewer of the drawing plane ``(z, y)``, with HDR ray accumulation.
 
-It draws a neutral :class:`~raytracer.viz.scene.Drawing` (:meth:`OpenGLViewer.draw`), or builds one from a
+It draws a neutral :class:`~raytracer.viz.drawing.Drawing` (:meth:`OpenGLViewer.draw`), or builds one from a
 system, loose elements or a non-sequential :class:`~raytracer.tracing.RayTree`. Each frame:
 
 1. ray quads blend additively (ONE, ONE) into a float32 framebuffer in linear radiometric units, so overlap
@@ -21,7 +21,7 @@ import numpy as np
 from vispy import app, gloo
 from vispy.color import Color
 
-from ..scene import Drawing, LensBodyItem, MarkerItem, RaySegmentsItem, SensorItem, SurfaceItem
+from ..drawing import Drawing, LensBodyItem, MarkerItem, RaySegmentsItem, SensorItem, SurfaceItem
 from .camera import Camera
 from .renderers import (
     AccumulationTarget,

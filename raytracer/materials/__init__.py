@@ -197,31 +197,18 @@ class MaterialLibrary(dict):
 
 
 def default_materials() -> MaterialLibrary:
-    """Library preloaded with vacuum/air, the DUV materials at 193.368 nm,
-    and a small common-glass catalog spanning crown to flint.
+    """Vacuum, air and a small common-glass catalog spanning crown to flint.
 
-    The DUV materials are single-wavelength ``ConstantIndex`` (that
-    prescription is only ever evaluated at one wavelength). SK16 and SK4 —
-    used by the Cooke triplet/double-Gauss prescriptions — are registered
-    with their real measured Sellmeier dispersion (see
-    ``_SELLMEIER_CATALOG``), so ``OpticalSystem.from_prescription`` picks
-    up accurate chromatic behavior for those two lenses automatically, with
-    no change to the CSV files themselves. F4 has no verified Sellmeier
-    data available (an older, largely-discontinued lead glass), so it stays
-    an ``AbbeMaterial`` approximation from its catalog nd/Vd. N-BK7, N-F2,
-    N-SF11, and N-LAK21 are registered too, for prescriptions that want a
-    common, accurately-dispersive glass but aren't tied to a specific
-    catalog match.
+    The glasses carry their measured Sellmeier dispersion (``_SELLMEIER_CATALOG``),
+    also under the names the Cooke triplet and Double Gauss prescriptions use
+    (SK16, SK4). F4, a discontinued lead glass with no verified Sellmeier data,
+    is an :class:`AbbeMaterial` from its catalog nd/Vd. A medium a prescription
+    names but the library lacks is built from the file's own index column.
     """
 
     lib = MaterialLibrary()
     lib.register(VACUUM)
     lib.register(AIR)
-    # Indices from the US 7,557,996 B2 prescription at lambda = 193.368 nm.
-    lib.register(ConstantIndex("SIO2", 1.56078570))
-    lib.register(ConstantIndex("CAF2", 1.50185255))
-    lib.register(ConstantIndex("HIINDEX1", 1.70196985))
-    lib.register(ConstantIndex("HIINDEX2", 1.59667693))
     # Real Sellmeier dispersion for the common-glass catalog.
     for glass_name in _SELLMEIER_CATALOG:
         lib.register(sellmeier_glass(glass_name))

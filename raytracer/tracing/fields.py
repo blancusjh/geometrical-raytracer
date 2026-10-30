@@ -6,7 +6,6 @@ from dataclasses import dataclass, field as dataclass_field
 from typing import Literal
 
 import numpy as np
-from scipy import optimize
 
 from ..geometry.vectors import direction_from_slopes
 from .sequential import BatchTraceResult, SequentialTracer, TraceResult, TraceStatus
@@ -244,10 +243,6 @@ class PupilTrace:
     @property
     def opl(self) -> np.ndarray:
         return self.batch.opl[self.valid]
-
-    @property
-    def uv(self) -> np.ndarray:
-        return self.pupil_uv[self.valid]
 
 
 def trace_pupil(

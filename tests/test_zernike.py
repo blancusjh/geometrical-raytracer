@@ -59,7 +59,6 @@ def test_transverse_gradient_roundtrip():
         (zernike(m.n, m.m, u, v + step) - zernike(m.n, m.m, u, v - step)) / (2 * step)
         for m in modes
     ])
-    na = 1.2
     # Hamilton: grad W = -NA * dr  =>  dr = -grad W / NA
     matrix = np.vstack([du, dv])
     target = matrix @ truth

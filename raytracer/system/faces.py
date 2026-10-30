@@ -24,8 +24,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..coatings import Coating, Uncoated
-from ..elements import BLADE, DETECTOR, EDGE, Element, ElementFace, EdgeWall, Stop
+from ..elements import BLADE, DETECTOR, EDGE, Element, ElementFace, Stop
 from ..geometry.apertures import Aperture
+from ..geometry.solids import Cylinder
 from ..geometry.transforms import Pose
 from ..interfaces import Interface
 from ..materials import Material
@@ -52,7 +53,7 @@ class PhysicalFace:
     medium_plus: Material
     elements: tuple[str, ...]
     hole: Aperture | None = None
-    wall: EdgeWall | None = None
+    wall: Cylinder | None = None
     virtual: bool = False
 
     @property

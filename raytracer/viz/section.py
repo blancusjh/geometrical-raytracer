@@ -10,7 +10,7 @@ chord of the face's aperture is the exact section, for any surface. For any othe
 ``(0, v, s(0, v))`` is drawn projected (its world x dropped); that is not a section, and
 :func:`section_offset` says which case applies.
 
-The figures, the neutral :class:`~raytracer.viz.scene.Drawing` and the 3-D viewer take their geometry from
+The figures, the neutral :class:`~raytracer.viz.drawing.Drawing` and the 3-D viewer take their geometry from
 here, so each fact is computed in one place.
 """
 

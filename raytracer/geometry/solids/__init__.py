@@ -84,21 +84,28 @@ class Cylinder(Solid):
         p = np.asarray(points, dtype=float)
         return (np.hypot(p[..., 0], p[..., 1]) <= self.radius) & (p[..., 2] >= 0.0) & (p[..., 2] <= self.length)
 
-    def intersect(self, origins, directions, *, t_min=1e-9):
+    def wall_hits(self, origins: np.ndarray, directions: np.ndarray, *, t_min: float = 1e-9) -> np.ndarray:
+        """Ray parameters ``(N, 2)`` where each ray crosses the curved wall; ``inf`` where it does not."""
+
         o, d = origins, directions
-        n = o.shape[0]
         a = d[:, 0] ** 2 + d[:, 1] ** 2
         b = o[:, 0] * d[:, 0] + o[:, 1] * d[:, 1]
         c = o[:, 0] ** 2 + o[:, 1] ** 2 - self.radius**2
         with np.errstate(divide="ignore", invalid="ignore"):
             root = np.sqrt(np.where(b * b - a * c >= 0.0, b * b - a * c, np.nan))
-            wall = np.stack([(-b - root) / a, (-b + root) / a], axis=1)
-            zw = o[:, 2:3] + wall * d[:, 2:3]
-            wall = np.where((zw >= 0.0) & (zw <= self.length), wall, np.inf)
+            roots = np.stack([(-b - root) / a, (-b + root) / a], axis=1)
+        z = o[:, 2:3] + roots * d[:, 2:3]
+        on_wall = np.isfinite(roots) & (roots > t_min) & (z >= 0.0) & (z <= self.length)
+        return np.where(on_wall, roots, np.inf)
+
+    def intersect(self, origins, directions, *, t_min=1e-9):
+        o, d = origins, directions
+        n = o.shape[0]
+        with np.errstate(divide="ignore", invalid="ignore"):
             caps = np.stack([-o[:, 2] / d[:, 2], (self.length - o[:, 2]) / d[:, 2]], axis=1)
             pc = o[:, None, :2] + caps[:, :, None] * d[:, None, :2]
             caps = np.where(np.hypot(pc[..., 0], pc[..., 1]) <= self.radius, caps, np.inf)
-        roots = np.concatenate([wall, caps], axis=1)
+        roots = np.concatenate([self.wall_hits(o, d, t_min=t_min), caps], axis=1)
         roots = np.where(np.isfinite(roots) & (roots > t_min), roots, np.inf)
         which = roots.argmin(axis=1)
         t = roots[np.arange(n), which]

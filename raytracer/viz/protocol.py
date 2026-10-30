@@ -1,4 +1,4 @@
-"""``show(drawing, backend=...)``: one neutral :class:`~raytracer.viz.scene.Drawing`, two backends.
+"""``show(drawing, backend=...)``: one neutral :class:`~raytracer.viz.drawing.Drawing`, two backends.
 
 ``"mpl"`` renders in matplotlib (few rays, publication diagrams); ``"gl"`` opens the OpenGL viewer (dense ray
 fields, HDR caustics, colorimetry).
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from .scene import Drawing
+from .drawing import Drawing
 
 
 def show(drawing: Drawing, backend: Literal["mpl", "gl"] = "mpl", *, interactive: bool = True, **config):

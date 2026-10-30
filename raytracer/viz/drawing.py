@@ -1,7 +1,7 @@
 """The backend-neutral 2-D drawing: items in drawing coordinates ``(z, y)``.
 
 A :class:`Drawing` is pure data — ray segments, surface curves, filled bodies, sensors, markers — in the
-meridional plane of :mod:`~raytracer.viz.sag_drawing`. The matplotlib backend (:mod:`~raytracer.viz.mpl`) and
+meridional plane of :mod:`~raytracer.viz.section`. The matplotlib backend (:mod:`~raytracer.viz.mpl`) and
 the OpenGL viewer (:mod:`~raytracer.viz.gl`) draw the same drawing.
 """
 
@@ -14,7 +14,7 @@ import numpy as np
 from ..elements import BeamSplitter, Element, Mirror, Sensor, Stop
 from .bodies import body_outline, body_outlines, glass_colors
 from .color import hex_rgba
-from .sag_drawing import DEFAULT_SEMIDIAMETER, element_sections, extent_of, fan_faces, strip_faces, to_drawing
+from .section import DEFAULT_SEMIDIAMETER, element_sections, extent_of, fan_faces, strip_faces, to_drawing
 
 _THIN_STYLES = {
     Mirror: ((0.13, 0.13, 0.13, 1.0), 3.0),
@@ -172,7 +172,7 @@ class SurfaceItem:
 class LensBodyItem:
     """A filled body: its closed outline and, for GL fills, its triangles.
 
-    Without ``faces`` the outline is laid out as by :func:`~raytracer.viz.sag_drawing.lens_outline` (one face
+    Without ``faces`` the outline is laid out as by :func:`~raytracer.viz.section.lens_outline` (one face
     up, the other back down) and strip-triangulated.
     """
 

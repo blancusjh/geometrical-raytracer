@@ -118,21 +118,6 @@ class _Front:
         return _Front(*(np.concatenate([getattr(p, f.name) for p in parts]) for f in fields(_Front)))
 
 
-def _wall_distance(wall, o: np.ndarray, d: np.ndarray, t_min: float) -> np.ndarray:
-    """Ray parameter to a lens rim: the cylinder ``r = radius`` between the two faces."""
-
-    a = d[:, 0] ** 2 + d[:, 1] ** 2
-    b = o[:, 0] * d[:, 0] + o[:, 1] * d[:, 1]
-    c = o[:, 0] ** 2 + o[:, 1] ** 2 - wall.radius**2
-    with np.errstate(divide="ignore", invalid="ignore"):
-        root = np.sqrt(np.where(b * b - a * c >= 0.0, b * b - a * c, np.nan))
-        roots = np.stack([(-b - root) / a, (-b + root) / a], axis=1)
-    z = o[:, 2:3] + roots * d[:, 2:3]
-    lo, hi = sorted((wall.z_front, wall.z_back))
-    ok = np.isfinite(roots) & (roots > t_min) & (z >= lo) & (z <= hi)
-    return np.where(ok, roots, np.inf).min(axis=1)
-
-
 class NonSequentialTracer:
     """Trace sources through a system with no assumed order."""
 
@@ -185,7 +170,7 @@ class NonSequentialTracer:
             o = face.pose.to_local(front.origin)
             d = face.pose.direction_to_local(front.direction)
             if face.role == EDGE:
-                t = _wall_distance(face.wall, o, d, self.t_min)
+                t = face.wall.wall_hits(o, d, t_min=self.t_min).min(axis=1)
             else:
                 hits = face.surface.intersect(o, d, mode="forward", t_min=self.t_min)
                 t = np.where(hits.ok, hits.t, np.inf)

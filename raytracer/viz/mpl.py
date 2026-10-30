@@ -7,11 +7,11 @@ import numpy as np
 from matplotlib.collections import LineCollection
 from matplotlib.patches import Polygon
 
-from .scene import Drawing, LensBodyItem, MarkerItem, RaySegmentsItem, SensorItem, SurfaceItem
+from .drawing import Drawing, LensBodyItem, MarkerItem, RaySegmentsItem, SensorItem, SurfaceItem
 
 
 class MplBackend:
-    """Renders a :class:`~raytracer.viz.scene.Drawing` into a matplotlib figure.
+    """Renders a :class:`~raytracer.viz.drawing.Drawing` into a matplotlib figure.
 
     Ray intensity maps to line alpha, normalized to the brightest ray, so a few hundred rays stay readable;
     dense caustic fields belong to the OpenGL backend.

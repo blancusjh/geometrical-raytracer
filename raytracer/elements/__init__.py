@@ -23,15 +23,16 @@ front vertex to the back vertex.
 
 from __future__ import annotations
 
+import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
-from ..coatings import Absorbing, Coating, IdealBeamSplitter, PerfectMirror
+from ..coatings import Absorbing, Coating, IdealBeamSplitter, PerfectMirror, Uncoated
 from ..geometry.apertures import Aperture, Circle
-from ..geometry.solids import Polyhedron
+from ..geometry.solids import Cylinder, Polyhedron
 from ..geometry.surfaces import Plane, Surface
 from ..geometry.transforms import Pose
 from ..interfaces import Interface
@@ -42,26 +43,14 @@ OPTICAL, EDGE, BLADE, DETECTOR = "optical", "edge", "blade", "detector"
 
 
 @dataclass(frozen=True)
-class EdgeWall:
-    """The cylindrical rim of a lens, between its two faces at ``radius``.
-
-    ``z_front`` and ``z_back`` are the axial positions (element frame) where
-    the rim meets the front and back faces.
-    """
-
-    radius: float
-    z_front: float
-    z_back: float
-
-
-@dataclass(frozen=True)
 class ElementFace:
     """One boundary of an element, in the element's own frame.
 
     ``bulk_side`` is +1 when the element's material lies on the face's local
     +z side, −1 on its −z side, 0 when the element has no bulk. ``extent``
     bounds the physical patch of surface; ``hole`` removes a region from it
-    (the opening of a diaphragm).
+    (the opening of a diaphragm). A lens rim is the curved ``wall`` of a
+    cylinder, placed by ``pose``, instead of an interface.
     """
 
     name: str
@@ -71,7 +60,7 @@ class ElementFace:
     extent: Aperture | None
     role: str = OPTICAL
     hole: Aperture | None = None
-    wall: EdgeWall | None = None
+    wall: Cylinder | None = None
 
 
 class Element(ABC):
@@ -86,16 +75,27 @@ class Element(ABC):
             raise TypeError("every element has a non-empty name")
         if "." in name or ":" in name:
             raise ValueError(f"element names cannot contain '.' or ':' (got {name!r})")
-        object.__setattr__(self, "name", name)
-        object.__setattr__(self, "pose", Pose.from_spec(**placement))
+        self._set(name=name, pose=Pose.from_spec(**placement))
 
     @abstractmethod
     def faces(self) -> list[ElementFace]:
         """The element's boundaries, in its own frame."""
 
-    @abstractmethod
+    def _set(self, **attributes: Any) -> None:
+        """Store the constructor's arguments, each under its own name."""
+
+        for key, value in attributes.items():
+            object.__setattr__(self, key, value)
+
     def _arguments(self) -> dict[str, Any]:
-        """The constructor arguments that rebuild this element (pose excluded)."""
+        """The constructor arguments that rebuild this element (name and placement excluded)."""
+
+        names = [
+            p.name
+            for p in inspect.signature(type(self).__init__).parameters.values()
+            if p.kind is p.KEYWORD_ONLY
+        ]
+        return {n: getattr(self, n) for n in names}
 
     # -- values ---------------------------------------------------------
 
@@ -172,23 +172,12 @@ class Lens(Element):
         semi_diameter: float,
         **placement,
     ) -> None:
-        object.__setattr__(self, "front", Interface.coerce(front))
-        object.__setattr__(self, "back", Interface.coerce(back))
+        front, back = Interface.coerce(front), Interface.coerce(back)
         if not float(thickness) > 0.0:
             raise ValueError(f"lens {name!r}: the centre thickness is positive, got {thickness}")
-        object.__setattr__(self, "thickness", float(thickness))
-        object.__setattr__(self, "material", material)
-        object.__setattr__(self, "semi_diameter", _semi_diameter(semi_diameter))
+        self._set(front=front, back=back, thickness=float(thickness), material=material, semi_diameter=_semi_diameter(semi_diameter))
         self._place(name, placement)
 
-    def _arguments(self):
-        return {
-            "front": self.front,
-            "back": self.back,
-            "thickness": self.thickness,
-            "material": self.material,
-            "semi_diameter": self.semi_diameter,
-        }
 
     def edge_heights(self) -> tuple[float, float]:
         """Axial positions where the rim meets the front and back faces."""
@@ -209,8 +198,26 @@ class Lens(Element):
         return [
             ElementFace("front", self.front, Pose(), +1, sd),
             ElementFace("back", self.back, Pose((0.0, 0.0, self.thickness)), -1, sd),
-            ElementFace("edge", None, Pose(), 0, None, role=EDGE, wall=EdgeWall(self.semi_diameter, zf, zb)),
-        ]
+        ] + self._rim(zf, zb)
+
+    def _rim(self, z_front: float, z_back: float) -> list[ElementFace]:
+        """The cylindrical rim between the faces, absent where the faces meet before the edge."""
+
+        if z_back - z_front <= 0.0:
+            return []
+        wall = Cylinder(self.semi_diameter, z_back - z_front)
+        return [ElementFace("edge", None, Pose((0.0, 0.0, z_front)), 0, None, role=EDGE, wall=wall)]
+
+
+def _one_face(surface: Surface | Interface, coating: Coating | None, clear_aperture, default: Coating):
+    """The (surface, coating, clear aperture) of a single-face element, an interface unpacked."""
+
+    if isinstance(surface, Interface):
+        if coating is not None or clear_aperture is not None:
+            raise TypeError("give coating and clear_aperture either in the Interface or as arguments, not both")
+        surface, coating, clear_aperture = surface.surface, surface.coating, surface.clear_aperture
+        coating = None if isinstance(coating, Uncoated) else coating
+    return surface, coating if coating is not None else default, Aperture.coerce(clear_aperture)
 
 
 class Mirror(Element):
@@ -226,26 +233,16 @@ class Mirror(Element):
         surface: Surface | Interface,
         aperture: Aperture | float | None,
         coating: Coating | None = None,
+        clear_aperture: Aperture | float | None = None,
         **placement,
     ) -> None:
-        interface = Interface.coerce(surface)
-        if coating is not None:
-            interface = interface.replace(coating=coating)
-        elif type(interface.coating).__name__ == "Uncoated":
-            interface = interface.replace(coating=PerfectMirror())
-        object.__setattr__(self, "interface", interface)
-        object.__setattr__(self, "aperture", Aperture.coerce(aperture))
+        surface, coating, clear_aperture = _one_face(surface, coating, clear_aperture, PerfectMirror())
+        self._set(surface=surface, aperture=Aperture.coerce(aperture), coating=coating, clear_aperture=clear_aperture)
         self._place(name, placement)
 
-    @property
-    def surface(self) -> Surface:
-        return self.interface.surface
-
-    def _arguments(self):
-        return {"surface": self.interface, "aperture": self.aperture}
-
     def faces(self):
-        return [ElementFace("", self.interface, Pose(), 0, self.aperture)]
+        interface = Interface(self.surface, coating=self.coating, clear_aperture=self.clear_aperture)
+        return [ElementFace("", interface, Pose(), 0, self.aperture)]
 
 
 class BeamSplitter(Element):
@@ -258,20 +255,16 @@ class BeamSplitter(Element):
         aperture: Aperture | float,
         surface: Surface | Interface | None = None,
         coating: Coating | None = None,
+        clear_aperture: Aperture | float | None = None,
         **placement,
     ) -> None:
-        interface = Interface.coerce(surface if surface is not None else Plane())
-        if coating is not None or type(interface.coating).__name__ == "Uncoated":
-            interface = interface.replace(coating=coating if coating is not None else IdealBeamSplitter())
-        object.__setattr__(self, "interface", interface)
-        object.__setattr__(self, "aperture", Aperture.coerce(aperture))
+        surface, coating, clear_aperture = _one_face(surface if surface is not None else Plane(), coating, clear_aperture, IdealBeamSplitter())
+        self._set(surface=surface, aperture=Aperture.coerce(aperture), coating=coating, clear_aperture=clear_aperture)
         self._place(name, placement)
 
-    def _arguments(self):
-        return {"surface": self.interface, "aperture": self.aperture}
-
     def faces(self):
-        return [ElementFace("", self.interface, Pose(), 0, self.aperture)]
+        interface = Interface(self.surface, coating=self.coating, clear_aperture=self.clear_aperture)
+        return [ElementFace("", interface, Pose(), 0, self.aperture)]
 
 
 class Prism(Element):
@@ -293,16 +286,10 @@ class Prism(Element):
     ) -> None:
         if not isinstance(solid, Polyhedron):
             raise TypeError("a prism is a polyhedral solid (Box or Mesh)")
-        object.__setattr__(self, "solid", solid)
-        object.__setattr__(self, "material", material)
-        object.__setattr__(self, "coatings", dict(coatings or {}))
+        self._set(solid=solid, material=material, coatings=dict(coatings or {}))
         self._place(name, placement)
 
-    def _arguments(self):
-        return {"solid": self.solid, "material": self.material, "coatings": self.coatings}
 
-    def _key(self):
-        return (type(self).__name__, self.name, self.pose, self.solid, self.material, tuple(sorted(self.coatings.items())))
 
     def faces(self):
         faces = []
@@ -333,13 +320,10 @@ class Stop(Element):
         **placement,
     ) -> None:
         opening = Aperture.coerce(aperture)
-        object.__setattr__(self, "aperture", opening)
-        object.__setattr__(self, "outer_radius", float(outer_radius) if outer_radius is not None else 2.0 * opening.extent)
-        object.__setattr__(self, "virtual", bool(virtual))
+        outer_radius = float(outer_radius) if outer_radius is not None else 2.0 * opening.extent
+        self._set(aperture=opening, outer_radius=outer_radius, virtual=bool(virtual))
         self._place(name, placement)
 
-    def _arguments(self):
-        return {"aperture": self.aperture, "outer_radius": self.outer_radius, "virtual": self.virtual}
 
     def faces(self):
         blade = Interface(Plane(), coating=Absorbing(), clear_aperture=self.aperture)
@@ -357,12 +341,9 @@ class Sensor(Element):
         aperture: Aperture | float | None = None,
         **placement,
     ) -> None:
-        object.__setattr__(self, "surface", surface if surface is not None else Plane())
-        object.__setattr__(self, "aperture", Aperture.coerce(aperture))
+        self._set(surface=surface if surface is not None else Plane(), aperture=Aperture.coerce(aperture))
         self._place(name, placement)
 
-    def _arguments(self):
-        return {"surface": self.surface, "aperture": self.aperture}
 
     def faces(self):
         return [ElementFace("", Interface(self.surface, coating=Absorbing()), Pose(), 0, self.aperture, role=DETECTOR)]
@@ -371,7 +352,6 @@ class Sensor(Element):
 __all__ = [
     "Element",
     "ElementFace",
-    "EdgeWall",
     "Lens",
     "Mirror",
     "BeamSplitter",

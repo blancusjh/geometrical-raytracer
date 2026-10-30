@@ -226,7 +226,6 @@ def aplanatism_report(
     sine_ratio = np.full(samples, np.nan)
     map_values = np.full(samples, np.nan)
 
-    vertices = np.asarray(train.vertices)
     heights = np.full((samples, train.n_surfaces), np.nan)
     for i, sine in enumerate(sines):
         slope = sine / np.sqrt(1.0 - sine * sine)

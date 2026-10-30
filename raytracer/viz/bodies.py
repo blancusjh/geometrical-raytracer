@@ -1,7 +1,7 @@
 """Bodies of a system in the drawing plane, their colours, and the matplotlib drawing of a traced system.
 
 A lens is a body of one material between its two faces, closed by its rim
-(:func:`~raytracer.viz.sag_drawing.lens_outline`). Coaxial neighbours not in contact may **interpenetrate**:
+(:func:`~raytracer.viz.section.lens_outline`). Coaxial neighbours not in contact may **interpenetrate**:
 one's back face crosses the other's front face off-axis, and the space between them is claimed by two
 materials at once — an inconsistency of the design, not of the drawing. :func:`body_outlines` cuts both parts
 there and leaves that region hollow. The cut bounds the design's valid aperture: :func:`draw_system` warns when
@@ -22,7 +22,7 @@ from ..materials import Material
 from ..system import OpticalSystem
 from ..system.faces import TRANSMIT
 from ..tracing import FieldPoint, SequentialTracer, TraceStatus, chief_ray_slopes, trace_from_object
-from .sag_drawing import (
+from .section import (
     beam_foci_from_paths,
     crossing_height,
     element_sections,
@@ -342,7 +342,7 @@ def draw_elements(ax, system, *, wavelength_um=None, material_colors=None, alpha
     """Draw every element of *system* on *ax*; return the drawn half-chord of each lens face by boundary name.
 
     Bodies fill by index (:func:`body_outlines`); mirrors span the sub-aperture the traced *paths* use when
-    given (:func:`~raytracer.viz.sag_drawing.mirror_arcs`), their whole aperture otherwise; blades, beam
+    given (:func:`~raytracer.viz.section.mirror_arcs`), their whole aperture otherwise; blades, beam
     splitters (dashed) and sensors (dotted) draw as their sections.
     """
 

@@ -20,7 +20,7 @@ from raytracer.geometry.surfaces import Plane, Sphere
 from raytracer.io import read_prescription
 from raytracer.materials import ConstantIndex
 from raytracer.sources import CollimatedSource, PointSource, Rays
-from raytracer.tracing import NonSequentialTracer, SequentialTracer
+from raytracer.tracing import NonSequentialTracer
 from raytracer.tracing.nonsequential import PRIMARY, REFLECTED, TRANSMITTED
 
 COOKE = Path(__file__).resolve().parents[1] / "data/optical_systems/photographic/cooke_triplet_prescription.csv"

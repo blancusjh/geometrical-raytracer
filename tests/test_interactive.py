@@ -10,7 +10,7 @@ from raytracer.geometry.surfaces import Sphere
 from raytracer.materials import ConstantIndex
 from raytracer.sources import PointSource
 from raytracer.viz.interactive import InteractiveSession, editable_for
-from raytracer.viz.scene import LensBodyItem, RaySegmentsItem, SensorItem
+from raytracer.viz.drawing import LensBodyItem, RaySegmentsItem, SensorItem
 
 
 @pytest.fixture()
