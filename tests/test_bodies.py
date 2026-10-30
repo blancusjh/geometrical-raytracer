@@ -12,13 +12,7 @@ from raytracer.geometry import Rotation
 from raytracer.geometry.surfaces import Plane, Sphere
 from raytracer.io import read_train
 from raytracer.materials import ConstantIndex, default_materials
-from raytracer.viz.bodies import (
-    body_outlines,
-    body_overlaps,
-    draw_system,
-    element_outline,
-    index_color,
-)
+from raytracer.viz.bodies import body_outlines, body_overlaps, draw_system, index_color
 from raytracer.viz.sag_drawing import face_section, is_meridional, lens_outline
 
 DATA = Path(__file__).resolve().parents[1] / "data"
@@ -89,7 +83,7 @@ def test_cemented_chain_yields_one_body_per_glass():
 def test_outline_is_a_closed_flat_rim_polygon_for_a_biconvex():
     train = StigmaticTrain.symmetric_singlet(n=1.5, d0=-30.0, thickness=40.0, semidiameter=3.5)
     system = train.system()
-    polygon, (edge_front, edge_back), joined = element_outline(system["L1"], system.pose_of("L1"))
+    polygon, (edge_front, edge_back), joined = lens_outline(system["L1"], system.pose_of("L1"))
     np.testing.assert_allclose(polygon[0], polygon[-1])  # closed
     assert not joined
     assert edge_front == pytest.approx(3.5) and edge_back == pytest.approx(3.5)
@@ -109,7 +103,7 @@ def test_crossing_faces_join_at_the_intersection_height():
     crossing = back.profile(h_probe) + 1.0 - front.profile(h_probe)
     assert (crossing <= 0).any()  # the faces genuinely cross below h = 3.7
 
-    polygon, (edge, edge_back), joined = element_outline(lens, system.pose_of("L1"))
+    polygon, (edge, edge_back), joined = lens_outline(lens, system.pose_of("L1"))
     assert joined and edge == edge_back
     assert 0.0 < edge < 3.7
     assert edge == pytest.approx(2.553, abs=0.05)
@@ -131,7 +125,7 @@ def test_outline_respects_the_usable_branch_of_an_ovoid():
         semidiameter=22.0,
     )
     system = train.system()
-    _, (edge_front, edge_back), _ = element_outline(system["L1"], system.pose_of("L1"))
+    _, (edge_front, edge_back), _ = lens_outline(system["L1"], system.pose_of("L1"))
     assert edge_front <= train.surfaces[0].max_radius + 1e-9
     assert edge_back <= train.surfaces[1].max_radius + 1e-9
     assert edge_back < 22.0  # the clamp is active on the back face
@@ -147,7 +141,7 @@ def test_neighbouring_bodies_of_different_media_are_cut_apart():
     assert [(a, b) for a, b, _ in overlaps] == [("L1", "L2")]
     assert overlaps[0][2] == pytest.approx(5.8584, abs=1e-3)
 
-    raw = [element_outline(system[n], system.pose_of(n))[0] for n in ("L1", "L2")]
+    raw = [lens_outline(system[n], system.pose_of(n))[0] for n in ("L1", "L2")]
     assert interior_collisions(*raw) > 0  # the uncut solids interpenetrate
 
     cut = {b.name: b.polygon for b in body_outlines(system)}
@@ -276,11 +270,11 @@ def biconvex(**placement):
 def test_a_lens_tilted_in_the_yz_plane_is_drawn_as_its_exact_section():
     """Rotating a lens about x turns its drawn outline rigidly in (z, y)."""
 
-    flat = lens_outline(biconvex(pos=(0.0, 0.0, 0.0)))
+    flat = lens_outline(biconvex(pos=(0.0, 0.0, 0.0)))[0]
     angle = 20.0
     tilted = biconvex(pos=(0.0, 3.0, 50.0), rot=Rotation.axis_angle((1.0, 0.0, 0.0), -angle))
     assert is_meridional(tilted.pose)
-    drawn = lens_outline(tilted)
+    drawn = lens_outline(tilted)[0]
     # the same outline turned by +angle (z toward +y) and moved to (z, y) = (50, 3)
     a = np.radians(angle)
     turn = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
@@ -292,7 +286,7 @@ def test_a_decentred_section_is_the_chord_of_the_rim():
     """A lens displaced along x is cut off-centre: a shorter chord, the faces' sag along it."""
 
     lens = biconvex(pos=(6.0, 0.0, 0.0))
-    polygon, (e_front, e_back), _ = element_outline(lens)
+    polygon, (e_front, e_back), _ = lens_outline(lens)
     assert e_front == pytest.approx(8.0) and e_back == pytest.approx(8.0)  # sqrt(10² - 6²)
     # the front face's z on the chord is the sag at radius hypot(6, y)
     y = polygon[:240, 1]
@@ -311,7 +305,7 @@ def test_a_fold_mirror_section_is_a_tilted_segment():
 def test_an_element_turned_out_of_the_plane_is_projected():
     lens = biconvex(rot=Rotation.axis_angle((0.0, 1.0, 0.0), 30.0))
     assert not is_meridional(lens.pose)
-    polygon = lens_outline(lens)
+    polygon = lens_outline(lens)[0]
     # the meridian (local x = 0) keeps its heights; its z is foreshortened by cos 30°
     assert np.abs(polygon[:, 1]).max() == pytest.approx(10.0)
     assert polygon[:, 0].max() == pytest.approx(np.cos(np.radians(30.0)) * 6.0, abs=1e-4)  # sampled vertex
