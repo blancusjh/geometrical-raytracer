@@ -18,11 +18,7 @@ class Material(Protocol):
 
 @dataclass(frozen=True)
 class ConstantIndex:
-    """Material with a wavelength-independent refractive index.
-
-    Sufficient for single-wavelength prescriptions; dispersive models
-    (Sellmeier, catalog glasses) can implement the same protocol later.
-    """
+    """A medium whose index does not depend on wavelength: enough for single-wavelength work."""
 
     name: str
     n: float
@@ -42,18 +38,14 @@ _LAMBDA_C_UM = 0.65627
 def _check_wavelength(wavelength_um: float, material_name: str) -> None:
     """Reject a non-positive wavelength for a dispersive material.
 
-    :class:`ConstantIndex` ignores its wavelength argument, so callers have
-    historically been able to get away with passing ``0.0`` — notably
-    :meth:`OpticalSystem._rebuild`, which substitutes ``0.0`` when a system
-    carries no ``wavelength_um``. A dispersive curve evaluated there would
-    silently return a physically meaningless index (the Sellmeier form
-    returns exactly 1.0, i.e. vacuum), so refuse it loudly instead.
+    A dispersion law evaluated at 0 returns a meaningless index (Sellmeier
+    gives exactly 1.0), so a missing wavelength is an error, never a value.
     """
 
     if not wavelength_um > 0.0:
         raise ValueError(
             f"{material_name} is dispersive and needs a positive wavelength, got "
-            f"{wavelength_um!r}; set wavelength_um on the OpticalSystem"
+            f"{wavelength_um!r}"
         )
 
 
