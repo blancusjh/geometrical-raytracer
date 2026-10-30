@@ -1,202 +1,110 @@
 # Ontology: what each noun is, and the laws that keep it so
 
-`usage.md` fixed how the library is used. This document reads the nouns
+`usage.md` fixes how the library is used. This document reads the nouns
 off that usage, gives each one a single nature and a single home, and
-states the laws that keep the natures apart. Section numbers are cited
-from `usage.md` as **‹law n›**.
+states the laws that keep the natures apart. **‹law n›** in `usage.md`
+cites §6 here.
+
+Sections 1–3 describe the architecture as implemented. Sections 4–5 and
+the laws cover the rest of the plan as well.
 
 ---
 
-## 1. The questions
+## 1. The questions, and the chain of packages
 
-Every piece of the library answers exactly one of these questions. Its
-answer decides the package the piece lives in.
+Each package answers one question. Every module-level import goes to a
+package earlier in the chain, and `tests/test_architecture.py` checks it:
 
-| Question | Nature | Package |
+```
+geometry → materials → coatings → interfaces → elements → system → sources
+         → tracing → families → io → analysis → optimize → viz
+```
+
+| Package | Question | Nature |
 |---|---|---|
-| What is the shape of a boundary? | geometry | `math`, `shapes` |
-| What is light, and what laws does it obey in a medium and at a boundary? | physics | `optics` |
-| What is this instrument, and how is it used? | description | `design` |
-| How does light get from here to there? | algorithm | `propagation` |
-| How is a description stored? | serialisation | `io` |
-| What do we measure? | measurement | `analysis` |
-| How sensitive is it to error? | variation (statistical) | `tolerance` |
-| What is better? | variation (directed) | `optimize` |
-| How is it shown? | presentation | `viz` |
-
-The packages form a strictly descending chain. Every import at module level
-goes to a package earlier in the chain:
-
-```
-math → shapes → optics → design → propagation → io → analysis → tolerance → optimize → viz
-```
-
-Compared with today, two things change. `surfaces` becomes `shapes`
-(decision D2 in §9), and `tolerance` appears between measuring and
-optimising. Tolerancing varies parameters but does not seek an optimum.
-Its compensators are one-dimensional solves that need nothing from
-`optimize`. A future desensitising optimiser may use `tolerance`, so
-`tolerance` sits below `optimize`.
+| `geometry` | Where is it, and what shape is it? (`Rotation`, `Pose`, surfaces, apertures, solids, intersection) | geometry, no optics |
+| `materials` | What fills space? | physics of media |
+| `coatings` | How much light does a boundary reflect and transmit? | physics of boundaries (energy) |
+| `interfaces` | What is a surface as an optical boundary, and which laws act there? | physics of boundaries (direction) |
+| `elements` | What physical things is an instrument made of? | description |
+| `system` | How are they arranged, and what follows from the arrangement? | description and derived facts |
+| `sources` | Where does light start? | description of emission |
+| `tracing` | How does light get from here to there? | algorithms |
+| `families` | Which systems does a design family generate? | generators of descriptions |
+| `io` | How is a design stored? | serialisation |
+| `analysis` | What do we measure? | measurement |
+| `optimize` | What is better? | directed variation |
+| `viz` | How is it shown? | presentation |
 
 ---
 
 ## 2. The nouns
 
 **Stated** means the user says it and the object stores it. **Derived**
-means it is computed from stated things on demand. A derived quantity is
-never stored as authoritative state. **‹law 3›**
+means it is computed from stated things. A derived quantity is never
+stored as authoritative state. **‹law 3›**
 
-### 2.1 Geometry — `math`, `shapes`
+| Noun | Is | Package | Stated / derived |
+|---|---|---|---|
+| `Rotation`, `Pose` | orientation; position + orientation (local → world) | geometry | stated |
+| `Surface` and its family | a smooth boundary `z = s(x, y)` in its own frame; geometry only | geometry.surfaces | stated |
+| `Aperture` (`Circle`, `Annulus`, `Rectangle`, `Polygon`) | a region of a surface's local (x, y) plane | geometry.apertures | stated |
+| `Solid` (`Sphere`, `Cylinder`, `Box`, `Mesh`) | a closed region of space | geometry.solids | stated |
+| `Material` | a medium: `index(λ)` | materials | stated |
+| `Coating` | power split at a boundary: `Uncoated` (Fresnel), `AR`, `PerfectMirror`, `IdealBeamSplitter`, `Absorbing` | coatings | stated |
+| `Interface` | a surface + its coating + its clear aperture | interfaces | stated |
+| `Element` (`Lens`, `Mirror`, `BeamSplitter`, `Prism`, `Stop`, `Sensor`) | a named physical thing with a pose | elements | stated |
+| `Assembly` | a named rigid group of components | system | stated |
+| `OpticalSystem` | components in an ambient medium, optionally a stated path and stop | system | stated |
+| `PhysicalFace` | one physical boundary, with the medium on each side | system | **derived** (coincident faces merge: contact) |
+| `Step`, `path` | the sequential route: boundary + event | system | stated, or **derived** for a coaxial system |
+| `Rays`, `Source` | a batch of rays; an emitter | sources | stated |
+| `SequentialTracer`, `NonSequentialTracer` | the engines; the tracer holds the facts of use it needs (wavelength, object plane) | tracing | — |
+| `StigmaticTrain` | a family of stigmatic systems; `.system()` is a member | families | stated |
 
-| Noun | Is | Stated / derived |
-|---|---|---|
-| `Frame`, `RigidTransform` | a position and orientation in 3-D | stated |
-| polynomial bases (`zernike`, `q_polynomials`, `chebyshev`) | orthogonal function families | — (pure math) |
-| `Shape` (`Plane`, `Sphere`, `Conic`, `EvenAsphere`, `OddAsphere`, `QCon`, `QBFS`, `Toroid`, `Cylinder`, `Biconic`, `XYPolynomial`, `ZernikeSag`, `CartesianOval`) | a boundary's geometry in its own local frame: sag, implicit `f_Σ`, gradient, seed | stated |
-| `Aperture` (`CircularAperture`, `AnnularAperture`, `RectangularAperture`, `EllipticalAperture`, `Obscuration`) | the region of a shape that exists | stated |
+### Surface hierarchy
 
-The intersection solvers stay in `math.intersections`. A shape declares
-itself. It never solves its own intersection, which is the existing
-decision, kept.
+Inheritance follows mathematical specialization. A subclass is a subset
+of its parent's family.
 
-Polynomial bases move down to `math`. Zernike polynomials are used by a
-shape (`ZernikeSag`) *and* by a measurement (wavefront fitting), so they
-belong to neither.
+```
+Surface
+├── SurfaceOfRevolution
+│   ├── Conic ─┬─ Plane         (c = 0: every family's flat member)
+│   │          ├─ Ellipsoid ── Sphere   (a sphere is the ellipsoid of equal axes)
+│   │          ├─ Paraboloid
+│   │          └─ Hyperboloid
+│   ├── CartesianSurface        (Descartes' stigmatic surface)
+│   └── Asphere ─┬─ EvenAsphere
+│                └─ QTypeAsphere
+├── ToroidalSurface ── CylindricalSurface   (a cylinder is the toroid of infinite rotation radius)
+└── FreeformSurface
+```
 
-### 2.2 Physics — `optics`
-
-| Noun | Is | Stated / derived |
-|---|---|---|
-| `Material` (protocol), `ConstantIndex`, `SellmeierMaterial`, `CauchyMaterial`, `AbbeMaterial`, `ModelGlass`, catalogue formulas | a homogeneous medium: `index(λ)`, optional `internal_transmittance(λ, t)` | stated |
-| `GradientIndex` | an inhomogeneous medium: `n(x, y, z, λ)` | stated |
-| `MaterialLibrary` | ordered catalogues that resolve a name to one material | stated |
-| `Interaction` (`Refract`, `Reflect`, `Diffract`) | what light does at a boundary: the direction law | stated |
-| `PhaseFunction` (`LinearGrating`, `Binary2`, …) | the phase a diffractive boundary adds | stated |
-| `Coating` (`Uncoated`, `ThinFilm`, `IdealCoating`) | how much light a boundary passes, per polarisation: the energy law | stated |
-| `Ray`, `RaySet` | geometric light: one ray, or a batch with status | — (state of light) |
-| `GaussianBeam` | paraxial beam light: complex `q`, `M²` | stated |
-| `ComplexField` | wave light: a sampled complex amplitude | stated |
-| `PolarizationState`, `Jones` algebra | the polarisation of light and its transfer | stated |
-| `Source` (`PointSource`, `Collimated`, `Lambertian`, `ImageSource`, …) | an emitter: geometry + spectrum + power | stated |
-| `Detector` | a surface that records what lands on it | stated |
-
-`laws` (vector reflection, refraction and the grating equation) and
-`radiometry` (Fresnel, thin-film transfer matrices) stay here. Physics
-needs no system to exist.
-
-### 2.3 Description — `design`
-
-| Noun | Is | Stated / derived |
-|---|---|---|
-| `Surface` | the five facts of a sequential boundary: shape, aperture, interaction, coating, placement | stated |
-| `Gap` | the medium between two surfaces, its signed axial length, and an optional change of axis (`then=`) | stated |
-| `Placement` (`Decenter`, `Tilt`, compositions with `@`) | a rigid motion of a surface or element *relative to the axis* | stated |
-| `Element` (`Singlet`, `Doublet`, `Mirror`, `Fold`, `Stop`, `Air`, `ImageSurface`, `Group`) | a named group of surfaces and gaps; a *way of writing* a system | stated (the grouping is kept) |
-| `OpticalSystem` | the instrument: object-space medium, alternating surfaces and gaps, image surface, which surface is the stop | stated |
-| vertices and frames, `bodies()`, `total_track_mm`, `table()` | facts of the hardware | **derived** |
-| `Object`, `Aperture` spec, `Fields`, `Spectrum`, `Polarization`, `Aiming` | how the instrument is used | stated |
-| `Conditions` | the five use-facts together | stated |
-| `Configuration` | a system *under* conditions: the subject of every analysis | stated (a pair) |
-| `MultiConfiguration` | an ordered, labelled tuple of configurations | stated |
-| `Field`, `Pupil` | coordinates in field space and in the normalised pupil | stated |
-| pupil samplings (`hexapolar`, `rings`, `grid`, `fan`, `random`) | point sets in the unit pupil | stated |
-| `Parameter` (`Radius`, `Thickness`, `AirSpace`, `Defocus`, `Decenter`, …) | a named degree of freedom: `get(config)` and `set(config, v) → config` | stated |
-| families (`StigmaticTrain`, …) | a parametrised generator of systems; `.system()` gives the member | stated |
-| `Scene` | solids, sources and detectors placed in space, with no order | stated |
-| `Solid` | a closed region of one medium bounded by faces | stated, or derived from a system's `bodies()` |
-
-Two words are used precisely. **Aperture** (geometry) is the region of a
-shape that exists. **`Aperture` spec** (description) is how big the
-light cone is: EPD, F/#, NA, or float-by-stop. They are different nouns.
-The spec lives in `design.conditions` and is written
-`rt.Aperture.f_number(…)`. The geometric kinds are always written with
-their shape, as in `CircularAperture`, so the two never meet unqualified.
-
-Body deduction (which pair of surfaces encloses which medium, and where
-the faces meet) moves from `viz.bodies` to `design`. It is a fact about
-the hardware. The non-sequential engine needs it, and drawing is only
-one of its readers.
-
-### 2.4 Algorithms — `propagation`
-
-| Kind of light | Engine | Module |
-|---|---|---|
-| paraxial ray (y, u) | y-nu trace, ABCD | `propagation.paraxial` |
-| real ray, fixed order | sequential, vectorised over (field, λ, pupil) | `propagation.sequential` |
-| real ray, any order | non-sequential, with ray splitting and genealogy (3-D; 2-D as the meridional case) | `propagation.nonsequential` |
-| Gaussian beam | complex-`q` ABCD | `propagation.beams` |
-| complex field | angular spectrum / Fresnel between surfaces, ray-traced phase at them | `propagation.physical_optics` |
-
-Ray aiming (from pupil coordinates to real rays) is
-`propagation.aiming`. It is the only place that turns a `Pupil` into a
-direction. It replaces today's `chief_ray_slope(s)` and the per-call
-`na_object_sine`.
-
-The engine for a sequential analysis is chosen by its subject, a
-`Configuration`. Users do not construct tracers for ordinary work.
-
-### 2.5 Measurement — `analysis`
-
-| Noun | Is |
-|---|---|
-| `Result` | base of every analysis output: the measured values, the `configuration` they were measured on, the exact `field`, `wavelength` and `focus`, and units in field names |
-| analysis functions | `Configuration → Result`, pure |
-| `Metric` (`RmsWavefront`, `RmsSpot`, `MtfAt`, `EncircledEnergyAt`, …) | an analysis reduced to one number by a stated rule: `Configuration → float` |
-| `sweep` | an analysis evaluated along an axis (field, wavelength, configuration or `Parameter`) → `Sweep` |
-| `focus` | explicit focusing: `focus.paraxial`, `focus.best(metric)` → a new configuration plus the shift |
-
-Sub-packages stay split by *what* is measured. `first_order`. `imaging`
-covers spot, PSF, MTF, encircled energy, image simulation and the
-lithographic aerial image. `aberrations` covers fans, Seidel, fitted
-Seidel, wavefront, distortion, field curvature, chromatic, stigmatism and
-aplanatism. `radiometry` covers transmission, relative illumination,
-vignetting, footprint and ghosts. `polarization` covers the pupil maps.
-
-### 2.6 Variation — `tolerance`, `optimize`
-
-| Noun | Is |
-|---|---|
-| `Tolerance` (`Power`, `Irregularity`, `Thickness`, `AirSpace`, `Decenter`, `Tilt`, `Index`, `Abbe`, …) | a *physical* fabrication or assembly error, in shop units, with a distribution; it maps onto one or more `Parameter`s |
-| `Compensator` | a `Parameter` re-solved after each perturbation, within bounds |
-| `sensitivity`, `inverse`, `monte_carlo` | tolerancing runs → reports whose members are real `Configuration`s |
-
-`optimize` keeps today's content. When the general optimiser comes, its
-variables are `Parameter`s and its objective is built from `Metric`s,
-so no new nouns will be needed.
-
-### 2.7 Presentation — `viz`
-
-`plot(result)` is a registry dispatched on the result type. `layout`,
-`view3d` and `report` are the other entry points. Today's `viz.scene.Scene`
-(a list of draw items) is renamed `Drawing`. That frees `Scene` for the
-non-sequential description, where it is the standard word.
+Where specialization is a lattice rather than a tree, the tree follows the
+defining form. A conic is the zero-departure member of *every* asphere
+family. The tree can carry only one of those relations, so it is
+expressed by `Asphere.base` and `EvenAsphere.from_conic` instead.
 
 ---
 
 ## 3. Anatomy of a boundary
 
-The single most important cut in the design: at a sequential boundary,
-five independent facts. Between boundaries, one.
-
 ```
-            ┌──────────── Surface ────────────┐
-   Gap      │ shape        what it looks like │      Gap
- (medium,   │ aperture     where it exists    │   (medium,
-  length,   │ interaction  where light goes   │    length,
-  then=…)   │ coating      how much goes      │    then=…)
-            │ placement    where it sits      │
-            └─────────────────────────────────┘
+  element A (material, pose)        element B or ambient
+      ┌───────────── Interface ─────────────┐
+      │ surface         what it looks like  │   ← geometry
+      │ coating         how much goes       │   ← physics (energy)
+      │ clear_aperture  where it is specified│
+      └─────────────────────────────────────┘
+  medium on each side  ← derived by the system from the elements
+  what light does      ← derived: media + coating + laws (never stated)
 ```
 
-Each of these is replaceable without touching the others:
-
-* An aspheric grating is `Surface(EvenAsphere(…), interaction=Diffract(LinearGrating(…)))`.
-* A coated mirror is `Surface(Conic(…), interaction=Reflect(), coating=ThinFilm(…))`.
-* A GRIN rod is `Gap(10.0, GradientIndex(…))` between two plane surfaces.
-
-Zemax encodes many of these combinations as distinct "surface types".
-Here there are no surface types, only the product of five
-vocabularies. **‹law 1›**
+* A mirror is a surface with a reflective coating.
+* A cemented face is two element faces that coincide.
+* A beam splitter's branch is a choice of the sequential path, stated
+  there (`"BS:reflect"`), because physics takes both branches.
 
 ---
 
@@ -219,10 +127,12 @@ An analysis fixes some of these and integrates or samples the others. A
 
 ## 5. Values, not objects with state
 
-`Shape`, `Aperture`, `Material`, `Surface`, `Gap`, `Element`,
-`OpticalSystem`, `Conditions`, `Configuration`, `Parameter`, `Tolerance`,
-`Scene` and every `Result` are frozen dataclasses: immutable, comparable,
-hashable. `replace(...)` and `Parameter.set(...)` return new values.
+`Rotation`, `Pose`, every `Surface`, `Aperture`, `Solid`, `Material`,
+`Coating`, `Interface`, `Element`, `Assembly` and `OpticalSystem` are
+immutable values, compared and hashed by their parameters. So will be the
+planned `Conditions`, `Configuration`, `Parameter`, `Tolerance` and every
+`Result`. `replace(...)`, `placed(...)`, `rotated(...)` and
+`Parameter.set(...)` return new values.
 
 Consequences that the usage depends on:
 
@@ -243,8 +153,8 @@ law with no enforcement is a wish. Enforcement is either a test or, where
 no test can see it, a review rule written in `CONTRIBUTING.md`.
 
 **Law 1 — One concept, one slot.** Each concept is expressible in exactly
-one place: a grating is an interaction, GRIN is a medium, a stop is a
-designation on the system, not a surface kind. *Why:* combinations stay a
+one place: a mirror is a coating, GRIN is a medium, a stop is an element,
+the media of a boundary are derived from the elements around it. *Why:* combinations stay a
 product, not a list of special cases. *Enforced:* the glossary test (§7);
 review.
 
@@ -253,9 +163,10 @@ review.
 distance. All descriptions are immutable and hashable. *Why:* the same
 instrument is analysed under many conditions, perturbed in tolerancing,
 and repeated in multi-configuration, all without aliasing.
-*Enforced:* a test that every public class in `shapes`, `optics`
-(descriptions), `design` and every `Result` is a frozen dataclass; a test
-that `OpticalSystem`'s fields contain no condition types.
+*Enforced:* a test that every public description class (in `geometry`,
+`materials`, `coatings`, `interfaces`, `elements`, `system`) and every
+`Result` refuses attribute assignment and hashes by value; a test that
+`OpticalSystem` holds no wavelength, field or object distance.
 
 **Law 3 — Stated, never derived, state.** An object stores what was
 stated. Pupils, vertex frames, EFL and bodies are computed. *Why:* a
@@ -316,11 +227,13 @@ seeds are equal.
 
 Three checks turn this document into something `pytest` fails on.
 
-1. **Layers.** `tests/test_architecture.py` already enforces the chain.
-   Extend `LAYERS` to the new chain. Add a third-party rule: below `viz`,
-   no `matplotlib`, `vispy` or `PySide6` (law 7).
-2. **Glossary.** `docs/design/glossary.md`, written once D1–D8 (§9) are
-   settled, defines every public name, once,
+1. **Layers.** `tests/test_architecture.py` enforces the chain of §1, plus
+   two rules: elements never import the system or the engines, and the
+   system never imports an engine or a file format. Still to add: a
+   third-party rule (below `viz`, no `matplotlib`, `vispy` or `PySide6`;
+   law 7).
+2. **Glossary.** `docs/design/glossary.md`, to be written once D1–D7 (§9)
+   are settled, defines every public name, once,
    with its nature and package. A test collects `raytracer.__all__`
    recursively and fails on any name missing from the glossary, and on any
    glossary entry that no longer exists. A new concept cannot enter the API
@@ -337,92 +250,43 @@ Laws 2, 5, 6, 8 and 10 each get the dedicated tests listed in §6.
 
 ---
 
-## 8. Migration: from today's names
+## 8. What changed from the old code
 
-Nothing here is renamed until the corresponding feature is implemented.
-The executable usage specification (§7.3) is the switch.
-
-| Today | Becomes | Why |
-|---|---|---|
-| package `surfaces` | `shapes` (geometry only) | a shape is not yet a surface; the surface is the five-fact composite (§3) |
-| `SurfaceRow` | `Surface` + `Gap`; the row survives as `OpticalSystem.table()` | a row mixes a boundary with the medium after it |
-| `SurfaceKind.REFRACT` / `MIRROR` | `Refract()` / `Reflect()` interactions | the direction law, now extensible to `Diffract` |
-| `SurfaceKind.STOP` | `OpticalSystem(..., stop="name")` | being the stop is a designation, not a kind of surface |
-| `OpticalSystem(rows, wavelength_um, object_space, object_z)` | `OpticalSystem` (hardware) + `Conditions` (`spectrum`, `object`) | law 2 |
-| `OpticalSystem.set_asphere`, `set_thickness` | `replace(...)`, `Parameter.set(...)` | law 2; no mutation |
-| `OpticalSystem.vertices`, `n_before`, `n_after`, `image_z` (stored) | derived methods | law 3 |
-| `AsphereProfile` | `shapes.EvenAsphere` (with `Sphere`, `Conic`, `Plane` as named cases) | one name per shape |
-| `CartesianOvalProfile` | `shapes.CartesianOval` | — |
-| `ProfileSurface`, `ConicSurface`, `EllipseSurface`, … (2-D, placed, with media) | shapes placed in a `Scene` | they were non-sequential objects all along |
-| `FieldPoint(x, y)` | `Field(x, y)` in a declared field type | fields have types (angle, height) |
-| `na_object_sine=` on every call | `Aperture.object_na(...)` in `Conditions` | stated once |
-| `stop_index=` on every call | `OpticalSystem.stop` | stated once |
-| object at `1e6` mm as "infinity" | `Object.at_infinity()` | it is not an approximation any more |
-| `PupilSampling(kind=...)` | `rt.pupil.hexapolar(...)`, `rings`, `grid`, `fan`, `random(seed=)` | — |
-| `trace_pupil(tracer, field, ...)` | `rt.trace(config, field=, pupil=)` | the subject is the configuration |
-| `trace_from_object` | `rt.trace_ray(config, field=, pupil=)` | — |
-| `chief_ray_slope(s)` | internal to `propagation.aiming` | aiming is one mechanism |
-| `solve_object_plane`, `differential_conjugates` | `rt.focus.paraxial(config)`, `first_order` | explicit solve (law 8) |
-| `ParaxialModel` | `rt.paraxial.trace` (y-nu) + `analysis.first_order` | — |
-| `TraceResult`, `BatchTraceResult`, `TraceStatus` | `RayPath`, `RaySet`, `RayStatus` | — |
-| `BranchingTracer` | `nonsequential.trace` on `scene.meridional()` | one engine, two dimensions |
-| `spot_data(pupil)` | `analysis.spot_diagram(config)`; `spot_data_from_points` stays low-level | — |
-| `exit_pupil_wavefront(..., reference_radius=500.0)` | `analysis.wavefront(config)`, referenced through the exit pupil | the 500 mm default was a placeholder |
-| `pupil_function` + `scalar_psf` (unit-disk pupil) | `analysis.psf(method="fft")` on the traced pupil | vignetting and pupil distortion included |
-| `seidel_coefficients` | `analysis.fitted_seidel`; new `analysis.seidel` is per-surface theory | two quantities, two names |
-| `zernike`, `zernike_modes`, `fit_opd`, `fit_transverse` | polynomials to `math.polynomials`; fits as `Wavefront.zernike(...)` | shared by a shape and a measurement |
-| `distortion_grid(tracer, magnification=, half_field=)` | `analysis.distortion_grid(config, n=)` | magnification and field come from conditions |
-| `chief_ray_distortion`, `field_metrics` | `analysis.distortion`, `analysis.field_curvature` | one measurement per name |
-| `axial_color`, `lateral_color`, `chromatic_spots` | `focal_shift`, `longitudinal_aberration`, `lateral_color`, `spot_diagram(wavelength="all")` | — |
-| `ray_fans` | `ray_fan`, plus new `opd_fan` | — |
-| `abbe_image`, `contrast_curve`, `BinaryMask` | `analysis.imaging.lithography` | specialised; kept |
-| `StigmaticTrain`, `.to_system()` | `design.families.StigmaticTrain`, `.system()`, `.under(c)` | a family is not a system |
-| `optics.elements.Lens`, `Mirror` (2-D) | `Singlet`, `Mirror` elements | one description of a lens, not two |
-| `optics.instruments.Screen` | `Detector` | — |
-| `viz.bodies` (deduction) | `OpticalSystem.bodies()` in `design` | a fact of the hardware |
-| `viz.scene.Scene` | `viz.Drawing` | frees `Scene` for non-sequential |
-| `io.read_csv`, `io.read_train` | `io.read_system` (dispatch by format) | named by what it returns |
-| `optimize.Constraint`, `EvaluationContext` | unchanged now; later expressed with `Metric` and `Parameter` | out of scope |
+| Old | Now |
+|---|---|
+| `math`, `surfaces` | `geometry` (vectors, `Rotation`/`Pose`, surfaces, apertures, solids, intersection) |
+| `optics.materials` | `materials` |
+| `optics.laws`, `optics.radiometry` | `interfaces.reflect/refract`; Fresnel is the `Uncoated` coating |
+| `SurfaceRow`, `SurfaceKind` | `TableRow` (a view and a constructor); the model is placed elements |
+| `SurfaceKind.STOP` | a `Stop` element (`virtual=True` for a reference plane inside glass) |
+| `OpticalSystem(rows, wavelength_um, object_z)` | `OpticalSystem(components, ambient, path, stop)`; wavelength and object plane on the tracer |
+| `set_thickness`, `set_asphere` (mutation) | new values: `replace`, `with_component`, `placed`, `rotated` |
+| 2-D `Lens`/`Mirror`/`Screen`, `BranchingTracer` | the same 3-D elements and `Sensor`, `NonSequentialTracer`; `fan="y"` sources for meridional pictures |
+| `propagation` | `tracing` |
+| `design.StigmaticTrain.to_system()` | `families.StigmaticTrain.system()` / `.tracer()` |
+| `OpticalSystem.from_prescription` | `io.read_prescription` → `Prescription(system, wavelength_um)` |
 
 ---
 
 ## 9. Open decisions
 
-Each has a recommendation. Each changes names in `usage.md`, so it should
-be settled before any code is written.
-
-**D1 — Name of "a system under conditions".** `Configuration` (the
-optical-design word, and multi-configuration falls out of it), `Setup`, or
+**D1 — Name of "a system under conditions".** `Configuration`, `Setup`, or
 `Imaging`. *Recommended: `Configuration`.*
 
-**D2 — Rename `surfaces` to `shapes`, and move `Surface` to `design` as
-the five-fact composite.** Today's `surfaces.Surface` is a 2-D placed
-shape with media, which is really a non-sequential object. *Recommended:
-yes.*
-
-**D3 — Sign convention.** Keep the standard signed thicknesses (negative
-after an odd number of mirrors) and global radius signs, or make gaps
-positive along the light path. *Recommended: keep standard*, so patents
-and `.zmx` files compare digit for digit. That is a core value of this
-repo.
-
-**D4 — Default ray aiming.** Real (correct off-axis, slower) or paraxial
-(Zemax's default). *Recommended: real.* The library already aims the
-chief ray in real space.
+**D4 — Default ray aiming** once conditions exist: real or paraxial.
+*Recommended: real.*
 
 **D5 — `result.plot()`.** Allow it as a deferred convenience, or allow
-only `rt.viz.plot(result)`. *Recommended: allow both*, with the method
-being one line that defers to the registry.
+only `rt.viz.plot(result)`. *Recommended: allow both.*
 
-**D6 — Language of the design documents.** The README is in Spanish and
-the code is in English. These documents are in English to match the code
-and the API names. *Your call.*
+**D6 — Language of the design documents.** English, matching the code;
+the README is in Spanish.
 
-**D7 — Glass data shipped with the package.** refractiveindex.info data
-is CC0 and can ship. Vendor `.agf` catalogues have unclear redistribution
-terms. *Recommended:* ship the refractiveindex.info subset; read vendor
-`.agf` files from a user path.
+**D7 — Glass data shipped with the package.** *Recommended:* ship
+refractiveindex.info data (CC0); read vendor `.agf` files from a user path.
 
-**D8 — Compatibility.** Break the old names (version 0.x, one main
-author), or keep deprecation shims. *Recommended: break*, migrating the
-notebooks and tests in the same commits that rename.
+Settled: the package is `geometry.surfaces`, not `shapes`. Prescription
+tables keep the standard signed convention, while placed elements have
+absolute poses. Old names were broken, not shimmed. Mutating verbs are
+past participles that return new values (`rotated`, `translated`,
+`placed`).

@@ -1,9 +1,9 @@
 # Design: usage first, then ontology
 
-**Status: proposal.** Nothing described in this folder is implemented
-yet unless the migration table in `ontology.md` says so. Its purpose is to
-fix *how the finished library is used*, and *what each noun in it is*,
-before any of Tier 0–3 is written.
+**Status.** The physical model is implemented: placed elements in an
+ambient medium, read by both a sequential and a non-sequential tracer
+(`usage.md` §2 and §12, `ontology.md` §1–3). Everything else here is the
+plan, and its usage is fixed before any code is written for it.
 
 > The purpose of abstraction is not to be vague, but to create a new
 > semantic level in which one can be absolutely precise.

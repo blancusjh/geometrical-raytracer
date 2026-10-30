@@ -1,5 +1,9 @@
 # The library as if it existed
 
+**Status.** §2 (describing a system) and the core of §12 (non-sequential
+tracing) are implemented. The other sections remain the specification of
+what comes next.
+
 One continuous session. The subject is a Cooke triplet, later a zoom, a
 folded telescope and a laser line. Every planned feature appears at least
 once. Comments marked **‹law›** point to the invariant in `ontology.md` §6
@@ -13,7 +17,6 @@ only inside). A name whose unit departs from that convention says so
 ```python
 import numpy as np
 import raytracer as rt
-from raytracer import shapes
 ```
 
 ---
@@ -46,145 +49,143 @@ that resolves to two catalogues raises; it never picks silently. **‹law 9›**
 
 ---
 
-## 2. Describing what the system *is*
+## 2. Describing what the system *is* — implemented
 
-A system is hardware. It is media that fill space and surfaces that bound
-them, in the order light meets them. It knows nothing about field angles,
-F-numbers or wavelengths of use. Those are *conditions*, in §3. **‹law 2›**
-
-### 2.1 By composing elements (the usual way)
+A system is hardware: **elements placed in an ambient medium**. It knows
+nothing about field angles, F-numbers or wavelengths of use. Those are
+*conditions*, in §3. **‹law 2›** This section is implemented (see
+`raytracer/elements`, `raytracer/system`).
 
 ```python
-cooke = rt.OpticalSystem.compose(
-    rt.Singlet("L1", front=shapes.Sphere(21.25), back=shapes.Sphere(-158.65),
-               thickness=2.0, material=glass["N-SK16"], aperture=6.5),
-    rt.Air(6.0),
-    rt.Singlet("L2", front=shapes.Sphere(-20.25), back=shapes.Sphere(19.30),
-               thickness=1.0, material=glass["F4"], aperture=5.0),
-    rt.Air(1.5),
-    rt.Stop("STO", aperture=4.2),
-    rt.Air(4.5),
-    rt.Singlet("L3", front=shapes.Sphere(141.25), back=shapes.Sphere(-17.285),
-               thickness=2.0, material=glass["N-SK16"], aperture=6.5),
-    rt.Air(43.0),
-    rt.ImageSurface(),                         # flat by default; may be curved
+import raytracer as rt
+from raytracer import elements as el, coatings
+from raytracer.geometry import surfaces as sf, apertures as ap
+from raytracer.interfaces import Interface
+from raytracer.materials import default_materials
+
+glass = default_materials()
+```
+
+### 2.1 Placed components (the model itself)
+
+Every element has a name and a pose. Its local origin is the vertex of its
+first face; its local +z runs into the element.
+
+```python
+cooke = rt.OpticalSystem(
     name="Cooke triplet",
-)
-```
-
-Elements are named groups of surfaces. The system keeps the grouping:
-`cooke.elements["L2"]`. Surfaces get derived names: `"L2.1"`, `"L2.2"`,
-`"STO"`. Any later reference to "surface 4" or "element L2" uses these
-names. Integer indices also work, but names survive edits.
-
-`Singlet`, `Doublet` (cemented), `Mirror`, `Stop`, `Air`, `ImageSurface`
-and a free-form `Group` are the element vocabulary. An element only
-*produces* surfaces and gaps. The system that results is the same value
-however it was written.
-
-### 2.2 By prescription table (the designer's view)
-
-```python
-cooke_same = rt.OpticalSystem.from_table(
-    #  shape                           gap after  medium after       aperture   name
-    [(shapes.Sphere(21.25),            2.0,       glass["N-SK16"],   6.5,       "L1.1"),
-     (shapes.Sphere(-158.65),          6.0,       rt.AIR,            6.5,       "L1.2"),
-     ...
+    ambient=rt.AIR,
+    components=[
+        el.Lens("L1", front=sf.Sphere(21.25), back=sf.Sphere(-158.65), thickness=2.0,
+                material=glass["N-SK16"], semi_diameter=6.5, z=0.0),
+        el.Lens("L2", front=sf.Sphere(-20.25), back=sf.Sphere(19.30), thickness=1.0,
+                material=glass["F4"], semi_diameter=5.0, z=8.0),
+        el.Stop("STO", aperture=4.2, z=10.5),
+        el.Lens("L3", front=sf.Sphere(141.25), back=sf.Sphere(-17.285), thickness=2.0,
+                material=glass["N-SK16"], semi_diameter=6.5, z=15.0),
+        el.Sensor("IMG", z=60.0),
     ],
-    stop="STO",
-)
-assert cooke_same == cooke.ungrouped()        # same surfaces and gaps, no element names
-print(cooke.table())                          # the table is a *view* of the system
-```
-
-### 2.3 What a surface is made of
-
-At a surface, four independent things are stated. Between surfaces, one
-more:
-
-```python
-rt.Surface(
-    shape=shapes.EvenAsphere(radius=-17.285, conic=-0.8, coefficients=(1.2e-5, -3e-8)),
-    aperture=rt.CircularAperture(6.5),      # where the boundary exists
-    interaction=rt.Refract(),               # what light does there
-    coating=rt.coatings.quarter_wave(glass["MGF2"], at_um=0.55),   # how much, which polarisation
-    placement=rt.Tilt(x_deg=0.0),           # where it sits relative to the axis
-)
-rt.Gap(43.0, medium=rt.AIR)                 # what fills the space up to the next surface
-```
-
-* **Shapes** (pure geometry, sag and gradient): `Plane`, `Sphere`, `Conic`,
-  `EvenAsphere`, `OddAsphere`, `QCon`, `QBFS`, `Toroid`, `Cylinder`,
-  `Biconic`, `XYPolynomial`, `ZernikeSag`, `CartesianOval`.
-* **Apertures**: `CircularAperture`, `AnnularAperture`,
-  `RectangularAperture`, `EllipticalAperture`, and `Obscuration`, which
-  blocks instead of passing.
-* **Interactions**: `Refract()` (the default), `Reflect()`, and
-  `Diffract(phase, order=…, mode="transmit"|"reflect")`. Here `phase` is a
-  `LinearGrating(lines_per_mm=…)` or a `PhaseProfile` such as
-  `Binary2(coefficients=…, norm_radius=…)` for diffractive optical
-  elements.
-* **Coatings**: `Uncoated()` (bare Fresnel, the default), `ThinFilm(layers)`,
-  and `IdealCoating(reflectance=…, transmittance=…)`.
-* **Media**: any `Material`, or `GradientIndex(base, profile)`. A GRIN
-  medium is a property of the *gap*, not of a surface.
-
-A grating is not a shape and a GRIN is not a surface. Each concept lives in
-exactly one of these five slots. **‹law 1›**
-
-### 2.4 Moving a surface vs moving the axis
-
-Two different acts with two different names. Zemax conflates both into
-"coordinate breaks".
-
-```python
-rt.Surface(shapes.Sphere(50.0), placement=rt.Decenter(y=0.1))
-#   moves this surface only; the axis that later surfaces follow is unchanged
-
-rt.Gap(30.0, rt.AIR, then=rt.Decenter(y=5.0) @ rt.Tilt(x_deg=2.0))
-#   moves the axis itself; every surface after this gap follows it
-
-folded = rt.OpticalSystem.compose(
-    rt.Mirror("M1", shapes.Conic(-2000.0, conic=-1.0), aperture=100.0),
-    rt.Air(-800.0),                                   # signed, as in every prescription
-    rt.Fold("M2", angle_deg=45.0, axis="x", aperture=30.0),   # plane mirror; turns the axis by 90°
-    rt.Air(150.0),
-    rt.ImageSurface(),
-    stop="M1",
 )
 ```
 
-`Fold` is shorthand. It tilts the surface by θ and turns the axis by 2θ.
-Element-level placement is the same act applied to a group:
-`cooke.elements["L2"].placed(rt.Decenter(x=0.02))`. Tolerancing (§10)
-uses exactly this.
+Placement keywords, the same on every element:
 
-Thicknesses keep the standard signed convention, negative after an odd
-number of mirrors. Radii keep the standard global sign. Patents and `.zmx`
-files then compare digit for digit.
+* `pos=(x, y, z)` or `z=` for the position;
+* `rot=` for the orientation: `(x, y, z)` Euler degrees (intrinsic
+  x → y′ → z″, so `R = Rx @ Ry @ Rz`), `(angle, (ax, ay, az))` axis-angle,
+  a 3×3 matrix, or a `rt.Rotation`;
+* `axis=` / `normal=`, which give where the local +z points;
+* or a complete `pose=rt.Pose(...)`.
 
-### 2.5 Systems are values
+Element vocabulary: `Lens`, `Mirror`, `BeamSplitter`, `Prism` (a
+polyhedral solid), `Stop` (an opaque plane with an opening; `virtual=True`
+for a patent's reference plane), `Sensor`. `rt.Assembly(name, components,
+pose)` moves a group rigidly.
 
-```python
-cooke.surfaces["L3.2"].shape.radius          # -17.285
-cooke2 = cooke.replace("L3.2", shape=shapes.Sphere(-17.0))   # a *new* system
-cooke == cooke2                              # False; cooke itself is untouched
-hash(cooke)                                  # systems are hashable; analyses may cache on them
-```
+### 2.2 Concise writing: composition and tables
 
-Nothing in the library mutates a system. Optimisation, tolerancing and
-multi-configuration all produce new values. **‹law 2›**
-
-Other things a system answers about itself, because they are facts of the
-hardware and not measurements:
+Both are constructors of the same value.
 
 ```python
-cooke.vertices()            # global vertex frames, derived from gaps and placements
-cooke.bodies()              # solids: which surfaces enclose which medium, where faces meet
-cooke.total_track_mm        # first vertex to image surface
+cooke_same = rt.OpticalSystem.compose(
+    el.Lens("L1", front=sf.Sphere(21.25), back=sf.Sphere(-158.65), thickness=2.0,
+            material=glass["N-SK16"], semi_diameter=6.5),
+    rt.Gap(6.0),
+    el.Lens("L2", ...), rt.Gap(1.5), el.Stop("STO", aperture=4.2), rt.Gap(4.5),
+    el.Lens("L3", ...), rt.Gap(43.0), el.Sensor("IMG"),
+)
+
+duv = rt.io.read_prescription("data/optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv")
+duv.system.summary()        # double-pass lens, two mirrors, virtual stop, immersion in contact
+duv.system.table()          # the rows again: the table is a view of the system
 ```
 
----
+A prescription table is read into physical elements:
+- every run of glass between two surfaces becomes a lens;
+- a surface met twice is one surface;
+- bodies sharing a surface are in contact;
+- a stop plane inside a lens is a virtual stop;
+- the image plane becomes a sensor.
+
+### 2.3 What a boundary is made of
+
+A **surface** is geometry only. An **interface** is a surface plus what
+makes it optical *on its own*: a coating and a clear aperture. A bare
+surface is accepted wherever an interface is.
+
+```python
+el.Lens("L1",
+    front=Interface(sf.Sphere(21.25), coating=coatings.AR(), clear_aperture=ap.Circle(6.2)),
+    back=sf.Sphere(-158.65),
+    thickness=2.0, material=glass["N-SK16"], semi_diameter=6.5, pos=(0, 0, 25), rot=(30, 45, 0))
+```
+
+What light *does* at a boundary is not stated anywhere. It follows from
+three things:
+- the media on the two sides, resolved by the system from the elements;
+- the coating: `Uncoated` (Fresnel), `AR`, `PerfectMirror`,
+  `IdealBeamSplitter`, `Absorbing`;
+- the laws of reflection and refraction.
+
+A mirror is a surface with a reflective coating. **‹law 1›**
+
+Surfaces, with inheritance following mathematical specialization:
+
+```
+Surface
+├── SurfaceOfRevolution
+│   ├── Conic ─┬─ Plane (c = 0)
+│   │          ├─ Ellipsoid ── Sphere
+│   │          ├─ Paraboloid
+│   │          └─ Hyperboloid
+│   ├── CartesianSurface      (Descartes' stigmatic surface; conjugates from the vertex)
+│   └── Asphere ─┬─ EvenAsphere
+│                └─ QTypeAsphere   (Forbes Q-con; Q-bfs not yet)
+├── ToroidalSurface ── CylindricalSurface
+└── FreeformSurface          (XY polynomial on a conic base)
+```
+
+Apertures (`Circle`, `Annulus`, `Rectangle`, `Polygon`) are regions of a
+surface's local (x, y) plane. Solids (`Sphere`, `Cylinder`, `Box`, `Mesh`)
+are closed regions, used by prisms.
+
+### 2.4 What the system derives
+
+```python
+cooke.faces          # every physical boundary, with the medium on each side
+cooke.path           # the sequential route: stated (path=[...]) or inferred if coaxial
+cooke.stop           # the aperture stop's name
+cooke.rotated(45, axis=(1, 1, 0), about=(10, 0, 5))     # a new system; nothing mutates
+```
+
+Where two faces coincide (same pose, same surface), they are one boundary
+between two materials: cemented lenses, an immersion liquid against a lens.
+A folded or split system states its path, with `":reflect"` where a
+beam splitter would otherwise be ambiguous:
+
+```python
+arm = system.replace(path=["BS:reflect", "M1", "L2.front", "L2.back", "D2"])
+```
 
 ## 3. Stating how it is *used*: conditions
 
@@ -527,30 +528,31 @@ special to the analyses. Randomness always takes an explicit `seed`. **‹law 10
 
 ---
 
-## 12. Non-sequential: a scene, not a sequence
+## 12. Non-sequential: the same system, no order — core implemented
 
-Without an order, the noun changes. A **scene** is solids, sources and
-detectors placed in space.
+There is no separate "scene". The non-sequential engine reads the very
+same `OpticalSystem`: the same faces, the same media on each side, the
+same coatings. Only the order is dropped.
 
 ```python
-scene = rt.Scene.from_system(triplet.system)      # solids deduced from the media, as bodies() does
-scene = scene.with_(
-    sources=[rt.sources.Collimated(diameter_mm=11.1, direction=rt.direction_from_angle_deg(14),
-                                   spectrum=day.spectrum, power_w=1.0)],
-    detectors=[rt.Detector("sensor", at=triplet.system.image_frame(),
-                           size_mm=(36, 24), pixels=(1200, 800))],
-)
+from raytracer.sources import CollimatedSource
+from raytracer.tracing import NonSequentialTracer
 
-run = rt.nonsequential.trace(scene, rays=1_000_000, split="fresnel",
-                             min_relative_power=1e-6, seed=1)
-run.irradiance("sensor")                         # W/mm² map
-run.paths().where(bounces=2)                     # ghost paths, with their genealogy
-run.paths().through("L2.2", "L1.1")              # light that went backwards between two faces
+source = CollimatedSource((0, 0, -40), direction=(0, 0, 1), beam_radius=2.0,
+                          rays=2000, wavelength_um=0.55)
+tree = NonSequentialTracer(system, max_interactions=12, split=True).trace(source)
+tree.hits("D1").power.sum()                      # power reaching a sensor
+tree.hits("D1").histogram(axis=1, bins=200)      # irradiance profile
+tree.segments()                                  # every segment, with generation/parent/kind
 ```
 
-The 2-D branching tracer stays. It is the meridional restriction of the
-same engine: `rt.nonsequential.trace(scene.meridional(), …)`, which is
-what the interactive viewer drives.
+* `split=True` divides power between reflected and transmitted children,
+  per coating (Fresnel for bare surfaces).
+* `split=False` follows the branch a sequential trace would take, which
+  gives the clean picture for drawing.
+* `fan="y"` on a source gives the meridional fan of the old 2-D figures.
+* Planned: irradiance maps in W/mm², ghost-path queries, Monte Carlo
+  splitting with `seed=`.
 
 ---
 
@@ -574,11 +576,12 @@ pop.coupling_efficiency(rt.ComplexField.fiber_mode(mfd_um=6.2, wavelength_um=1.0
 
 ## What the session needed, and nothing more
 
-Nouns: `Material`, `MaterialLibrary`, `OpticalSystem`, `Surface`, `Gap`,
-the shape, aperture, interaction, coating and placement vocabularies,
-`Element`, `Conditions`, `Configuration`, `MultiConfiguration`, `Field`,
-`Pupil`, `RaySet`, `Result`, `Parameter`, `Metric`, `Tolerance`,
-`Compensator`, `Scene`, `Source`, `Detector`, `GaussianBeam`,
+Nouns: `Material`, `MaterialLibrary`, `Surface` (and its family),
+`Aperture`, `Solid`, `Coating`, `Interface`, `Element` (`Lens`, `Mirror`,
+`BeamSplitter`, `Prism`, `Stop`, `Sensor`), `Pose`, `Rotation`,
+`Assembly`, `OpticalSystem`, `Conditions`, `Configuration`,
+`MultiConfiguration`, `Field`, `Pupil`, `RaySet`, `Result`, `Parameter`,
+`Metric`, `Tolerance`, `Compensator`, `Source`, `GaussianBeam`,
 `ComplexField`.
 
 Verbs: `compose`, `under`, `replace`, `trace`, `sweep`, the analyses, the
