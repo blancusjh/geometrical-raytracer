@@ -1,8 +1,9 @@
 # Design: usage first, then ontology
 
 **Status.** The physical model is implemented: placed elements in an
-ambient medium, read by both a sequential and a non-sequential tracer
-(`usage.md` §2 and §12, `ontology.md` §1–3). Everything else here is the
+ambient medium, and light as `Rays` that both a sequential and a
+non-sequential tracer carry through it (`usage.md` §2 and §12,
+`ontology.md` §1–3). Everything else here is the
 plan, and its usage is fixed before any code is written for it.
 
 > The purpose of abstraction is not to be vague, but to create a new
@@ -23,8 +24,7 @@ comes last, and it is written against this text, not the other way round.
    feature appears here at least once.
 2. [`ontology.md`](ontology.md) — what each noun *is*: its nature, its
    package, whether it is stated or derived. The laws that keep the
-   ontology sound, and how each law is enforced. The map from today's
-   names to the new ones, and the decisions still open.
+   ontology sound, how each law is enforced, and the decisions still open.
 
 ## Scope
 
