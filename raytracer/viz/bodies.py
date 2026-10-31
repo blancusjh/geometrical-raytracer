@@ -1,7 +1,8 @@
 """Bodies of a system in the drawing plane, their colours, and the matplotlib drawing of a traced system.
 
-A lens is a body of one material between its two faces, closed by its rim
-(:func:`~raytracer.viz.section.lens_outline`). Coaxial neighbours not in contact may **interpenetrate**:
+A lens is one body of glass between two faces, or several cemented, closed by its rim; each body is drawn
+alone, in its own material (:func:`lens_bodies`, :func:`~raytracer.viz.section.lens_outline`). Coaxial
+neighbours not in contact may **interpenetrate**:
 one's back face crosses the other's front face off-axis, and the space between them is claimed by two
 materials at once — an inconsistency of the design, not of the drawing. :func:`body_outlines` cuts both parts
 there and leaves that region hollow. The cut bounds the design's valid aperture: :func:`draw_system` warns when
@@ -20,6 +21,7 @@ from ..elements import BeamSplitter, Lens, Mirror, Prism, Sensor, Stop
 from ..geometry.surfaces import Plane
 from ..materials import Material
 from ..system import OpticalSystem
+from ..geometry.transforms import Pose
 from ..system.faces import TRANSMIT
 from ..rays import Rays, Status
 from ..tracing import FieldPoint, SequentialTracer, chief_ray_slopes, trace_from_object
@@ -62,16 +64,32 @@ _THIN_STYLES = {
 class BodyOutline(NamedTuple):
     """One drawn body: element name, material, index, closed ``(z, y)`` polygon.
 
-    ``extents`` are the drawn half-chords of a lens's front and back faces (``None`` for a prism); ``exact``
-    is False when the pose is not meridional and the polygon is a projection.
+    ``faces`` names the lens faces in front of and behind the body, and ``extents`` are their drawn
+    half-chords (both ``None`` for a prism); ``exact`` is False when the pose is not meridional and the
+    polygon is a projection.
     """
 
     name: str
     material: Material
     n: float
     polygon: np.ndarray
+    faces: tuple[str, str] | None
     extents: tuple[float, float] | None
     exact: bool
+
+
+def lens_bodies(lens: Lens, pose: Pose) -> list[tuple[Lens, Pose, tuple[str, str]]]:
+    """Each glass of *lens* alone — a singlet at its world pose — with the names of the faces before and behind it."""
+
+    return [
+        (
+            Lens(lens.name, surfaces=lens.surfaces[k : k + 2], thicknesses=lens.thicknesses[k : k + 1],
+                 materials=lens.materials[k : k + 1], semi_diameter=lens.semi_diameter),
+            pose @ Pose((0.0, 0.0, float(z))),
+            (f"{lens.name}.{k + 1}", f"{lens.name}.{k + 2}"),
+        )
+        for k, z in enumerate(lens.vertices[:-1])
+    ]
 
 
 def body_outlines(system: OpticalSystem, *, wavelength_um: float | None = None, samples: int = 240) -> list[BodyOutline]:
@@ -85,48 +103,62 @@ def body_outlines(system: OpticalSystem, *, wavelength_um: float | None = None, 
     """
 
     caps = _cuts(system)
-    outlines = []
-    for element, pose in system.walk():
-        lens_caps = (caps.get((element.name, "front")), caps.get((element.name, "back")))
-        body = body_outline(element, pose, wavelength_um=wavelength_um, caps=lens_caps, samples=samples)
-        if body is not None:
-            outlines.append(body)
-    return outlines
+    return [body for element, pose in system.walk()
+            for body in element_bodies(element, pose, wavelength_um=wavelength_um, caps=caps, samples=samples)]
 
 
-def body_outline(element, pose, *, wavelength_um=None, caps=(None, None), samples=240) -> BodyOutline | None:
-    """The outline of a lens or prism at world *pose* (``None`` for other elements); *caps* trim a lens's faces."""
+def element_bodies(element, pose, *, wavelength_um=None, caps=None, samples=240) -> list[BodyOutline]:
+    """The outlines of a lens's bodies, or of a prism, at world *pose* (none for other elements).
 
-    n = medium_index(element.material, wavelength_um)
+    *caps* trim lens faces: ``{(face name, "front" | "back"): half-chord}``.
+    """
+
+    caps = caps or {}
     if isinstance(element, Lens):
-        polygon, extents, _ = lens_outline(element, pose, front_extent=caps[0], back_extent=caps[1], samples=samples)
-        return BodyOutline(element.name, element.material, n, polygon, extents, section_offset(pose)[1])
+        outlines = []
+        for body, body_pose, faces in lens_bodies(element, pose):
+            polygon, extents, _ = lens_outline(body, body_pose, front_extent=caps.get((faces[0], "front")),
+                                               back_extent=caps.get((faces[1], "back")), samples=samples)
+            material = body.materials[0]
+            outlines.append(BodyOutline(element.name, material, medium_index(material, wavelength_um), polygon, faces, extents,
+                                        section_offset(body_pose)[1]))
+        return outlines
     if isinstance(element, Prism):
         polygon, exact = polyhedron_section(element.solid, pose)
         if polygon.shape[0] >= 3:
-            return BodyOutline(element.name, element.material, n, np.vstack([polygon, polygon[:1]]), None, exact)
-    return None
+            n = medium_index(element.material, wavelength_um)
+            return [BodyOutline(element.name, element.material, n, np.vstack([polygon, polygon[:1]]), None, None, exact)]
+    return []
 
 
 def body_overlaps(system: OpticalSystem) -> list[tuple[str, str, float]]:
     """``[(upstream, downstream, h_cut), ...]``: neighbouring coaxial lenses that interpenetrate.
 
     Above ``h_cut`` the upstream back face lies behind the downstream front face; ``h_cut = 0`` means they
-    collide on the axis. Lenses in contact (a cemented face) never overlap; only lenses on the z axis,
+    collide on the axis. Bodies in contact — cemented, or separate lenses touching — never overlap; only lenses on the z axis,
     unrotated, are compared.
     """
 
-    lenses = sorted(
-        ((e, p) for e, p in system.walk() if isinstance(e, Lens) and _coaxial(p)), key=lambda lp: float(lp[1].position[2])
+    return [(a[0], b[0], h) for a, b, h in _overlaps(system)]
+
+
+def _overlaps(system: OpticalSystem) -> list[tuple[tuple, tuple, float]]:
+    """:func:`body_overlaps`, between bodies ``(lens name, singlet, pose, faces)``, in order along z."""
+
+    bodies = sorted(
+        ((e.name, *body) for e, p in system.walk() if isinstance(e, Lens) and _coaxial(p) for body in lens_bodies(e, p)),
+        key=lambda b: float(b[2].position[2]),
     )
     overlaps = []
-    for (a, pa), (b, pb) in zip(lenses, lenses[1:]):
-        if any(f"{a.name}.back" in f.names and f"{b.name}.front" in f.names for f in system.faces):
-            continue
-        upper = min(usable_extents(a, pa)[1], usable_extents(b, pb)[0])
-        crossing = _crossing(face_curve(a, "back", z0=float(pa.position[2])), face_curve(b, "front", z0=float(pb.position[2])), upper)
+    for a, b in zip(bodies, bodies[1:]):
+        back, front = a[3][1], b[3][0]
+        if back == front or any(back in f.names and front in f.names for f in system.faces):
+            continue  # cemented, or in contact
+        upper = min(usable_extents(a[1], a[2])[1], usable_extents(b[1], b[2])[0])
+        crossing = _crossing(face_curve(a[1], "back", z0=float(a[2].position[2])),
+                             face_curve(b[1], "front", z0=float(b[2].position[2])), upper)
         if crossing is not None:
-            overlaps.append((a.name, b.name, crossing))
+            overlaps.append((a, b, crossing))
     return overlaps
 
 
@@ -142,33 +174,33 @@ def _crossing(early, late, upper):
 
 
 def _cuts(system) -> dict[tuple[str, str], float]:
-    """Half-chord caps ``{(lens, side): h}`` that cut interpenetrating neighbours apart (see :func:`body_outlines`)."""
+    """Half-chord caps ``{(face, side): h}`` that cut interpenetrating neighbours apart (see :func:`body_outlines`)."""
 
-    placed = {e.name: (e, p) for e, p in system.walk()}
     caps: dict[tuple[str, str], float] = {}
 
-    def curve(name, side):
-        lens, pose = placed[name]
+    def curve(body, side):
+        _, lens, pose, _ = body
         return face_curve(lens, side, z0=float(pose.position[2]))
 
-    def at(name, side, h):
-        return float(curve(name, side)(np.asarray([h]))[0])
+    def at(body, side, h):
+        return float(curve(body, side)(np.asarray([h]))[0])
 
-    def usable(name, side):
-        return usable_extents(*placed[name])[side == "back"]
+    def usable(body, side):
+        return usable_extents(body[1], body[2])[side == "back"]
 
-    def cap(name, side, h):
-        caps[name, side] = min(caps.get((name, side), np.inf), h)
+    def cap(body, side, h):
+        key = (body[3][side == "back"], side)
+        caps[key] = min(caps.get(key, np.inf), h)
 
-    def clear(h0, z0, h1, z1, h_top, name, side, sign):
+    def clear(h0, z0, h1, z1, h_top, body, side, sign):
         """True when the chord (z0, h0)→(z1, h1) stays on the *sign* side of a face over [h0, h_top]."""
         hs = np.linspace(h0, h_top, 120)
         chord = z0 + (z1 - z0) * (hs - h0) / (h1 - h0)
-        return bool((sign * (chord - curve(name, side)(hs)) >= -1e-9).all())
+        return bool((sign * (chord - curve(body, side)(hs)) >= -1e-9).all())
 
-    for a, b, h_cut in body_overlaps(system):
+    for a, b, h_cut in _overlaps(system):
         if h_cut <= 0.0:
-            warnings.warn(f"lenses {a!r} and {b!r} collide on the axis; drawn uncut", stacklevel=3)
+            warnings.warn(f"lenses {a[0]!r} and {b[0]!r} collide on the axis; drawn uncut", stacklevel=3)
             continue
         cap(a, "back", h_cut)
         cap(b, "front", h_cut)
@@ -353,8 +385,8 @@ def draw_elements(ax, system, *, wavelength_um=None, material_colors=None, alpha
         colors = glass_colors(body.material, body.n, material_colors)
         if colors is not None:
             ax.fill(body.polygon[:, 0], body.polygon[:, 1], facecolor=colors[0], edgecolor=colors[1], lw=1.1, alpha=alpha, zorder=1)
-            if body.extents is not None:
-                drawn[f"{body.name}.front"], drawn[f"{body.name}.back"] = body.extents
+            for face, extent in zip(body.faces or (), body.extents or ()):  # a cemented face is drawn from both sides
+                drawn[face] = max(drawn.get(face, 0.0), extent)
 
     scale = extent_of(system.elements)
 
@@ -426,8 +458,9 @@ __all__ = [
     "FIELD_COLORS",
     "DEFAULT_MATERIAL_COLORS",
     "BodyOutline",
+    "lens_bodies",
     "body_outlines",
-    "body_outline",
+    "element_bodies",
     "body_overlaps",
     "medium_index",
     "glass_colors",

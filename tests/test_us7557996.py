@@ -54,7 +54,7 @@ def test_prescription_loads(prescription, system, tracer):
     assert system.step_index("STO") == 34
     assert system["STO"].virtual  # the patent puts the stop plane inside L15
     assert [i for i, step in enumerate(system.path) if step.event == "reflect"] == [6, 9]
-    assert system.path[7].face is system.path[5].face  # L3.back, second pass
+    assert system.path[7].face is system.path[5].face  # L3.2, second pass
     assert tracer.image_z == pytest.approx(1423.077700, abs=1e-6)
     assert tracer.n_image == pytest.approx(1.59667693)
 

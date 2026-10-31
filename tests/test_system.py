@@ -39,16 +39,16 @@ def meridional_rays(z=-100.0):
 # -- what the system derives ------------------------------------------------------
 
 
-def test_lenses_sharing_a_face_are_one_cemented_boundary():
-    l1 = Lens("L1", front=Sphere(40.0), back=Sphere(-30.0), thickness=6.0, material=G1, semi_diameter=10.0)
-    l2 = Lens("L2", front=Sphere(-30.0), back=Plane(), thickness=2.0, material=G2, semi_diameter=10.0, z=6.0)
+def test_separate_lenses_in_contact_share_one_boundary():
+    l1 = Lens("L1", surfaces=[Sphere(40.0), Sphere(-30.0)], thicknesses=[6.0], materials=[G1], semi_diameter=10.0)
+    l2 = Lens("L2", surfaces=[Sphere(-30.0), Plane()], thicknesses=[2.0], materials=[G2], semi_diameter=10.0, z=6.0)
     system = OpticalSystem([l1, l2, Sensor("IMG", z=60.0)])
-    contact = system.face("L1.back")
-    assert contact is system.face("L2.front")
-    assert set(contact.names) == {"L1.back", "L2.front"}
+    contact = system.face("L1.2")
+    assert contact is system.face("L2.1")
+    assert set(contact.names) == {"L1.2", "L2.1"}
     assert (contact.medium_minus, contact.medium_plus) == (G1, G2)
     optical = [f for f in system.faces if f.role != "edge"]
-    assert len(optical) == 4  # front, the cemented face, back, sensor
+    assert len(optical) == 4  # front, the contact face, back, sensor
     assert [s.event for s in system.path] == ["transmit"] * 3 + ["detect"]
     # The element order does not matter: the path follows the axis.
     shuffled = OpticalSystem([l2, Sensor("IMG", z=60.0), l1])
@@ -56,19 +56,19 @@ def test_lenses_sharing_a_face_are_one_cemented_boundary():
 
 
 def test_compose_places_touching_lenses_in_contact():
-    l1 = Lens("L1", front=Sphere(40.0), back=Sphere(-30.0), thickness=6.0, material=G1, semi_diameter=10.0)
-    l2 = Lens("L2", front=Sphere(-30.0), back=Plane(), thickness=2.0, material=G2, semi_diameter=10.0)
+    l1 = Lens("L1", surfaces=[Sphere(40.0), Sphere(-30.0)], thicknesses=[6.0], materials=[G1], semi_diameter=10.0)
+    l2 = Lens("L2", surfaces=[Sphere(-30.0), Plane()], thicknesses=[2.0], materials=[G2], semi_diameter=10.0)
     system = OpticalSystem.compose(l1, l2, Gap(50.0), Sensor("IMG"))
     assert system.pose_of("L2").position.tolist() == [0.0, 0.0, 6.0]
-    assert system.face("L2.front").medium_minus == G1
+    assert system.face("L2.1").medium_minus == G1
     with pytest.raises(ValueError, match="share the contact surface"):
-        OpticalSystem.compose(l1, l2.replace(front=Sphere(-31.0)), Sensor("IMG"))
+        OpticalSystem.compose(l1, l2.replace(surfaces=[Sphere(-31.0), Plane()]), Sensor("IMG"))
 
 
 def test_overlapping_bodies_are_rejected():
-    lens = Lens("A", front=Sphere(40.0), back=Plane(), thickness=6.0, material=G1, semi_diameter=10.0)
+    lens = Lens("A", surfaces=[Sphere(40.0), Plane()], thicknesses=[6.0], materials=[G1], semi_diameter=10.0)
     with pytest.raises(ValueError, match="overlap"):
-        OpticalSystem([lens, lens.replace(name="B", thickness=3.0)]).faces
+        OpticalSystem([lens, lens.replace(name="B", thicknesses=[3.0])]).faces
 
 
 def test_immersion_layer_and_a_detector_at_its_back():
@@ -76,19 +76,19 @@ def test_immersion_layer_and_a_detector_at_its_back():
     and with the sensor at its back face, so the image space is the liquid."""
 
     system = OpticalSystem([
-        Lens("L", front=Sphere(10.0), back=Plane(), thickness=5.0, material=G1, semi_diameter=4.0),
-        Lens("W", front=Plane(), back=Plane(), thickness=2.0, material=WATER, semi_diameter=4.0, z=5.0),
+        Lens("L", surfaces=[Sphere(10.0), Plane()], thicknesses=[5.0], materials=[G1], semi_diameter=4.0),
+        Lens("W", surfaces=[Plane(), Plane()], thicknesses=[2.0], materials=[WATER], semi_diameter=4.0, z=5.0),
         Sensor("IMG", z=7.0),
     ])
-    assert (system.face("W.front").medium_minus, system.face("W.front").medium_plus) == (G1, WATER)
+    assert (system.face("W.1").medium_minus, system.face("W.1").medium_plus) == (G1, WATER)
     image = system.face("IMG")
-    assert set(image.names) == {"W.back", "IMG"} and image.role == "detector"
+    assert set(image.names) == {"W.2", "IMG"} and image.role == "detector"
     assert len(system.path) == 3 and system.path[-1].event == "detect"
     tracer = SequentialTracer(system)
     assert tracer.n_image == pytest.approx(1.33)
     # An immersion objective: the system may also be immersed as a whole.
     immersed = system.replace(ambient=WATER)
-    assert immersed.face("L.front").medium_minus == WATER
+    assert immersed.face("L.1").medium_minus == WATER
     assert SequentialTracer(immersed).n_object == pytest.approx(1.33)
 
 
@@ -106,7 +106,7 @@ def test_double_pass_lens_from_a_prescription_table():
         TableRow(Sphere(R1), -s, AIR, 15.0),
     ])
     assert [e.name for e in folded.elements] == ["L1", "M1", "IMG"]
-    assert [s.name for s in folded.path] == ["L1.front", "L1.back", "M1", "L1.back", "L1.front", "IMG"]
+    assert [s.name for s in folded.path] == ["L1.1", "L1.2", "M1", "L1.2", "L1.1", "IMG"]
     assert folded.path[1].face is folded.path[3].face
     assert folded.path[2].event == "reflect"
 
@@ -136,11 +136,13 @@ def test_double_pass_is_one_surface_with_one_clear_aperture():
     first, second = system.path[4], system.path[8]
     assert first.face is second.face
     assert first.face.clear_aperture == Circle(67.241)
-    # The cemented HIINDEX1|HIINDEX2 face keeps its own 18.135 mm, not its lens's 58.621 mm.
-    cemented = system.face("L21.back")
-    assert set(cemented.names) == {"L21.back", "L22.front"}
-    assert cemented.clear_aperture == Circle(18.135)
-    assert system["L21"].semi_diameter == 58.621
+    # The last lens holds the HIINDEX1 glass and the HIINDEX2 liquid against it, one element; the
+    # face between them keeps its own 18.135 mm, not its lens's 58.621 mm.
+    last = system["L21"]
+    assert [m.name for m in last.materials] == ["HIINDEX1", "HIINDEX2"] and last.semi_diameter == 58.621
+    cemented = system.face("L21.2")
+    assert cemented.names == ("L21.2",) and cemented.clear_aperture == Circle(18.135)
+    assert set(system.face("IMG").names) == {"IMG", "L21.3"}  # the wafer at the back of the liquid
 
 
 def test_virtual_stop_inside_a_lens():
@@ -181,11 +183,11 @@ def test_a_real_stop_blocks_light_non_sequentially():
 
 def test_path_inference_along_a_tilted_common_axis():
     axis = np.array([0.0, np.sin(0.3), np.cos(0.3)])
-    lens = Lens("L", front=Sphere(40.0), back=Sphere(-40.0), thickness=4.0, material=G1, semi_diameter=8.0, axis=axis)
+    lens = Lens("L", surfaces=[Sphere(40.0), Sphere(-40.0)], thicknesses=[4.0], materials=[G1], semi_diameter=8.0, axis=axis)
     sensor = Sensor("IMG", pos=50.0 * axis, axis=axis)
     stop = Stop("S", aperture=5.0, pos=-5.0 * axis, axis=axis)
     system = OpticalSystem([sensor, lens, stop])
-    assert [s.name for s in system.path] == ["S", "L.front", "L.back", "IMG"]
+    assert [s.name for s in system.path] == ["S", "L.1", "L.2", "IMG"]
     assert [s.event for s in system.path] == ["stop", "transmit", "transmit", "detect"]
     assert system.stop_index == 0 and not system.has_stated_path
 
@@ -201,7 +203,7 @@ def test_path_inference_along_a_tilted_common_axis():
     ids=["folded", "beam-splitter", "tilted", "decentred"],
 )
 def test_path_inference_refuses_what_it_cannot_order(extra, message):
-    lens = Lens("L", front=Sphere(40.0), back=Sphere(-40.0), thickness=4.0, material=G1, semi_diameter=8.0)
+    lens = Lens("L", surfaces=[Sphere(40.0), Sphere(-40.0)], thicknesses=[4.0], materials=[G1], semi_diameter=8.0)
     system = OpticalSystem([lens, extra])
     with pytest.raises(ValueError, match=message):
         system.path
@@ -250,21 +252,21 @@ def test_stated_path_errors():
         OpticalSystem(parts, path=["BX:reflect", "CAM_R"]).path
     with pytest.raises(ValueError, match="unknown event"):
         OpticalSystem(parts, path=["BS:bounce", "CAM_R"]).path
-    lens = Lens("L", front=Sphere(40.0), back=Sphere(-40.0), thickness=4.0, material=G1, semi_diameter=8.0)
+    lens = Lens("L", surfaces=[Sphere(40.0), Sphere(-40.0)], thicknesses=[4.0], materials=[G1], semi_diameter=8.0)
     with pytest.raises(ValueError, match="edge"):
-        OpticalSystem([lens], path=["L.edge"]).path
+        OpticalSystem([lens], path=["L.edge1"]).path
     with pytest.raises(ValueError, match="detector"):
         SequentialTracer(OpticalSystem(parts, path=["BS:reflect"]))
 
 
 def test_folding_mirror_with_a_stated_path():
-    lens = Lens("L", front=Sphere(50.0), back=Sphere(-50.0), thickness=5.0, material=G1, semi_diameter=10.0)
+    lens = Lens("L", surfaces=[Sphere(50.0), Sphere(-50.0)], thicknesses=[5.0], materials=[G1], semi_diameter=10.0)
     fold = Mirror("FOLD", surface=Plane(), aperture=12.0, z=30.0, normal=(0.0, 1.0, 1.0))
     straight = OpticalSystem.compose(lens, Gap(100.0), Sensor("IMG"))
     # The folded twin: the mirror plane y + z = 30 turns the axis onto -y,
     # and the image plane with it.
     sensor = Sensor("IMG", pos=(0.0, 30.0 - 105.0, 30.0), normal=(0.0, -1.0, 0.0))
-    folded = OpticalSystem([lens, fold, sensor], path=["L.front", "L.back", "FOLD:reflect", "IMG"])
+    folded = OpticalSystem([lens, fold, sensor], path=["L.1", "L.2", "FOLD:reflect", "IMG"])
     o, d = meridional_rays()
     a = SequentialTracer(straight, restart_offset=0.0).trace(Rays(o, d))
     b = SequentialTracer(folded, restart_offset=0.0).trace(Rays(o, d))
@@ -309,7 +311,7 @@ def test_air_rows_that_change_nothing_are_dropped():
         TableRow(Plane(), 20.0, AIR, 10.0),
     ]
     system = OpticalSystem.from_table(rows)
-    assert [s.name for s in system.path] == ["L1.front", "L1.back", "IMG"]
+    assert [s.name for s in system.path] == ["L1.1", "L1.2", "IMG"]
     assert system.pose_of("L1").position[2] == 5.0
 
 
@@ -353,7 +355,7 @@ def test_systems_are_values():
     assert system == read_prescription(COOKE).system
     with pytest.raises(AttributeError):
         system.ambient = G1
-    thicker = system.with_component("L2", system["L2"].replace(thickness=1.5))
+    thicker = system.with_component("L2", system["L2"].replace(thicknesses=[1.5]))
     assert thicker["L2"].thickness == 1.5 and system["L2"].thickness == 1.0
     assert thicker != system
     with pytest.raises(KeyError):

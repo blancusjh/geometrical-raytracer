@@ -40,7 +40,7 @@ GLASS = ConstantIndex("G", 1.5)
 
 
 def lens(**placement) -> Lens:
-    return Lens("L", front=Sphere(50.0), back=Sphere(-50.0), thickness=5.0, material=GLASS,
+    return Lens("L", surfaces=[Sphere(50.0), Sphere(-50.0)], thicknesses=[5.0], materials=[GLASS],
                 semi_diameter=10.0, **placement)
 
 
@@ -54,12 +54,12 @@ def test_elements_are_immutable():
     with pytest.raises(AttributeError):
         element.name = "other"
     with pytest.raises(AttributeError):
-        element.front.coating = AR()
+        element.surfaces[0].coating = AR()
 
 
 def test_replace_returns_a_modified_copy_and_keeps_the_pose():
     element = lens(z=3.0)
-    thicker = element.replace(thickness=6.0)
+    thicker = element.replace(thicknesses=[6.0])
     assert thicker.thickness == 6.0 and element.thickness == 5.0
     assert thicker.pose == element.pose
     assert thicker.name == "L"
@@ -74,14 +74,14 @@ def test_equal_elements_are_equal_values():
     assert lens() == lens()
     assert hash(lens()) == hash(lens())
     assert lens() != lens(z=1.0)
-    assert lens() != lens().replace(thickness=5.5)
+    assert lens() != lens().replace(thicknesses=[5.5])
 
 
 def test_constructor_validation():
     with pytest.raises(ValueError):
-        Lens("L", front=Plane(), back=Plane(), thickness=0.0, material=GLASS, semi_diameter=1.0)
+        Lens("L", surfaces=[Plane(), Plane()], thicknesses=[0.0], materials=[GLASS], semi_diameter=1.0)
     with pytest.raises(ValueError):
-        Lens("L", front=Plane(), back=Plane(), thickness=1.0, material=GLASS, semi_diameter=-1.0)
+        Lens("L", surfaces=[Plane(), Plane()], thicknesses=[1.0], materials=[GLASS], semi_diameter=-1.0)
     with pytest.raises(ValueError):
         Sensor("a.b")  # '.' separates element and face names
     with pytest.raises(ValueError):
@@ -129,9 +129,9 @@ def test_placed_translated_rotated():
 def test_lens_faces():
     element = lens()
     front, back, edge = element.faces()
-    assert (front.name, back.name, edge.name) == ("front", "back", "edge")
+    assert (front.name, back.name, edge.name) == ("1", "2", "edge1")
     assert front.pose.is_identity() and back.pose == Pose((0.0, 0.0, 5.0))
-    assert (front.bulk_side, back.bulk_side) == (+1, -1)  # the glass lies between them
+    assert front.media == (None, GLASS) and back.media == (GLASS, None)  # the glass lies between them
     assert front.role == back.role == OPTICAL and edge.role == EDGE
     assert front.extent == Circle(10.0)
     sag = 50.0 - np.sqrt(50.0**2 - 10.0**2)
@@ -141,19 +141,35 @@ def test_lens_faces():
     assert element.edge_thickness == pytest.approx(5.0 - 2 * sag)
 
 
+def test_a_cemented_lens_is_one_element_with_a_face_between_its_glasses():
+    flint = ConstantIndex("F", 1.62)
+    doublet = Lens("D", surfaces=[Sphere(60.0), Sphere(-45.0), Sphere(-120.0)], thicknesses=[8.0, 3.0],
+                   materials=[GLASS, flint], semi_diameter=12.0)
+    faces = doublet.faces()
+    assert [f.name for f in faces] == ["1", "2", "3", "edge1", "edge2"]
+    assert [f.media for f in faces[:3]] == [(None, GLASS), (GLASS, flint), (flint, None)]
+    np.testing.assert_allclose(doublet.vertices, [0.0, 8.0, 11.0])
+    assert doublet.thickness == 11.0
+    rims = faces[3:]  # each glass has its own rim, from where its faces meet the edge
+    assert [r.media[0] for r in rims] == [GLASS, flint]
+    np.testing.assert_allclose([r.pose.position[2] for r in rims], doublet.edge_heights()[:2])
+    with pytest.raises(ValueError, match="n \\+ 1 surfaces"):
+        Lens("D", surfaces=[Plane(), Plane()], thicknesses=[1.0, 1.0], materials=[GLASS], semi_diameter=1.0)
+
+
 def test_bare_surfaces_are_uncoated_interfaces():
     element = lens()
-    assert element.front == Interface(Sphere(50.0))
-    assert isinstance(element.front.coating, Uncoated)
-    coated = lens().replace(front=Interface(Sphere(50.0), coating=AR(), clear_aperture=8.0))
+    assert element.surfaces[0] == Interface(Sphere(50.0))
+    assert isinstance(element.surfaces[0].coating, Uncoated)
+    coated = lens().replace(surfaces=[Interface(Sphere(50.0), coating=AR(), clear_aperture=8.0), Sphere(-50.0)])
     assert isinstance(coated.faces()[0].interface.coating, AR)
-    assert coated.front.clear_aperture == Circle(8.0)
+    assert coated.surfaces[0].clear_aperture == Circle(8.0)
 
 
 def test_mirror_and_beam_splitter_faces():
     (face,) = Mirror("M", surface=Sphere(-100.0), aperture=Rectangle(4.0, 2.0)).faces()
     assert isinstance(face.interface.coating, PerfectMirror)
-    assert face.bulk_side == 0 and face.extent == Rectangle(4.0, 2.0)
+    assert face.media == (None, None) and face.extent == Rectangle(4.0, 2.0)
     (face,) = Mirror("M", surface=Plane(), aperture=3.0, coating=IdealBeamSplitter(0.9, 0.1)).faces()
     assert face.interface.coating == IdealBeamSplitter(0.9, 0.1)
     (face,) = BeamSplitter("BS", aperture=3.0).faces()
@@ -176,7 +192,7 @@ def test_prism_faces_are_its_facets():
     prism = Prism("P", solid=Box(2.0, 2.0, 2.0), material=GLASS, coatings={1: AR()})
     faces = prism.faces()
     assert [f.name for f in faces] == [f"facet{i}" for i in range(6)]
-    assert all(f.bulk_side == -1 for f in faces)  # the glass is inside, each facet's +z outward
+    assert all(f.media == (GLASS, None) for f in faces)  # the glass is inside, each facet's +z outward
     assert isinstance(faces[1].interface.coating, AR)
     assert isinstance(faces[0].interface.coating, Uncoated)
 
@@ -196,12 +212,12 @@ def test_sensor_records_and_misses_outside_its_aperture():
 def test_lens_face_matches_sphere_geometry():
     R, n = 150.0, 1.5
     lens = Lens(
-        "L", front=Sphere(R), back=Plane(), thickness=20.0,
-        material=ConstantIndex("G", n), semi_diameter=60.0, z=10.0,
+        "L", surfaces=[Sphere(R), Plane()], thicknesses=[20.0],
+        materials=[ConstantIndex("G", n)], semi_diameter=60.0, z=10.0,
     )
     y0 = 40.0
     hit = NonSequentialTracer(OpticalSystem([lens])).trace(Rays([0.0, y0, -100.0], [0.0, 0.0, 1.0])).at(1)
-    assert hit.boundary[0] == "L.front"
+    assert hit.boundary[0] == "L.1"
     z_exact = 10.0 + R - np.sqrt(R * R - y0 * y0)
     assert hit.position[0] == pytest.approx([0.0, y0, z_exact], abs=1e-10)
 
@@ -212,8 +228,8 @@ def test_single_refracting_face_paraxial_focus():
     R, n = 50.0, 1.5
     f_expected = n * R / (n - 1.0)  # 150 mm, inside the glass
     lens = Lens(
-        "L", front=Sphere(R), back=Plane(), thickness=200.0,
-        material=ConstantIndex("G", n), semi_diameter=10.0,
+        "L", surfaces=[Sphere(R), Plane()], thicknesses=[200.0],
+        materials=[ConstantIndex("G", n)], semi_diameter=10.0,
     )
     source = CollimatedSource((0.0, 0.0, -20.0), beam_radius=0.5, rays=11, fan="y")
     in_glass = NonSequentialTracer(OpticalSystem([lens]), split=False).trace(source).at(1)
@@ -227,8 +243,8 @@ def test_single_refracting_face_paraxial_focus():
 
 def biconvex(name="L1", **placement) -> Lens:
     return Lens(
-        name, front=Sphere(60.0), back=Sphere(-60.0), thickness=8.0,
-        material=ConstantIndex("G", 1.5), semi_diameter=15.0, **placement,
+        name, surfaces=[Sphere(60.0), Sphere(-60.0)], thicknesses=[8.0],
+        materials=[ConstantIndex("G", 1.5)], semi_diameter=15.0, **placement,
     )
 
 
@@ -272,7 +288,9 @@ def test_sequential_and_non_sequential_land_rays_on_the_same_image_point():
         TableRow(Sphere(-120.0), 95.0, air, 15.0),
     ]
     system = OpticalSystem.from_table(rows)
-    assert system.face("L1.back").names == ("L1.back", "L2.front")  # cemented
+    cemented = system.face("L1.2")  # one lens of two glasses, the face between them stated once
+    assert [type(e).__name__ for e in system.elements] == ["Lens", "Sensor"]
+    assert cemented.names == ("L1.2",) and (cemented.medium_minus, cemented.medium_plus) == (glass, flint)
     tracer = SequentialTracer(system)
     solve_object_plane(tracer)
 

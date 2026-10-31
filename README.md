@@ -66,13 +66,13 @@ cooke = rt.OpticalSystem(
     name="Cooke triplet",
     ambient=rt.AIR,
     components=[
-        el.Lens("L1", front=sf.Sphere(21.25), back=sf.Sphere(-158.65), thickness=2.0,
-                material=glass["N-SK16"], semi_diameter=6.5, z=0.0),
-        el.Lens("L2", front=sf.Sphere(-20.25), back=sf.Sphere(19.30), thickness=1.0,
-                material=glass["F4"], semi_diameter=5.0, z=8.0),
+        el.Lens("L1", surfaces=[sf.Sphere(21.25), sf.Sphere(-158.65)], thicknesses=[2.0],
+                materials=[glass["N-SK16"]], semi_diameter=6.5, z=0.0),
+        el.Lens("L2", surfaces=[sf.Sphere(-20.25), sf.Sphere(19.30)], thicknesses=[1.0],
+                materials=[glass["F4"]], semi_diameter=5.0, z=8.0),
         el.Stop("STO", aperture=4.75, z=9.0, virtual=True),  # en el vértice curvo de L2: un plano de referencia
-        el.Lens("L3", front=sf.Sphere(141.25), back=sf.Sphere(-17.285), thickness=2.0,
-                material=glass["N-SK16"], semi_diameter=6.5, z=15.0),
+        el.Lens("L3", surfaces=[sf.Sphere(141.25), sf.Sphere(-17.285)], thicknesses=[2.0],
+                materials=[glass["N-SK16"]], semi_diameter=6.5, z=15.0),
         el.Sensor("IMG", z=59.95),
     ],
 )
@@ -84,12 +84,26 @@ Cada elemento acepta su colocación de la misma forma: `pos=(x, y, z)` o
 `axis=` / `normal=`, hacia donde apunta su +z local. Los sistemas son
 valores: `cooke.rotated(45, (1, 1, 0), about=(10, 0, 5))` devuelve otro.
 
+Una lente es vidrio entre superficies: n + 1 superficies, n espesores y n
+materiales. Un singlete tiene dos superficies; un doblete cementado es
+**un** elemento de tres, y la superficie cementada se escribe y se nombra
+una sola vez. Las caras se numeran desde 1 en el orden de las superficies
+(`L1.1`, `L1.2`, …):
+
+```python
+el.Lens("D1", surfaces=[sf.Sphere(61.5), sf.Sphere(-43.2), sf.Sphere(-124.0)],
+        thicknesses=[6.0, 2.5], materials=[glass["N-BK7"], glass["N-F2"]], semi_diameter=12.5)
+```
+
 Lo que se **deduce** del sistema, nunca se declara:
 
-- **los medios a cada lado de cada frontera.** Donde la cara de un elemento
+- **los medios a cada lado de cada frontera.** Cada elemento dice qué
+  llena a cada lado de sus caras —los dos lados de una superficie
+  cementada, uno de una cara exterior—; donde la cara de un elemento
   coincide con la de otro (misma pose, misma superficie), son una sola
-  frontera entre dos materiales: un doblete cementado, un líquido de
-  inmersión contra una lente;
+  frontera entre sus materiales: dos lentes separadas que se tocan, un
+  sensor al fondo de un líquido de inmersión; del otro lado está el medio
+  ambiente;
 - **el camino secuencial**, en el orden en que la luz visita las fronteras.
   Se infiere para un sistema coaxial; un sistema plegado o con divisor de
   haz lo declara, con `"BS:reflect"` donde la física ofrece dos ramas.
@@ -101,8 +115,8 @@ la patente queda así:
 - sus dos espejos son elementos;
 - el plano de diafragma que la tabla pone dentro de una lente es un
   diafragma **virtual**;
-- el líquido de inmersión es un cuerpo en contacto con la última lente y
-  con el sensor.
+- el líquido de inmersión y la última lente comparten una superficie: son
+  una lente de dos medios, y el sensor está al fondo del líquido.
 
 ## Los dos motores
 
@@ -371,8 +385,8 @@ fabricable, en un tren exactamente estigmático.
 La construcción en dos superficies sigue la abstracción Ω (`OmegaLens`) del
 [generador de STL de superficies cartesianas](https://github.com/blancusjh/cartesian-surfaces-stl-generator)
 del autor; aquí la misma lente es una familia (`StigmaticTrain`) cuyo
-miembro `train.system()` son lentes reales colocadas sobre el eje, en
-contacto donde dos vidrios se tocan, con un sensor en la conjugada imagen.
+miembro `train.system()` es una lente real sobre el eje —vidrios
+cementados donde se tocan— con un sensor en la conjugada imagen.
 
 **Fuentes.** A. Silva-Lora y R. Torres, *Aplanatism in stigmatic optical
 systems*, J. Opt. Soc. Am. A 37 (2020); *Superconical aplanatic ovoid
@@ -400,8 +414,8 @@ geometry → materials → coatings → interfaces → elements → system → r
 | **`materials`** | ¿qué llena el espacio? — índice constante, Abbe, Cauchy, Sellmeier, catálogo | 237 |
 | **`coatings`** | ¿cuánta luz refleja y transmite una frontera? | 155 |
 | **`interfaces`** | una superficie como frontera óptica, y las leyes de reflexión y refracción | 96 |
-| **`elements`** | ¿de qué cosas físicas está hecho un instrumento? — `Lens`, `Mirror`, `BeamSplitter`, `Prism`, `Stop`, `Sensor` | 365 |
-| **`system`** | ¿cómo están dispuestas y qué se sigue de ello? — `OpticalSystem`, `Assembly`, fronteras con sus medios, camino secuencial, tablas | 899 |
+| **`elements`** | ¿de qué cosas físicas está hecho un instrumento? — `Lens`, `Mirror`, `BeamSplitter`, `Prism`, `Stop`, `Sensor` | 380 |
+| **`system`** | ¿cómo están dispuestas y qué se sigue de ello? — `OpticalSystem`, `Assembly`, fronteras con sus medios, camino secuencial, tablas | 918 |
 | **`rays`** | ¿qué es la luz? — `Rays`: cada rayo, la línea quebrada entera que sigue, lo trace quien lo trace | 251 |
 | **`sources`** | ¿dónde empieza la luz? | 206 |
 | **`tracing`** | ¿cómo llega la luz de aquí a allá? — secuencial, no secuencial, paraxial, pupilas | 935 |
@@ -409,7 +423,7 @@ geometry → materials → coatings → interfaces → elements → system → r
 | **`io`** | ¿cómo se guarda un diseño? | 430 |
 | **`analysis`** | ¿qué se mide? — `imaging` mira la imagen, `aberrations` el error de rayo y de frente de onda, `footprints` dónde y cómo dio la luz en el instrumento | 2313 |
 | **`optimize`** | ¿qué es mejor? — restricciones enchufables sobre familias exactas | 551 |
-| **`viz`** | ¿cómo se muestra? — matplotlib y OpenGL HDR, 2-D como corte meridional del modelo 3-D | 3493 |
+| **`viz`** | ¿cómo se muestra? — matplotlib y OpenGL HDR, 2-D como corte meridional del modelo 3-D | 3536 |
 
 `tests/test_architecture.py` lee el AST de cada módulo y comprueba la
 cadena en cada `pytest`. Comprueba además tres reglas más finas: un elemento
@@ -421,7 +435,7 @@ que encuentra ni quién lo traza.
 
 **Lo declarado y lo deducido no se mezclan.** Un objeto guarda lo que se
 dijo de él. Los medios a cada lado de una frontera, el camino de un sistema
-coaxial, las posiciones de los vértices y el contacto entre dos lentes se
+coaxial, las posiciones de los vértices y el contacto entre dos elementos se
 calculan a partir de los elementos. Nunca se almacenan como estado propio.
 
 **El hardware no es el uso.** El sistema no sabe de longitudes de onda ni

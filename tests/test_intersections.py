@@ -155,8 +155,8 @@ def test_placed_hit_agrees_with_the_bare_solver():
     glass = ConstantIndex("G", NI)
     pose = Pose((1.0, 2.0, 5.0), Rotation.axis_angle((1.0, 1.0, 0.0), 7.0))
     lens = Lens(
-        "L", front=CartesianSurface(N0, Z0, NI, ZI), back=Plane(), thickness=ZI,
-        material=glass, semi_diameter=4.0, pose=pose,
+        "L", surfaces=[CartesianSurface(N0, Z0, NI, ZI), Plane()], thicknesses=[ZI],
+        materials=[glass], semi_diameter=4.0, pose=pose,
     )
     sensor = Sensor("IMG", pose=pose @ Pose((0.0, 0.0, ZI + 5.0)))
     tracer = SequentialTracer(OpticalSystem([lens, sensor]))
@@ -167,7 +167,7 @@ def test_placed_hit_agrees_with_the_bare_solver():
     world_hit = result.trajectory[0, 1]
 
     o_local, d_local = pose.to_local(origin[None, :]), pose.direction_to_local(direction[None, :])
-    hits = lens.front.surface.intersect(o_local, d_local)
+    hits = lens.surfaces[0].surface.intersect(o_local, d_local)
     assert pose.to_world(o_local[0] + hits.t[0] * d_local[0]) == pytest.approx(world_hit, abs=1e-12)
-    normal = lens.front.surface.normal(pose.to_local(world_hit[None, :]))
+    normal = lens.surfaces[0].surface.normal(pose.to_local(world_hit[None, :]))
     assert np.linalg.norm(normal) == pytest.approx(1.0)

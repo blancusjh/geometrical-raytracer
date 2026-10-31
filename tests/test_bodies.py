@@ -63,7 +63,7 @@ def test_every_lens_of_the_system_is_one_body():
 
 
 def test_cemented_chain_yields_one_body_per_glass():
-    """Air G1 G2 G3 Air across four surfaces: three lenses in contact."""
+    """Air G1 G2 G3 Air across four surfaces: three glasses cemented into one lens, each drawn alone."""
 
     train = StigmaticTrain(
         media=(1.0, 1.517122, 1.670591, 1.851280, 1.0),
@@ -73,7 +73,8 @@ def test_cemented_chain_yields_one_body_per_glass():
     )
     system = train.system()
     bodies = body_outlines(system)
-    assert [b.name for b in bodies] == ["L1", "L2", "L3"]
+    assert [b.name for b in bodies] == ["L1"] * 3
+    assert [b.faces for b in bodies] == [("L1.1", "L1.2"), ("L1.2", "L1.3"), ("L1.3", "L1.4")]
     assert [round(b.n, 4) for b in bodies] == [1.5171, 1.6706, 1.8513]
     assert body_overlaps(system) == []  # contact is not an overlap
     # neighbours share the cemented face: the back edge of one is the front edge of the next
@@ -98,7 +99,7 @@ def test_crossing_faces_join_at_the_intersection_height():
     train = StigmaticTrain.singlet(n=1.5, d0=-9.0, d1=-8.0, d2=25.0, thickness=1.0, semidiameter=3.7)
     system = train.system()
     lens = system["L1"]
-    front, back = lens.front.surface, lens.back.surface
+    front, back = lens.surfaces[0].surface, lens.surfaces[-1].surface
     h_probe = np.linspace(0, 3.7, 200)
     crossing = back.profile(h_probe) + 1.0 - front.profile(h_probe)
     assert (crossing <= 0).any()  # the faces genuinely cross below h = 3.7
@@ -165,7 +166,7 @@ def test_no_part_claims_the_ambiguous_region():
     from matplotlib.path import Path as PolygonPath
 
     l1, l2 = system["L1"], system["L2"]
-    back1, front2 = l1.back.surface, l2.front.surface
+    back1, front2 = l1.surfaces[-1].surface, l2.surfaces[0].surface
     h = np.linspace(h_cut * 1.01, 0.98 * back1.max_radius, 40)
     z_lo = system.pose_of("L2").position[2] + front2.profile(h)
     z_hi = l1.thickness + back1.profile(h)
@@ -203,7 +204,8 @@ def test_valid_aperture_fan_refracts_only_on_drawn_glass():
 
         extents, outlines = {}, {}
         for body in body_outlines(system):
-            extents[f"{body.name}.front"], extents[f"{body.name}.back"] = body.extents
+            for face, extent in zip(body.faces, body.extents):
+                extents[face] = max(extents.get(face, 0.0), extent)
             outlines[body.name] = body.polygon
         for k, step in enumerate(system.path[:-1]):
             assert np.abs(kinks[:, k, 1]).max() <= extents[step.face.name] + 1e-9
@@ -264,7 +266,7 @@ def test_index_color_is_monotone_darker_with_density():
 
 
 def biconvex(**placement):
-    return Lens("L", front=Sphere(40.0), back=Sphere(-40.0), thickness=6.0, material=GLASS, semi_diameter=10.0, **placement)
+    return Lens("L", surfaces=[Sphere(40.0), Sphere(-40.0)], thicknesses=[6.0], materials=[GLASS], semi_diameter=10.0, **placement)
 
 
 def test_a_lens_tilted_in_the_yz_plane_is_drawn_as_its_exact_section():
@@ -328,7 +330,7 @@ def test_draw_system_draws_a_folded_system():
             biconvex(pos=(0.0, 20.0, 40.0), axis=(0.0, 1.0, 0.0)).replace(name="L2"),
             Sensor("IMG", aperture=20.0, pos=(0.0, 60.0, 40.0), axis=(0.0, 1.0, 0.0)),
         ],
-        path=["L1.front", "L1.back", "FM:reflect", "L2.front", "L2.back", "IMG"],
+        path=["L1.1", "L1.2", "FM:reflect", "L2.1", "L2.2", "IMG"],
     )
     tracer = SequentialTracer(system, object_z=-100.0)
     fig, ax = plt.subplots()

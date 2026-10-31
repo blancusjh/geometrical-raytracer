@@ -174,7 +174,7 @@ def face_points(surface, pose, u0: float, v, *, z_offset: float = 0.0) -> np.nda
 
 
 def lens_outline(lens, pose=None, *, front_extent=None, back_extent=None, samples=240):
-    """``(polygon, (front, back), joined)``: the closed ``(z, y)`` outline of a lens body at world *pose*.
+    """``(polygon, (front, back), joined)``: the closed ``(z, y)`` outline of a lens at world *pose*, first face to last.
 
     Each face runs over the semi-diameter's chord, clamped to its single-valued branch, so a ray refracting
     near the rim refracts on the drawn surface. Faces that cross below the rim (a negative edge thickness) close
@@ -194,8 +194,8 @@ def lens_outline(lens, pose=None, *, front_extent=None, back_extent=None, sample
     e_front = e_front if front_extent is None else min(e_front, front_extent)
     e_back = e_back if back_extent is None else min(e_back, back_extent)
     joined = crossing is not None and e_front == e_back == crossing
-    front = to_drawing(face_points(lens.front.surface, pose, u0, np.linspace(-e_front, e_front, samples)))
-    back = to_drawing(face_points(lens.back.surface, pose, u0, np.linspace(e_back, -e_back, samples), z_offset=lens.thickness))
+    front = to_drawing(face_points(lens.surfaces[0].surface, pose, u0, np.linspace(-e_front, e_front, samples)))
+    back = to_drawing(face_points(lens.surfaces[-1].surface, pose, u0, np.linspace(e_back, -e_back, samples), z_offset=lens.thickness))
     return np.vstack([front, back, front[:1]]), (e_front, e_back), joined
 
 
@@ -204,13 +204,13 @@ def usable_extents(lens, pose) -> tuple[float, float]:
 
     u0, _ = section_offset(pose)
     half = float(np.sqrt(max(lens.semi_diameter**2 - u0 * u0, 0.0)))
-    return usable_half_chord(lens.front.surface, u0, half), usable_half_chord(lens.back.surface, u0, half)
+    return usable_half_chord(lens.surfaces[0].surface, u0, half), usable_half_chord(lens.surfaces[-1].surface, u0, half)
 
 
 def face_curve(lens, side: str, u0: float = 0.0, z0: float = 0.0):
-    """``v -> z`` of the ``"front"`` or ``"back"`` face of *lens* along its chord ``x = u0``, plus ``z0``."""
+    """``v -> z`` of the ``"front"`` (first) or ``"back"`` (last) face of *lens* along its chord ``x = u0``, plus ``z0``."""
 
-    surface = lens.front.surface if side == "front" else lens.back.surface
+    surface = lens.surfaces[0].surface if side == "front" else lens.surfaces[-1].surface
     z0 = z0 + (0.0 if side == "front" else lens.thickness)
 
     def curve(v):

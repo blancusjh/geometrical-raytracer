@@ -78,13 +78,13 @@ cooke = rt.OpticalSystem(
     name="Cooke triplet",
     ambient=rt.AIR,
     components=[
-        el.Lens("L1", front=sf.Sphere(21.25), back=sf.Sphere(-158.65), thickness=2.0,
-                material=glass["N-SK16"], semi_diameter=6.5, z=0.0),
-        el.Lens("L2", front=sf.Sphere(-20.25), back=sf.Sphere(19.30), thickness=1.0,
-                material=glass["F4"], semi_diameter=5.0, z=8.0),
+        el.Lens("L1", surfaces=[sf.Sphere(21.25), sf.Sphere(-158.65)], thicknesses=[2.0],
+                materials=[glass["N-SK16"]], semi_diameter=6.5, z=0.0),
+        el.Lens("L2", surfaces=[sf.Sphere(-20.25), sf.Sphere(19.30)], thicknesses=[1.0],
+                materials=[glass["F4"]], semi_diameter=5.0, z=8.0),
         el.Stop("STO", aperture=4.2, z=10.5),
-        el.Lens("L3", front=sf.Sphere(141.25), back=sf.Sphere(-17.285), thickness=2.0,
-                material=glass["N-SK16"], semi_diameter=6.5, z=15.0),
+        el.Lens("L3", surfaces=[sf.Sphere(141.25), sf.Sphere(-17.285)], thicknesses=[2.0],
+                materials=[glass["N-SK16"]], semi_diameter=6.5, z=15.0),
         el.Sensor("IMG", z=60.0),
     ],
 )
@@ -110,22 +110,22 @@ Both are constructors of the same value.
 
 ```python
 cooke_same = rt.OpticalSystem.compose(
-    el.Lens("L1", front=sf.Sphere(21.25), back=sf.Sphere(-158.65), thickness=2.0,
-            material=glass["N-SK16"], semi_diameter=6.5),
+    el.Lens("L1", surfaces=[sf.Sphere(21.25), sf.Sphere(-158.65)], thicknesses=[2.0],
+            materials=[glass["N-SK16"]], semi_diameter=6.5),
     rt.Gap(6.0),
     el.Lens("L2", ...), rt.Gap(1.5), el.Stop("STO", aperture=4.2), rt.Gap(4.5),
     el.Lens("L3", ...), rt.Gap(43.0), el.Sensor("IMG"),
 )
 
 duv = rt.io.read_prescription("data/optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv")
-duv.system.summary()        # double-pass lens, two mirrors, virtual stop, immersion in contact
+duv.system.summary()        # double-pass lens, two mirrors, virtual stop, an immersion layer on the last lens
 duv.system.table()          # the rows again: the table is a view of the system
 ```
 
 A prescription table is read into physical elements:
-- every run of glass between two surfaces becomes a lens;
+- every run of glass between two surfaces is a body;
+- bodies sharing a surface are cemented into one lens;
 - a surface met twice is one surface;
-- bodies sharing a surface are in contact;
 - a stop plane inside a lens is a virtual stop;
 - the image plane becomes a sensor.
 
@@ -137,10 +137,16 @@ surface is accepted wherever an interface is.
 
 ```python
 el.Lens("L1",
-    front=Interface(sf.Sphere(21.25), coating=coatings.AR(), clear_aperture=ap.Circle(6.2)),
-    back=sf.Sphere(-158.65),
-    thickness=2.0, material=glass["N-SK16"], semi_diameter=6.5, pos=(0, 0, 25), rot=(30, 45, 0))
+    surfaces=[Interface(sf.Sphere(21.25), coating=coatings.AR(), clear_aperture=ap.Circle(6.2)), sf.Sphere(-158.65)],
+    thicknesses=[2.0], materials=[glass["N-SK16"]], semi_diameter=6.5, pos=(0, 0, 25), rot=(30, 45, 0))
+
+el.Lens("D1",                                           # a cemented doublet: one element, three surfaces
+    surfaces=[sf.Sphere(61.5), sf.Sphere(-43.2), sf.Sphere(-124.0)],
+    thicknesses=[6.0, 2.5], materials=[glass["N-BK7"], glass["N-F2"]], semi_diameter=12.5)
 ```
+
+A lens's faces are numbered from 1 in the order of its surfaces (`D1.1`,
+`D1.2`, `D1.3`); the cemented face `D1.2` is written once and named once.
 
 What light *does* at a boundary is not stated anywhere. It follows from
 three things:
@@ -180,13 +186,14 @@ cooke.stop           # the aperture stop's name
 cooke.rotated(45, axis=(1, 1, 0), about=(10, 0, 5))     # a new system; nothing mutates
 ```
 
-Where two faces coincide (same pose, same surface), they are one boundary
-between two materials: cemented lenses, an immersion liquid against a lens.
+Where faces of two elements coincide (same pose, same surface), they are
+one boundary between their materials: separate lenses touching, a detector
+at the back of an immersion layer.
 A folded or split system states its path, with `":reflect"` where a
 beam splitter would otherwise be ambiguous:
 
 ```python
-arm = system.replace(path=["BS:reflect", "M1", "L2.front", "L2.back", "D2"])
+arm = system.replace(path=["BS:reflect", "M1", "L2.1", "L2.2", "D2"])
 ```
 
 ## 3. Stating how it is *used*: conditions

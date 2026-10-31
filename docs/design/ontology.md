@@ -104,7 +104,9 @@ expressed by `Asphere.base` and `EvenAsphere.from_conic` instead.
 ```
 
 * A mirror is a surface with a reflective coating.
-* A cemented face is two element faces that coincide.
+* A cemented face is one face of a lens, with a glass on each side, named
+  once. Where faces of two elements coincide (separate lenses touching, a
+  detector at the back of an immersion layer), they are one boundary.
 * A beam splitter's branch is a choice of the sequential path, stated
   there (`"BS:reflect"`), because physics takes both branches.
 

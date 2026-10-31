@@ -104,10 +104,10 @@ def oval_lens(semi_diameter: float, *, extra: float = 0.0) -> OpticalSystem:
     point ``ZI`` (on the glass's flat back face when ``extra`` is 0)."""
 
     lens = Lens(
-        "L", front=CartesianSurface(N0, Z0, NI, ZI), back=Plane(),
-        thickness=ZI + extra, material=GLASS, semi_diameter=semi_diameter,
+        "L", surfaces=[CartesianSurface(N0, Z0, NI, ZI), Plane()],
+        thicknesses=[ZI + extra], materials=[GLASS], semi_diameter=semi_diameter,
     )
-    return OpticalSystem([lens, Sensor("IMG", z=ZI)], path=["L.front", "IMG"])
+    return OpticalSystem([lens, Sensor("IMG", z=ZI)], path=["L.1", "IMG"])
 
 
 def test_semidiameter_clips_rays_beyond_the_aperture():

@@ -31,8 +31,8 @@ fidelity the application needs:
   chromatic analysis away from the design line is honest.
 
 A train is a *family*, not a system: :meth:`StigmaticTrain.system` builds
-the member — Cartesian lenses placed on the axis, in contact where two
-glasses meet, and a sensor at the image conjugate — and
+the member — a lens of Cartesian surfaces on the axis, its glasses
+cemented where they meet, and a sensor at the image conjugate — and
 :meth:`StigmaticTrain.tracer` sets it up for sequential tracing at the
 design wavelength with the object plane at ``d_0``.
 

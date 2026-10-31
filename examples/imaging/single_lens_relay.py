@@ -40,8 +40,8 @@ SENSOR_HALF = 12.0
 
 
 def build_relay() -> OpticalSystem:
-    lens = Lens("singlet", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
-                material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0)
+    lens = Lens("singlet", surfaces=[Sphere(60.0), Sphere(-60.0)], thicknesses=[9.0],
+                materials=[ConstantIndex("N1.5168", 1.5168)], semi_diameter=16.0)
     sensor = Sensor("IMG", aperture=Rectangle(2 * SENSOR_HALF, 2 * SENSOR_HALF), z=171.4)
     return OpticalSystem([lens, sensor])
 

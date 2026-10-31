@@ -21,7 +21,7 @@ import numpy as np
 from ..elements import BeamSplitter, Lens, Mirror, Prism, Sensor, Stop
 from ..geometry.apertures import Annulus, Aperture, Circle, Rectangle
 from ..geometry.transforms import Pose
-from .bodies import DEFAULT_MATERIAL_COLORS, glass_colors, medium_index
+from .bodies import DEFAULT_MATERIAL_COLORS, glass_colors, lens_bodies, medium_index
 from .color import hex_rgba, spectral_rgb
 from .gl import shaders
 from .section import facet_corners, fan_faces, lens_outline
@@ -109,12 +109,13 @@ class Viewer3D:
                                          section=section, angular_samples=angular_samples, hole=face.hole)
 
     def add_lens(self, lens: Lens, pose: Pose | None = None, *, color=None, section="full", style="glass", wavelength_um=None):
-        """A lens body at its world *pose* (default: its own)."""
+        """A lens at its world *pose* (default: its own), each of its bodies a solid in its own glass."""
 
-        _, (e_front, e_back), _ = lens_outline(lens, Pose())
-        v, f = lathe_solid(lens.front.surface, lens.back.surface, e_front, thickness=lens.thickness, back_semidiameter=e_back,
-                           pose=lens.pose if pose is None else pose, angle_range=_angle_range(section))
-        self._add_mesh(v, f, _glass_rgba(lens.material, wavelength_um) if color is None else color, style=style)
+        for body, body_pose, _ in lens_bodies(lens, lens.pose if pose is None else pose):
+            _, (e_front, e_back), _ = lens_outline(body, Pose())
+            v, f = lathe_solid(body.surfaces[0].surface, body.surfaces[1].surface, e_front, thickness=body.thickness,
+                               back_semidiameter=e_back, pose=body_pose, angle_range=_angle_range(section))
+            self._add_mesh(v, f, _glass_rgba(body.materials[0], wavelength_um) if color is None else color, style=style)
 
     def add_surface(self, surface, aperture, *, pose: Pose | None = None, color, section="full", angular_samples=96,
                     style="opaque", hole=None):

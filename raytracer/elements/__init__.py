@@ -1,11 +1,11 @@
 """Optical elements: the physical things an optical system is made of.
 
 An element is a named, placed object: geometry (its surfaces, or a solid)
-plus what it is made of (its material) plus its optical interfaces. It
+plus what it is made of (its materials) plus its optical interfaces. It
 knows its own **pose** — position and orientation — but nothing about the
-other elements around it: which medium lies outside it, whether it is
-cemented to a neighbour, and in which order light visits it are facts of
-the system, resolved there.
+other elements around it: which medium lies outside it, whether it touches
+a neighbour, and in which order light visits it are facts of the system,
+resolved there.
 
 Every element accepts the same placement keywords (see
 :meth:`raytracer.geometry.Pose.from_spec`):
@@ -46,17 +46,18 @@ OPTICAL, EDGE, BLADE, DETECTOR = "optical", "edge", "blade", "detector"
 class ElementFace:
     """One boundary of an element, in the element's own frame.
 
-    ``bulk_side`` is +1 when the element's material lies on the face's local
-    +z side, −1 on its −z side, 0 when the element has no bulk. ``extent``
+    ``media`` are what the element itself fills on the face's local −z and
+    +z sides (None: outside it, for the system to resolve). ``extent``
     bounds the physical patch of surface; ``hole`` removes a region from it
     (the opening of a diaphragm). A lens rim is the curved ``wall`` of a
-    cylinder, placed by ``pose``, instead of an interface.
+    cylinder, placed by ``pose``, instead of an interface; its inside is
+    ``media[0]``.
     """
 
     name: str
     interface: Interface | None
     pose: Pose
-    bulk_side: int
+    media: tuple[Material | None, Material | None]
     extent: Aperture | None
     role: str = OPTICAL
     hole: Aperture | None = None
@@ -68,7 +69,6 @@ class Element(ABC):
 
     name: str
     pose: Pose
-    material: Material | None = None
 
     def _place(self, name: str, placement: dict[str, Any]) -> None:
         if not isinstance(name, str) or not name:
@@ -148,65 +148,80 @@ def _semi_diameter(value: float) -> float:
 
 
 class Lens(Element):
-    """A body of one material between two optical surfaces.
+    """Glass between optical surfaces: one body, or several cemented into one.
 
-    ``front`` sits at the element's origin and ``back`` at ``z = thickness``
-    on its axis; each is a :class:`~raytracer.geometry.surfaces.Surface` or
-    an :class:`~raytracer.interfaces.Interface` (to give it a coating or a
-    clear aperture of its own). ``semi_diameter`` is the physical radius of
-    the body, closed by a cylindrical rim that absorbs (a ground edge).
+    The ``surfaces`` follow one another along the element's axis, the first
+    at its origin; ``thicknesses[k]`` is the centre thickness of the body
+    between surfaces ``k`` and ``k + 1``, made of ``materials[k]``. A singlet
+    has two surfaces, one thickness and one material; a cemented doublet
+    three, two and two. Each surface is a
+    :class:`~raytracer.geometry.surfaces.Surface` or an
+    :class:`~raytracer.interfaces.Interface` (to give it a coating or a clear
+    aperture of its own). ``semi_diameter`` is the physical radius of the
+    whole, closed by a cylindrical rim that absorbs (a ground edge).
 
-    A cemented doublet is two lenses in contact; an immersion layer is a
-    lens of liquid in contact with its neighbours. The system recognises
-    contact where a face of one element coincides with a face of another.
+    Its faces are numbered from 1 in the order of the surfaces (``L1.1``,
+    ``L1.2``, …); the rim of body ``k`` is ``edge{k}``.
     """
 
     def __init__(
         self,
         name: str,
         *,
-        front: Interface | Surface,
-        back: Interface | Surface,
-        thickness: float,
-        material: Material,
+        surfaces: list[Interface | Surface],
+        thicknesses: list[float],
+        materials: list[Material],
         semi_diameter: float,
         **placement,
     ) -> None:
-        front, back = Interface.coerce(front), Interface.coerce(back)
-        if not float(thickness) > 0.0:
-            raise ValueError(f"lens {name!r}: the centre thickness is positive, got {thickness}")
-        self._set(front=front, back=back, thickness=float(thickness), material=material, semi_diameter=_semi_diameter(semi_diameter))
+        surfaces = tuple(Interface.coerce(s) for s in surfaces)
+        thicknesses, materials = tuple(float(t) for t in thicknesses), tuple(materials)
+        if not len(surfaces) - 1 == len(thicknesses) == len(materials) >= 1:
+            raise ValueError(
+                f"lens {name!r}: n + 1 surfaces bound n bodies, each with a thickness and a material "
+                f"(got {len(surfaces)} surfaces, {len(thicknesses)} thicknesses, {len(materials)} materials)"
+            )
+        if not all(t > 0.0 for t in thicknesses):
+            raise ValueError(f"lens {name!r}: centre thicknesses are positive, got {thicknesses}")
+        self._set(surfaces=surfaces, thicknesses=thicknesses, materials=materials, semi_diameter=_semi_diameter(semi_diameter))
         self._place(name, placement)
 
+    @property
+    def vertices(self) -> np.ndarray:
+        """Axial position of each surface's vertex."""
 
-    def edge_heights(self) -> tuple[float, float]:
-        """Axial positions where the rim meets the front and back faces."""
+        return np.concatenate([[0.0], np.cumsum(self.thicknesses)])
+
+    @property
+    def thickness(self) -> float:
+        """Centre thickness of the whole lens."""
+
+        return float(self.vertices[-1])
+
+    def edge_heights(self) -> np.ndarray:
+        """Axial position where each surface meets the rim."""
 
         h = np.array([self.semi_diameter])
-        zf = float(self.front.surface.sag(h, np.zeros(1))[0])
-        zb = float(self.thickness + self.back.surface.sag(h, np.zeros(1))[0])
-        return zf, zb
+        return np.array([z + float(s.surface.sag(h, np.zeros(1))[0]) for z, s in zip(self.vertices, self.surfaces)])
 
     @property
     def edge_thickness(self) -> float:
-        zf, zb = self.edge_heights()
-        return zb - zf
+        edges = self.edge_heights()
+        return float(edges[-1] - edges[0])
 
     def faces(self):
         sd = Circle(self.semi_diameter)
-        zf, zb = self.edge_heights()
-        return [
-            ElementFace("front", self.front, Pose(), +1, sd),
-            ElementFace("back", self.back, Pose((0.0, 0.0, self.thickness)), -1, sd),
-        ] + self._rim(zf, zb)
-
-    def _rim(self, z_front: float, z_back: float) -> list[ElementFace]:
-        """The cylindrical rim between the faces, absent where the faces meet before the edge."""
-
-        if z_back - z_front <= 0.0:
-            return []
-        wall = Cylinder(self.semi_diameter, z_back - z_front)
-        return [ElementFace("edge", None, Pose((0.0, 0.0, z_front)), 0, None, role=EDGE, wall=wall)]
+        around = (None, *self.materials, None)  # what lies on either side of each surface, within the lens
+        faces = [
+            ElementFace(str(k + 1), surface, Pose((0.0, 0.0, z)), (around[k], around[k + 1]), sd)
+            for k, (surface, z) in enumerate(zip(self.surfaces, self.vertices))
+        ]
+        edges = self.edge_heights()
+        for k, material in enumerate(self.materials):  # a body's rim, absent where its faces meet before the edge
+            if edges[k + 1] > edges[k]:
+                wall = Cylinder(self.semi_diameter, edges[k + 1] - edges[k])
+                faces.append(ElementFace(f"edge{k + 1}", None, Pose((0.0, 0.0, edges[k])), (material, None), None, role=EDGE, wall=wall))
+        return faces
 
 
 def _one_face(surface: Surface | Interface, coating: Coating | None, clear_aperture, default: Coating):
@@ -242,7 +257,7 @@ class Mirror(Element):
 
     def faces(self):
         interface = Interface(self.surface, coating=self.coating, clear_aperture=self.clear_aperture)
-        return [ElementFace("", interface, Pose(), 0, self.aperture)]
+        return [ElementFace("", interface, Pose(), (None, None), self.aperture)]
 
 
 class BeamSplitter(Element):
@@ -264,7 +279,7 @@ class BeamSplitter(Element):
 
     def faces(self):
         interface = Interface(self.surface, coating=self.coating, clear_aperture=self.clear_aperture)
-        return [ElementFace("", interface, Pose(), 0, self.aperture)]
+        return [ElementFace("", interface, Pose(), (None, None), self.aperture)]
 
 
 class Prism(Element):
@@ -295,7 +310,7 @@ class Prism(Element):
         faces = []
         for i, (pose, outline) in enumerate(self.solid.facets()):
             interface = Interface(Plane(), coating=self.coatings.get(i))
-            faces.append(ElementFace(f"facet{i}", interface, pose, -1, outline))
+            faces.append(ElementFace(f"facet{i}", interface, pose, (self.material, None), outline))
         return faces
 
 
@@ -327,7 +342,7 @@ class Stop(Element):
 
     def faces(self):
         blade = Interface(Plane(), coating=Absorbing(), clear_aperture=self.aperture)
-        return [ElementFace("", blade, Pose(), 0, Circle(self.outer_radius), role=BLADE, hole=self.aperture)]
+        return [ElementFace("", blade, Pose(), (None, None), Circle(self.outer_radius), role=BLADE, hole=self.aperture)]
 
 
 class Sensor(Element):
@@ -346,7 +361,7 @@ class Sensor(Element):
 
 
     def faces(self):
-        return [ElementFace("", Interface(self.surface, coating=Absorbing()), Pose(), 0, self.aperture, role=DETECTOR)]
+        return [ElementFace("", Interface(self.surface, coating=Absorbing()), Pose(), (None, None), self.aperture, role=DETECTOR)]
 
 
 __all__ = [

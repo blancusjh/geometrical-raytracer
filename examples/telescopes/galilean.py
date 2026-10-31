@@ -68,8 +68,8 @@ def equiconvex(name: str, f: float, thickness: float, semi_diameter: float) -> L
     the gap solve absorbs the thickness error)."""
 
     radius = 2.0 * (GLASS_N - 1.0) * f
-    return Lens(name, front=Sphere(radius), back=Sphere(-radius), thickness=thickness,
-                material=GLASS, semi_diameter=semi_diameter)
+    return Lens(name, surfaces=[Sphere(radius), Sphere(-radius)], thicknesses=[thickness],
+                materials=[GLASS], semi_diameter=semi_diameter)
 
 
 OBJECTIVE = equiconvex("objective", F_OBJECTIVE, OBJ_THICKNESS, OBJ_SEMI)

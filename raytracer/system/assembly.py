@@ -14,8 +14,8 @@ class Assembly:
     """A named rigid group of components, with a pose of its own.
 
     Component poses are relative to the assembly's frame, so moving the
-    assembly moves everything in it — a lens barrel, a cemented group, a
-    whole subsystem.
+    assembly moves everything in it — a lens barrel, a relay, a whole
+    subsystem.
     """
 
     def __init__(self, name: str, components: Sequence[Component], **placement: Any) -> None:

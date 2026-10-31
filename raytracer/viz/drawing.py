@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..elements import BeamSplitter, Element, Mirror, Sensor, Stop
-from .bodies import body_outline, body_outlines, glass_colors
+from .bodies import body_outlines, element_bodies, glass_colors
 from .color import hex_rgba
 from .section import DEFAULT_SEMIDIAMETER, element_sections, extent_of, fan_faces, strip_faces, to_drawing
 
@@ -53,8 +53,8 @@ class Drawing:
         """Loose elements, each at its own pose, or ``(element, pose)`` pairs; no neighbour cuts."""
 
         placed = [(e, e.pose) if isinstance(e, Element) else (e[0], e[1]) for e in elements]
-        bodies = [body_outline(e, p, wavelength_um=wavelength_um) for e, p in placed]
-        return self._add_placed(placed, [b for b in bodies if b is not None], None, {}, True)
+        bodies = [b for e, p in placed for b in element_bodies(e, p, wavelength_um=wavelength_um)]
+        return self._add_placed(placed, bodies, None, {}, True)
 
     def _add_placed(self, placed, bodies, material_colors, hits, sensors) -> "Drawing":
         for body in bodies:

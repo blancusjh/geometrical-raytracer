@@ -4,12 +4,12 @@ Two facts follow from the elements of a system and are computed here, never
 stated:
 
 **Which medium lies on each side of each boundary.** Every element knows
-on which side of each of its faces its own material lies. Where a face of
-one element coincides with a face of another — same world pose, same
-surface — the two are one physical boundary between two materials:
-cemented lenses, an immersion liquid against a lens, a detector at the
-back of a liquid layer. Everywhere else, the other side is the ambient
-medium.
+what it fills on either side of each of its faces — both sides of a
+cemented surface, one side of an outer face. Where a face of one element
+coincides with a face of another — same world pose, same surface — the
+two are one physical boundary between their materials: separate lenses in
+contact, a detector at the back of an immersion layer. Everywhere else,
+the other side is the ambient medium.
 
 **The sequential path**: the ordered boundaries a sequential trace visits,
 each with the event that happens there. It is stated by the designer
@@ -41,7 +41,7 @@ class PhysicalFace:
 
     ``medium_minus`` / ``medium_plus`` fill the local −z / +z sides of the
     surface. ``names`` lists every element face that coincides here (two
-    for a cemented face), the first being the canonical one.
+    where separate elements touch), the first being the canonical one.
     """
 
     names: tuple[str, ...]
@@ -127,15 +127,17 @@ def _physical_face(group: list[tuple[Element, ElementFace, Pose]], ambient: Mate
     elements = tuple(e.name for e, _, _ in group)
     element, face, pose = group[0]
     if face.role == EDGE:
-        return PhysicalFace(names, None, pose, None, EDGE, element.material or ambient, ambient, elements, wall=face.wall)
+        inside = ambient if face.media[0] is None else face.media[0]
+        return PhysicalFace(names, None, pose, None, EDGE, inside, ambient, elements, wall=face.wall)
 
-    sides: dict[int, Material] = {}
+    sides: list[Material | None] = [None, None]
     interface, extent = face.interface, face.extent
-    for e, f, _ in group:
-        if f.bulk_side:
-            if f.bulk_side in sides:
-                raise ValueError(f"{'='.join(names)}: two elements claim the same side of one boundary (their bodies overlap)")
-            sides[f.bulk_side] = e.material
+    for _, f, _ in group:
+        for side, medium in enumerate(f.media):
+            if medium is not None:
+                if sides[side] is not None:
+                    raise ValueError(f"{'='.join(names)}: two elements claim the same side of one boundary (their bodies overlap)")
+                sides[side] = medium
         if f is not face:
             interface = interface.replace(coating=_merge_coatings(interface.coating, f.interface.coating, names[0]))
             if extent is not None and (f.extent is None or f.extent.extent > extent.extent):
@@ -146,8 +148,8 @@ def _physical_face(group: list[tuple[Element, ElementFace, Pose]], ambient: Mate
         pose,
         extent,
         face.role,
-        sides.get(-1, ambient),
-        sides.get(+1, ambient),
+        ambient if sides[0] is None else sides[0],
+        ambient if sides[1] is None else sides[1],
         elements,
         hole=face.hole,
         virtual=isinstance(element, Stop) and element.virtual,
@@ -182,7 +184,7 @@ def default_event(face: PhysicalFace) -> str | None:
 
 
 def parse_path(spec, faces: tuple[PhysicalFace, ...]) -> tuple[Step, ...]:
-    """Read ``["L1.front", "BS:reflect", ...]`` against the system's boundaries."""
+    """Read ``["L1.1", "BS:reflect", ...]`` against the system's boundaries."""
 
     by_name = {n: f for f in faces for n in f.names}
     steps = []

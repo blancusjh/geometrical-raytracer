@@ -38,8 +38,8 @@ VIEW = dict(x_lims=(-110.0, 200.0), y_lims=(-60.0, 60.0), size=(1300, 700))
 
 
 def main() -> None:
-    lens = Lens("lens", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
-                material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0)
+    lens = Lens("lens", surfaces=[Sphere(60.0), Sphere(-60.0)], thicknesses=[9.0],
+                materials=[ConstantIndex("N1.5168", 1.5168)], semi_diameter=16.0)
     sensor = Sensor("IMG", aperture=Rectangle(30.0, 30.0), z=171.4)
     source = PointSource((0.0, 0.0, -90.0), half_angle_deg=9.0, rays=201, fan="y")
     session = InteractiveSession(sources=[source], system=OpticalSystem([lens, sensor]), max_interactions=5)

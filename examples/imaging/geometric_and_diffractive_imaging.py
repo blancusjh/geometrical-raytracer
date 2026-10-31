@@ -45,8 +45,8 @@ def geometric_relay():
         profile[start : start + 30] = 1.0
     profile[105:135] *= 0.55  # middle bar dimmer: gray levels survive imaging
 
-    lens = Lens("relay", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
-                material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0)
+    lens = Lens("relay", surfaces=[Sphere(60.0), Sphere(-60.0)], thicknesses=[9.0],
+                materials=[ConstantIndex("N1.5168", 1.5168)], semi_diameter=16.0)
     sensor = Sensor("IMG", aperture=Rectangle(36.0, 36.0), z=171.4)
     source = ImageSource(profile, p0=(0.0, -6.0, -90.0), p1=(0.0, 6.0, -90.0), half_angle_deg=5.0, rays_per_point=31)
 

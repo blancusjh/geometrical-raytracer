@@ -72,8 +72,8 @@ def rim_half_angle_deg(surface, semi_diameter: float) -> float:
 
 
 def build_block() -> OpticalSystem:
-    return OpticalSystem([Lens("oval", front=OVAL, back=Plane(), thickness=BLOCK_LENGTH,
-                               material=ConstantIndex("GLASS", GLASS_N), semi_diameter=SEMIDIAMETER)])
+    return OpticalSystem([Lens("oval", surfaces=[OVAL, Plane()], thicknesses=[BLOCK_LENGTH],
+                               materials=[ConstantIndex("GLASS", GLASS_N)], semi_diameter=SEMIDIAMETER)])
 
 
 def trace(system: OpticalSystem, rays: int = 300):

@@ -13,11 +13,13 @@ surface-by-surface listing, as in patents and lens files: each row is a
 surface, the signed gap to the next vertex, and the medium after it. The
 reader recovers the physical elements the table describes:
 
-- every run of non-ambient medium between two surfaces becomes a
-  :class:`~raytracer.elements.Lens` (a liquid layer included);
+- every run of non-ambient medium between two surfaces is a body of glass
+  (or of liquid);
+- bodies that share a surface are cemented into one
+  :class:`~raytracer.elements.Lens` (an immersion layer against a lens
+  reads the same way);
 - a surface met twice (a double-pass lens in a catadioptric) is one
   physical surface: the second visit reuses the element;
-- consecutive bodies sharing a surface are in contact (cemented);
 - mirror rows become :class:`~raytracer.elements.Mirror` s, or a reflective
   coating on a lens face when they sit on glass (a Mangin mirror);
 - stop rows become :class:`~raytracer.elements.Stop` s — *virtual* when the
@@ -95,15 +97,15 @@ def compose(cls, parts, *, name="", ambient=AIR, stop=None):
         element = part.placed(Pose((0.0, 0.0, z)))
         placed.append(element)
         if isinstance(element, Lens):
+            faces = [f"{element.name}.{k}" for k in range(1, len(element.surfaces) + 1)]
             if last_lens is not None:
-                if last_lens.back.surface != element.front.surface:
+                if last_lens.surfaces[-1].surface != element.surfaces[0].surface:
                     raise ValueError(
-                        f"{last_lens.name!r} and {element.name!r} touch (no Gap between them), "
-                        "so they must share the contact surface"
+                        f"{last_lens.name!r} and {element.name!r} touch (no Gap between them), so they must "
+                        "share the contact surface; glass cemented together is one Lens"
                     )
-            else:
-                path.append(f"{element.name}.front")
-            path.append(f"{element.name}.back")
+                faces = faces[1:]  # the contact face is on the path already
+            path += faces
             z += element.thickness
             last_lens = element
         else:
@@ -188,22 +190,38 @@ def _bodies(visits: list, image: _Surface, ambient: Material) -> list[tuple[_Sur
     return list(bodies.values())
 
 
-def _lens(name: str, front: _Surface, back: _Surface, material: Material) -> Lens:
-    """A lens as wide as its wider face; a table that gives no width falls back on what its surfaces allow."""
+def _cemented(bodies: list) -> list[list]:
+    """The bodies grouped into lenses: a body whose back surface is another's front is cemented to it."""
 
-    semi = max(front.semi_diameter, back.semi_diameter)
+    behind = {id(front): (front, back, material) for front, back, material in bodies}
+    backs = {id(back) for _, back, _ in bodies}
+    lenses = []
+    for body in bodies:
+        if id(body[0]) in backs:
+            continue  # cemented behind another body: its lens starts there
+        lens = [body]
+        while id(lens[-1][1]) in behind:
+            lens.append(behind[id(lens[-1][1])])
+        lenses.append(lens)
+    return lenses
+
+
+def _lens(name: str, bodies: list) -> Lens:
+    """A lens of cemented bodies, as wide as its widest face; a table that gives no width falls back on what its surfaces allow."""
+
+    surfaces = [bodies[0][0]] + [back for _, back, _ in bodies]
+    semi = max(s.semi_diameter for s in surfaces)
     if semi <= 0.0:
-        semi = min(front.interface.surface.max_radius, back.interface.surface.max_radius)
+        semi = min(s.interface.surface.max_radius for s in surfaces)
         if not np.isfinite(semi):
             raise ValueError(f"{name}: the table gives no semi-diameter and its surfaces do not bound one")
     return Lens(
         name,
-        front=front.as_face(),
-        back=back.as_face(),
-        thickness=back.z - front.z,
-        material=material,
+        surfaces=[s.as_face() for s in surfaces],
+        thicknesses=[back.z - front.z for front, back, _ in bodies],
+        materials=[material for _, _, material in bodies],
         semi_diameter=semi,
-        z=front.z,
+        z=surfaces[0].z,
     )
 
 
@@ -218,8 +236,8 @@ def _cuts(stop: Stop, lens: Lens) -> bool:
     z = stop.pose.position[2] - lens.pose.position[2]
     r = np.linspace(0.0, min(stop.outer_radius, lens.semi_diameter), 129)
     zero = np.zeros_like(r)
-    front = lens.front.surface.sag(r, zero)
-    back = lens.thickness + lens.back.surface.sag(r, zero)
+    front = lens.surfaces[0].surface.sag(r, zero)
+    back = lens.thickness + lens.surfaces[-1].surface.sag(r, zero)
     return bool(np.any((front + 1e-9 < z) & (z < back - 1e-9)))
 
 
@@ -239,11 +257,10 @@ def from_table(cls, rows, *, name: str = "", ambient: Material = AIR, image_surf
 
     elements: list[Element] = []
     names: dict[int, str] = {}
-    bodies = _bodies(visits, image, ambient)
-    for n, (front, back, material) in enumerate(bodies, 1):
-        elements.append(_lens(f"L{n}", front, back, material))
-        names.setdefault(id(front), f"L{n}.front")
-        names.setdefault(id(back), f"L{n}.back")
+    for n, bodies in enumerate(_cemented(_bodies(visits, image, ambient)), 1):
+        elements.append(_lens(f"L{n}", bodies))
+        for k, surface in enumerate([bodies[0][0]] + [back for _, back, _ in bodies], 1):
+            names.setdefault(id(surface), f"L{n}.{k}")
 
     mirrors = 0
     for surface in {id(s): s for _, s, _ in visits}.values():

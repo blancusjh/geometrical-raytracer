@@ -18,8 +18,8 @@ def _relay(profile, *, object_height=6.0, rays_per_point=41):
     in the meridional y-z plane, with fans of 4 degree half-angle."""
 
     lens = Lens(
-        "relay", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
-        material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0,
+        "relay", surfaces=[Sphere(60.0), Sphere(-60.0)], thicknesses=[9.0],
+        materials=[ConstantIndex("N1.5168", 1.5168)], semi_diameter=16.0,
     )
     sensor = Sensor("IMG", aperture=Rectangle(40.0, 40.0), z=171.4)
     source = ImageSource(

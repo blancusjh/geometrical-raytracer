@@ -57,7 +57,7 @@ def splitter_bench(window: Lens) -> OpticalSystem:
 
 
 def test_power_is_conserved_through_a_beam_splitter_and_a_lens():
-    lens = Lens("L", front=Sphere(80.0), back=Sphere(-80.0), thickness=6.0, material=GLASS,
+    lens = Lens("L", surfaces=[Sphere(80.0), Sphere(-80.0)], thicknesses=[6.0], materials=[GLASS],
                 semi_diameter=8.0, z=40.0)
     source = CollimatedSource((0.0, 0.0, 0.0), beam_radius=4.0, rays=37, power=1.0)
     rays = NonSequentialTracer(splitter_bench(lens), max_interactions=40, min_power=1e-12).trace(source)
@@ -79,7 +79,7 @@ def test_fresnel_losses_of_a_window_sum_the_incoherent_series():
     """A flat window at normal incidence transmits T^2 (1 + R^2 + R^4 + ...)
     = (1 - R) / (1 + R): every internal reflection retraces the axis."""
 
-    window = Lens("W", front=Plane(), back=Plane(), thickness=5.0, material=GLASS,
+    window = Lens("W", surfaces=[Plane(), Plane()], thicknesses=[5.0], materials=[GLASS],
                   semi_diameter=8.0, z=40.0)
     source = CollimatedSource((0.0, 0.0, 0.0), beam_radius=3.0, rays=19)
     rays = NonSequentialTracer(splitter_bench(window), max_interactions=60, min_power=1e-14).trace(source)
@@ -89,7 +89,7 @@ def test_fresnel_losses_of_a_window_sum_the_incoherent_series():
     np.testing.assert_allclose(camera.direction, np.tile([0.0, 0.0, 1.0], (len(camera), 1)), atol=1e-12)
     assert rays.power.sum() == pytest.approx(1.0, abs=1e-12)
     # An anti-reflection coating removes the loss.
-    coated = window.replace(front=window.front.replace(coating=AR()), back=window.back.replace(coating=AR()))
+    coated = window.replace(surfaces=[surface.replace(coating=AR()) for surface in window.surfaces])
     rays = NonSequentialTracer(splitter_bench(coated)).trace(source)
     assert detected(rays, "CAM_T").power.sum() == pytest.approx(0.5)
 
@@ -179,7 +179,7 @@ def test_rays_that_meet_nothing_escape():
 def test_dispersive_media_need_a_wavelength():
     from raytracer.materials import sellmeier_glass
 
-    lens = Lens("L", front=Sphere(50.0), back=Plane(), thickness=5.0, material=sellmeier_glass("N-BK7"),
+    lens = Lens("L", surfaces=[Sphere(50.0), Plane()], thicknesses=[5.0], materials=[sellmeier_glass("N-BK7")],
                 semi_diameter=10.0)
     rays = Rays([0.0, 1.0, -5.0], [0.0, 0.0, 1.0])
     with pytest.raises(ValueError, match="wavelength"):

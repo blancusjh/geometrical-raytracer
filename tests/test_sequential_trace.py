@@ -92,12 +92,12 @@ def test_vignetting_status_and_where_the_ray_ends():
 def test_lens_rim_vignettes_at_its_face():
     glass = ConstantIndex("GLASS", 1.5)
     system = OpticalSystem.compose(
-        Lens("W", front=Plane(), back=Plane(), thickness=5.0, material=glass, semi_diameter=5.0),
+        Lens("W", surfaces=[Plane(), Plane()], thicknesses=[5.0], materials=[glass], semi_diameter=5.0),
         Gap(10.0),
         Sensor("IMG"),
     )
     rays = SequentialTracer(system).trace(Rays([[0.0, 2.0, -10.0], [0.0, 8.0, -10.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]))
-    assert system.step_index("W.front") == 0
+    assert system.step_index("W.1") == 0
     assert rays.status[1] == Status.VIGNETTED and rays.boundary[1] is None
 
 
@@ -156,9 +156,9 @@ def test_a_path_back_to_a_passed_boundary_stops_the_ray():
 
     glass = ConstantIndex("G", 1.5)
     system = OpticalSystem.compose(
-        Lens("A", front=Plane(), back=Plane(), thickness=2.0, material=glass, semi_diameter=5.0),
+        Lens("A", surfaces=[Plane(), Plane()], thicknesses=[2.0], materials=[glass], semi_diameter=5.0),
         Gap(1.0),
-        Lens("B", front=Sphere(-5.0), back=Plane(), thickness=4.0, material=glass, semi_diameter=4.8),
+        Lens("B", surfaces=[Sphere(-5.0), Plane()], thicknesses=[4.0], materials=[glass], semi_diameter=4.8),
         Gap(20.0),
         Sensor("IMG"),
     )
@@ -185,7 +185,7 @@ def test_a_stop_may_sit_behind_the_ray():
 
 def test_tracer_replace_keeps_the_settings_it_is_not_given():
     glass = ConstantIndex("G", 1.5)
-    system = OpticalSystem.compose(Lens("A", front=Sphere(20.0), back=Plane(), thickness=2.0, material=glass, semi_diameter=5.0), Gap(30.0), Sensor("IMG"))
+    system = OpticalSystem.compose(Lens("A", surfaces=[Sphere(20.0), Plane()], thicknesses=[2.0], materials=[glass], semi_diameter=5.0), Gap(30.0), Sensor("IMG"))
     tracer = SequentialTracer(system, wavelength_um=0.55, object_z=-100.0, clip_apertures=False)
     moved = tracer.replace(object_z=-200.0)
     assert (moved.wavelength_um, moved.object_z, moved.clip_apertures) == (0.55, -200.0, False)
@@ -197,7 +197,7 @@ def test_each_ray_is_traced_at_its_own_wavelength():
 
     from raytracer.materials import sellmeier_glass
 
-    lens = Lens("L", front=Sphere(30.0), back=Plane(), thickness=4.0, material=sellmeier_glass("N-BK7"), semi_diameter=8.0)
+    lens = Lens("L", surfaces=[Sphere(30.0), Plane()], thicknesses=[4.0], materials=[sellmeier_glass("N-BK7")], semi_diameter=8.0)
     tracer = SequentialTracer(OpticalSystem.compose(lens, Gap(50.0), Sensor("IMG")), wavelength_um=0.5876)
     start, along = [0.0, 5.0, -5.0], [0.0, 0.0, 1.0]
     mixed = tracer.trace(Rays([start, start], [along, along], wavelength_um=[np.nan, 0.48613]))

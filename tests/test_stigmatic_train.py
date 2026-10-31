@@ -189,9 +189,9 @@ def test_flat_interior_surface_train_is_stigmatic():
 # -- the member system ---------------------------------------------------------
 
 
-def test_member_system_is_cemented_lenses_and_a_sensor():
-    """Each medium between two surfaces is a lens; neighbouring glasses are in
-    contact at the surface they share; the sensor sits at the image conjugate."""
+def test_member_system_is_one_cemented_lens_and_a_sensor():
+    """Each medium between two surfaces is a glass; glasses that share a surface
+    are cemented into one lens; the sensor sits at the image conjugate."""
 
     train = StigmaticTrain(
         media=(1.0, 1.5, 1.7, 1.0),
@@ -200,9 +200,9 @@ def test_member_system_is_cemented_lenses_and_a_sensor():
         semidiameter=6.0,
     )
     system = train.system()
-    assert [type(e).__name__ for e in system.elements] == ["Lens", "Lens", "Sensor"]
-    contact = system.face("L1.back")
-    assert set(contact.names) == {"L1.back", "L2.front"}
+    assert [type(e).__name__ for e in system.elements] == ["Lens", "Sensor"]
+    contact = system.face("L1.2")
+    assert contact.names == ("L1.2",)
     assert (contact.medium_minus.index(0.5), contact.medium_plus.index(0.5)) == (1.5, 1.7)
     assert [s.face.surface for s in system.path[:-1]] == list(train.surfaces)
     tracer = train.tracer()

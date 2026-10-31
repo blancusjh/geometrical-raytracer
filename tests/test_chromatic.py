@@ -134,7 +134,7 @@ def test_tracer_at_wavelength_leaves_the_original_untouched():
     assert at_f.wavelength_um == F_LINE
     assert tracer.wavelength_um == pytest.approx(0.5876)
     # The glass index is evaluated at each tracer's own wavelength.
-    lens = tracer.system.step_index("L1.front")
+    lens = tracer.system.step_index("L1.1")
     assert at_f._n[lens][1] > tracer._n[lens][1]
     with pytest.raises(AttributeError):
         tracer.system.name = "changed"

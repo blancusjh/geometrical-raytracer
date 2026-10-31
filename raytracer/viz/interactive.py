@@ -301,23 +301,32 @@ def _element_editable(element, session: InteractiveSession) -> Editable:
                      -180.0, 180.0, 1.0)
 
     if isinstance(element, Lens):
+        def with_item(values, k, value):
+            return values[:k] + (value,) + values[k + 1:]
+
+        def set_radius(k, v):
+            surfaces = current().surfaces
+            change(surfaces=with_item(surfaces, k, surfaces[k].replace(surface=_with_radius(surfaces[k].surface, v))))
+
+        def set_index(k, v):
+            materials = current().materials
+            change(materials=with_item(materials, k, ConstantIndex(getattr(materials[k], "name", "glass"), float(v))))
+
+        # r1, r2, … the radii of the surfaces; t1, n1, … the thickness and index of each body
         parameters = [
-            Parameter(
-                label,
-                lambda side=side: float(getattr(current(), side).surface.radius),
-                lambda v, side=side: change(**{side: getattr(current(), side).replace(surface=_with_radius(getattr(current(), side).surface, v))}),
-                -1000.0, 1000.0, 1.0,
-            )
-            for side, label in (("front", "r1"), ("back", "r2"))
-            if isinstance(getattr(element, side).surface, Conic)
+            Parameter(f"r{k + 1}", lambda k=k: float(current().surfaces[k].surface.radius), lambda v, k=k: set_radius(k, v),
+                      -1000.0, 1000.0, 1.0)
+            for k, surface in enumerate(element.surfaces)
+            if isinstance(surface.surface, Conic)
         ]
-        parameters += [
-            Parameter("thickness", lambda: float(current().thickness), lambda v: change(thickness=max(0.1, float(v))), 0.1, 100.0, 0.5),
-            Parameter("n", lambda: medium_index(current().material, session.wavelength_um),
-                      lambda v: change(material=ConstantIndex(getattr(current().material, "name", "glass"), float(v))), 1.0, 3.0, 0.01),
-            tilt,
-        ]
-        return Editable(name, name, [vertex], parameters)
+        for k in range(len(element.materials)):
+            parameters += [
+                Parameter(f"t{k + 1}", lambda k=k: current().thicknesses[k],
+                          lambda v, k=k: change(thicknesses=with_item(current().thicknesses, k, max(0.1, float(v)))), 0.1, 100.0, 0.5),
+                Parameter(f"n{k + 1}", lambda k=k: medium_index(current().materials[k], session.wavelength_um),
+                          lambda v, k=k: set_index(k, v), 1.0, 3.0, 0.01),
+            ]
+        return Editable(name, name, [vertex], parameters + [tilt])
 
     if isinstance(element, Mirror):
         parameters = [tilt]

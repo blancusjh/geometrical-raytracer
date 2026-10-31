@@ -16,8 +16,8 @@ from raytracer.viz.drawing import LensBodyItem, RaySegmentsItem, SensorItem
 @pytest.fixture()
 def session():
     lens = Lens(
-        "lens", front=Sphere(60.0), back=Sphere(-60.0), thickness=9.0,
-        material=ConstantIndex("N1.5168", 1.5168), semi_diameter=16.0,
+        "lens", surfaces=[Sphere(60.0), Sphere(-60.0)], thicknesses=[9.0],
+        materials=[ConstantIndex("N1.5168", 1.5168)], semi_diameter=16.0,
     )
     sensor = Sensor("IMG", aperture=Rectangle(30.0, 30.0), z=171.4)
     source = PointSource((0.0, 0.0, -90.0), half_angle_deg=9.0, rays=51, fan="y")
@@ -69,13 +69,13 @@ def test_parameter_cycle_and_adjust_retraces(session):
     old_radius = r1.get()
     r1.set(old_radius * 0.8)  # stronger curvature -> shorter focal length
     session.retrace()
-    assert session.system["lens"].front.surface.radius == pytest.approx(old_radius * 0.8)
+    assert session.system["lens"].surfaces[0].surface.radius == pytest.approx(old_radius * 0.8)
 
 
 def test_lens_rebuild_preserves_position_and_updates_the_rim(session):
     session.drag_handle(next(e for e in session.editables if e.label == "lens").handles[0], np.array([4.0, 0.0]))
     editable = next(e for e in session.editables if e.label == "lens")
-    thickness = next(p for p in editable.parameters if p.name == "thickness")
+    thickness = next(p for p in editable.parameters if p.name == "t1")
     thickness.set(15.0)
     lens = session.system["lens"]
     assert lens.thickness == pytest.approx(15.0)
