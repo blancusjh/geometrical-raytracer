@@ -106,10 +106,20 @@ la patente queda así:
 
 ## Los dos motores
 
+Un rayo es una sola cosa, lo trace quien lo trace. `Rays` es una tabla
+con un rayo por fila: la línea quebrada entera que sigue la luz desde que
+nace —en una fuente, o donde se desprende de otro rayo— con su longitud
+de onda, la potencia que lleva, el camino óptico recorrido, los puntos
+por los que pasó (`trajectory`) y cómo terminó (`status`). Los dos motores
+toman `Rays` y devuelven los mismos rayos, llevados más lejos; sólo
+difieren en cómo eligen la próxima frontera de cada rayo, y en si la luz
+se divide.
+
 **Secuencial** — cada rayo visita las fronteras del camino en orden, un solo
-recorrido determinista, y los N rayos avanzan juntos en numpy con un
-`TraceStatus` por rayo (viñeteo, TIR, fallo de intersección, o `BEHIND`:
-el camino declarado lo manda a una frontera que ya pasó). Sobre él se
+recorrido determinista, y los N rayos avanzan juntos en numpy. Cada uno
+termina detectado o con la razón por la que no siguió (viñeteo, TIR, fallo
+de intersección, o `BEHIND`: el camino declarado lo manda a una frontera
+que ya pasó). Sobre él se
 apoyan la capa paraxial, el rayo principal y el muestreo de pupila. La
 longitud de onda y el plano objeto son hechos *de uso*: viven en el
 trazador, no en el sistema.
@@ -129,20 +139,22 @@ print(spot_data(pupil).rms_radius_um)        # 0.087 µm
 ```
 
 **No secuencial** — sin orden: cada rayo se prueba contra todas las
-fronteras del *mismo* sistema, y en la primera que encuentra se divide en
-hijo reflejado y transmitido según su recubrimiento (Fresnel en una
-superficie desnuda). Los bordes de lente, las láminas de diafragma y los
-sensores absorben; los sensores además registran. Con `split=False` cada
-rayo sigue sólo la rama que tomaría el trazado secuencial: el dibujo
-limpio.
+fronteras del *mismo* sistema, y en la primera que encuentra la luz se
+divide entre reflexión y transmisión según su recubrimiento (Fresnel en
+una superficie desnuda): el rayo sigue por la rama que tomaría el trazado
+secuencial, y la otra parte es un rayo nuevo desprendido de él (`parent`).
+Los bordes de lente y las láminas de diafragma absorben; los sensores
+detectan. Con `split=False` nada se desprende: fila por fila, los mismos
+rayos que da el trazado secuencial —el dibujo limpio.
 
 ```python
 from raytracer.sources import CollimatedSource
 from raytracer.tracing import NonSequentialTracer
 
 beam = CollimatedSource((0, 0, -40), direction=(0, 0, 1), beam_radius=2.0, rays=500, wavelength_um=0.55)
-tree = NonSequentialTracer(cooke, split=True).trace(beam)
-tree.hits("IMG").power.sum()     # potencia que llega al sensor, descontadas las pérdidas de Fresnel
+rays = NonSequentialTracer(cooke, split=True).trace(beam)
+rays.power[rays.detected & (rays.boundary == "IMG")].sum()   # potencia que llega al sensor, descontado Fresnel
+rays[rays.parent >= 0]                                        # los rayos desprendidos: luz fantasma y parásita
 ```
 
 ![Layout del objetivo DUV](docs/img/duv_layout.png)
@@ -378,30 +390,32 @@ estrictamente descendente: todo import a nivel de módulo apunta a un paquete
 anterior.
 
 ```
-geometry → materials → coatings → interfaces → elements → system → sources
-         → tracing → families → io → analysis → optimize → viz
+geometry → materials → coatings → interfaces → elements → system → rays
+         → sources → tracing → families → io → analysis → optimize → viz
 ```
 
 | paquete | pregunta | líneas |
 |---|---|---|
-| **`geometry`** | ¿dónde está y qué forma tiene? — `Rotation`, `Pose`, superficies, aperturas, sólidos, intersección. Nada de óptica | 1969 |
-| **`materials`** | ¿qué llena el espacio? — índice constante, Abbe, Cauchy, Sellmeier, catálogo | 250 |
+| **`geometry`** | ¿dónde está y qué forma tiene? — `Rotation`, `Pose`, superficies, aperturas, sólidos, intersección. Nada de óptica | 1988 |
+| **`materials`** | ¿qué llena el espacio? — índice constante, Abbe, Cauchy, Sellmeier, catálogo | 237 |
 | **`coatings`** | ¿cuánta luz refleja y transmite una frontera? | 155 |
 | **`interfaces`** | una superficie como frontera óptica, y las leyes de reflexión y refracción | 96 |
-| **`elements`** | ¿de qué cosas físicas está hecho un instrumento? — `Lens`, `Mirror`, `BeamSplitter`, `Prism`, `Stop`, `Sensor` | 382 |
-| **`system`** | ¿cómo están dispuestas y qué se sigue de ello? — `OpticalSystem`, `Assembly`, fronteras con sus medios, camino secuencial, tablas | 877 |
-| **`sources`** | ¿dónde empieza la luz? | 236 |
-| **`tracing`** | ¿cómo llega la luz de aquí a allá? — secuencial, no secuencial, paraxial, pupilas | 1113 |
+| **`elements`** | ¿de qué cosas físicas está hecho un instrumento? — `Lens`, `Mirror`, `BeamSplitter`, `Prism`, `Stop`, `Sensor` | 365 |
+| **`system`** | ¿cómo están dispuestas y qué se sigue de ello? — `OpticalSystem`, `Assembly`, fronteras con sus medios, camino secuencial, tablas | 899 |
+| **`rays`** | ¿qué es la luz? — `Rays`: cada rayo, la línea quebrada entera que sigue, lo trace quien lo trace | 251 |
+| **`sources`** | ¿dónde empieza la luz? | 206 |
+| **`tracing`** | ¿cómo llega la luz de aquí a allá? — secuencial, no secuencial, paraxial, pupilas | 935 |
 | **`families`** | ¿qué sistemas genera una familia de diseño? — `StigmaticTrain` | 363 |
 | **`io`** | ¿cómo se guarda un diseño? | 430 |
-| **`analysis`** | ¿qué se mide? — `imaging` mira la imagen, `aberrations` el error de rayo y de frente de onda | 2274 |
-| **`optimize`** | ¿qué es mejor? — restricciones enchufables sobre familias exactas | 553 |
-| **`viz`** | ¿cómo se muestra? — matplotlib y OpenGL HDR, 2-D como corte meridional del modelo 3-D | 3483 |
+| **`analysis`** | ¿qué se mide? — `imaging` mira la imagen, `aberrations` el error de rayo y de frente de onda, `footprints` dónde y cómo dio la luz en el instrumento | 2313 |
+| **`optimize`** | ¿qué es mejor? — restricciones enchufables sobre familias exactas | 551 |
+| **`viz`** | ¿cómo se muestra? — matplotlib y OpenGL HDR, 2-D como corte meridional del modelo 3-D | 3493 |
 
 `tests/test_architecture.py` lee el AST de cada módulo y comprueba la
-cadena en cada `pytest`. Comprueba además dos reglas más finas: un elemento
-no importa nunca el sistema ni los motores, y el sistema no importa nunca
-un motor ni un formato de archivo.
+cadena en cada `pytest`. Comprueba además tres reglas más finas: un elemento
+no importa nunca el sistema ni los motores; el sistema no importa nunca un
+motor ni un formato de archivo; y un rayo no importa nada: es luz, no lo
+que encuentra ni quién lo traza.
 
 ### Cuatro decisiones que explican el resto
 

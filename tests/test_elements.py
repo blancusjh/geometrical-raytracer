@@ -25,7 +25,9 @@ from raytracer.geometry.solids import Box
 from raytracer.geometry.surfaces import Plane, Sphere
 from raytracer.interfaces import Interface
 from raytracer.materials import ConstantIndex
-from raytracer.sources import CollimatedSource, PointSource, Rays
+from raytracer.analysis import detected_on
+from raytracer.rays import Rays, Status
+from raytracer.sources import CollimatedSource, PointSource
 from raytracer.tracing import (
     NonSequentialTracer,
     SequentialTracer,
@@ -179,23 +181,16 @@ def test_prism_faces_are_its_facets():
     assert isinstance(faces[0].interface.coating, Uncoated)
 
 
-def single_ray(origin, direction) -> Rays:
-    return Rays([origin], [direction], np.nan, 1.0)
-
-
 def test_sensor_records_and_misses_outside_its_aperture():
     sensor = Sensor("S", aperture=Rectangle(1.0, 2.0))  # y from -1 to 1
     system = OpticalSystem([sensor])
-    tree = NonSequentialTracer(system).trace(single_ray([0.0, 0.5, -2.0], [0.0, 0.0, 1.0]))
-    hits = tree.hits("S")
-    assert len(hits) == 1
-    assert hits.point[0] == pytest.approx([0.0, 0.5, 0.0])
-    assert hits.local_point[0, 1] == pytest.approx(0.5)  # 3/4 of the way along the segment
-    assert hits.opl[0] == pytest.approx(2.0)
+    ray = NonSequentialTracer(system).trace(Rays([0.0, 0.5, -2.0], [0.0, 0.0, 1.0]))
+    assert ray.detected[0] and ray.boundary[0] == "S"
+    assert ray.position[0] == pytest.approx([0.0, 0.5, 0.0])
+    assert ray.opl[0] == pytest.approx(2.0)
 
-    tree = NonSequentialTracer(system).trace(single_ray([0.0, 2.0, -2.0], [0.0, 0.0, 1.0]))
-    assert "S" not in tree.detectors
-    assert tree.escaped.all()
+    ray = NonSequentialTracer(system).trace(Rays([0.0, 2.0, -2.0], [0.0, 0.0, 1.0]))
+    assert ray.status.tolist() == [Status.ESCAPED]
 
 
 def test_lens_face_matches_sphere_geometry():
@@ -205,10 +200,10 @@ def test_lens_face_matches_sphere_geometry():
         material=ConstantIndex("G", n), semi_diameter=60.0, z=10.0,
     )
     y0 = 40.0
-    tree = NonSequentialTracer(OpticalSystem([lens])).trace(single_ray([0.0, y0, -100.0], [0.0, 0.0, 1.0]))
-    assert tree.face[0] == "L.front"
+    hit = NonSequentialTracer(OpticalSystem([lens])).trace(Rays([0.0, y0, -100.0], [0.0, 0.0, 1.0])).at(1)
+    assert hit.boundary[0] == "L.front"
     z_exact = 10.0 + R - np.sqrt(R * R - y0 * y0)
-    assert tree.end[0] == pytest.approx([0.0, y0, z_exact], abs=1e-10)
+    assert hit.position[0] == pytest.approx([0.0, y0, z_exact], abs=1e-10)
 
 
 def test_single_refracting_face_paraxial_focus():
@@ -221,12 +216,12 @@ def test_single_refracting_face_paraxial_focus():
         material=ConstantIndex("G", n), semi_diameter=10.0,
     )
     source = CollimatedSource((0.0, 0.0, -20.0), beam_radius=0.5, rays=11, fan="y")
-    tree = NonSequentialTracer(OpticalSystem([lens]), split=False).trace(source)
+    in_glass = NonSequentialTracer(OpticalSystem([lens]), split=False).trace(source).at(1)
 
-    inside = (tree.generation == 2) & (np.abs(tree.direction[:, 1]) > 1e-12)  # skip the axial ray
+    inside = np.abs(in_glass.direction[:, 1]) > 1e-12  # skip the axial ray
     assert inside.sum() >= 8
-    t = -tree.start[inside, 1] / tree.direction[inside, 1]
-    crossings = tree.start[inside, 2] + t * tree.direction[inside, 2]
+    start, direction = in_glass.position[inside], in_glass.direction[inside]
+    crossings = start[:, 2] - start[:, 1] / direction[:, 1] * direction[:, 2]
     assert np.mean(crossings) == pytest.approx(f_expected, rel=1e-3)
 
 
@@ -242,13 +237,13 @@ def test_lens_focuses_a_parallel_fan_onto_a_sensor():
     sensor = Sensor("IMG", aperture=Rectangle(40.0, 40.0), z=58.0)
     system = OpticalSystem([biconvex(), sensor])
     source = CollimatedSource((0.0, 0.0, -30.0), beam_radius=8.0, rays=41, fan="y")
-    tree = NonSequentialTracer(system, split=False).trace(source)
+    rays = NonSequentialTracer(system, split=False).trace(source)
 
-    hits = tree.hits("IMG")
-    assert len(hits) >= 35  # nearly every ray lands on the sensor
-    assert np.ptp(hits.local_point[:, 1]) < 3.0  # concentrated near focus (spherical aberration aside)
-    values, edges = hits.histogram(axis=1, bins=64, range=(-20.0, 20.0))
-    assert values.sum() == pytest.approx(hits.power.sum())
+    points, power = detected_on(system, rays, "IMG")
+    assert len(points) >= 35  # nearly every ray lands on the sensor
+    assert np.ptp(points[:, 1]) < 3.0  # concentrated near focus (spherical aberration aside)
+    values, edges = np.histogram(points[:, 1], bins=64, range=(-20.0, 20.0), weights=power)
+    assert values.sum() == pytest.approx(power.sum())
     peak = np.argmax(values)
     assert abs((edges[peak] + edges[peak + 1]) / 2) < 4.0  # peak near the axis
 
@@ -256,12 +251,11 @@ def test_lens_focuses_a_parallel_fan_onto_a_sensor():
 def test_sensor_absorbs_rays():
     sensor = Sensor("IMG", aperture=Rectangle(20.0, 20.0), z=5.0)
     source = PointSource((0.0, 0.0, 0.0), half_angle_deg=15.0, rays=9, fan="y")
-    tree = NonSequentialTracer(OpticalSystem([sensor]), max_interactions=5).trace(source)
-    # Every ray ends on the sensor: no children are spawned.
-    assert (tree.generation == 1).all()
-    assert (tree.parent == -1).all()
-    assert len(tree.hits("IMG")) == 9
-    assert tree.hits("IMG").power.sum() == pytest.approx(1.0)
+    rays = NonSequentialTracer(OpticalSystem([sensor]), max_interactions=5).trace(source)
+    # Every ray ends on the sensor, its first boundary: nothing splits off.
+    assert len(rays) == 9 and rays.trajectory.shape[1] == 2
+    assert rays.detected.all() and (rays.parent == -1).all()
+    assert rays.power.sum() == pytest.approx(1.0)
 
 
 def test_sequential_and_non_sequential_land_rays_on_the_same_image_point():
@@ -284,13 +278,12 @@ def test_sequential_and_non_sequential_land_rays_on_the_same_image_point():
 
     y_obj, slope = 5.0, -0.005
     reference = trace_from_object(tracer, (0.0, y_obj), (0.0, slope))
-    assert reference.ok
+    assert reference.detected[0]
 
     direction = np.array([0.0, slope, 1.0]) / np.hypot(1.0, slope)
-    tree = NonSequentialTracer(system, split=False).trace(single_ray([0.0, y_obj, tracer.object_z], direction))
-    hits = tree.hits("IMG")
-    assert len(hits) == 1
-    assert hits.point[0] == pytest.approx(reference.end, abs=1e-9)
+    ray = NonSequentialTracer(system, split=False).trace(Rays([0.0, y_obj, tracer.object_z], direction))
+    assert ray.detected[0] and ray.boundary[0] == "IMG"
+    assert ray.position[0] == pytest.approx(reference.position[0], abs=1e-9)
     # Both accumulate the same optical path (the sequential tracer's restart
     # offset adds 1e-8 mm per boundary, hence the tolerance).
-    assert hits.opl[0] == pytest.approx(reference.opl, abs=1e-6)
+    assert ray.opl[0] == pytest.approx(reference.opl[0], abs=1e-6)

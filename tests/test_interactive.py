@@ -35,13 +35,13 @@ def test_retrace_builds_drawing_and_hits(session):
 
 def test_drag_source_handle_moves_focus(session):
     session.retrace()
-    y_before = np.median(session.hits("IMG").point[:, 1])
+    y_before = np.median(session.hits("IMG").position[:, 1])
 
     editable = session.editables[0]  # the point source
     handle = editable.handles[0]
     session.drag_handle(handle, np.array([-90.0, 3.0]))  # raise the source (z, y)
 
-    y_after = np.median(session.hits("IMG").point[:, 1])
+    y_after = np.median(session.hits("IMG").position[:, 1])
     # Imaging inverts: raising the object lowers the image.
     assert y_after < y_before - 1.0
 

@@ -69,28 +69,28 @@ def trace(rays: int = 500):
     return NonSequentialTracer(build_mirror(), max_interactions=2).trace(source)
 
 
-def build_drawing(system: OpticalSystem, tree) -> Drawing:
+def build_drawing(system: OpticalSystem, rays) -> Drawing:
     drawing = Drawing(x_lims=(-8.0, 1.0), y_lims=(-4.0, 4.0)).add_system(system)
     for item in drawing.items:  # the mirror's section, white on the black background
         item.color, item.width = (1.0, 1.0, 1.0, 1.0), 2.0
     drawing.add(MarkerItem(np.array([[FAR_FOCUS[2], FAR_FOCUS[1]]]), color=(1.0, 0.84, 0.0, 1.0), size=8.0))
-    return drawing.add_tree(tree, intensities=1.0 / (1.0 + 0.3 * tree.generation), markers="crimson", marker_size=7.0)
+    return drawing.add_rays(rays, intensities=lambda ray, j: 1.0 / (1.0 + 0.3 * (j + 1)), markers="crimson", marker_size=7.0)
 
 
 def main() -> None:
-    tree = trace()
-    origins, directions = rays_by_generation(tree, generation=2)
+    rays = trace()
+    origins, directions = rays_by_generation(rays, generation=2)
     distances_um = point_line_distances(origins, directions, FAR_FOCUS) * 1e3
     rms_um = float(np.sqrt(np.mean(distances_um**2)))
     print("Ellipse mirror: focus-to-focus stigmatism")
     print("  near focus (source): z = 0")
     print(f"  far focus (target):  z = {FAR_FOCUS[2]:.4f}")
-    print(f"  reflected rays checked: {len(origins)}/{int((tree.generation == 1).sum())}")
+    print(f"  reflected rays checked: {len(origins)}/{int((rays.parent == -1).sum())}")
     print(f"  RMS distance from the far focus to each reflected ray: {rms_um:.4g} um")
 
     save = Path(sys.argv[sys.argv.index("--save") + 1]) if "--save" in sys.argv else None
     backend = show(
-        build_drawing(build_mirror(), tree), backend="gl", interactive=save is None,
+        build_drawing(build_mirror(), rays), backend="gl", interactive=save is None,
         size=(1200, 800), bgcolor="black", title="Ellipse mirror (stigmatic) — raytracer",
         render_config=RenderConfig(ray_width=0.008, sigma_factor=0.5, min_pixels=1.0, use_solid_rays=True),
     )

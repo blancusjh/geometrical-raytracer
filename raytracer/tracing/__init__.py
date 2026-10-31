@@ -1,7 +1,12 @@
 """Tracing: the algorithms that carry light through an optical system.
 
+Both tracers take :class:`~raytracer.rays.Rays` and return the same rays,
+carried further; they differ only in how each ray's next boundary is
+chosen, and in whether light divides.
+
 - :mod:`.sequential` — every ray along the system's path, vectorized.
 - :mod:`.nonsequential` — every ray wherever the physics sends it.
+- :mod:`.arrival` — what both do where rays meet a boundary.
 - :mod:`.paraxial` — conjugates and ABCD matrices of a coaxial path.
 - :mod:`.fields` — field points, chief rays, pupil sampling.
 """
@@ -14,18 +19,13 @@ from .fields import (
     trace_from_object,
     trace_pupil,
 )
-from .nonsequential import DetectorHits, NonSequentialTracer, RayTree
+from .nonsequential import NonSequentialTracer
 from .paraxial import ConjugateSolution, ParaxialModel, differential_conjugates, solve_object_plane
-from .sequential import SequentialTrace, SequentialTracer, TracedRay, TraceStatus
+from .sequential import SequentialTracer
 
 __all__ = [
     "SequentialTracer",
     "NonSequentialTracer",
-    "RayTree",
-    "DetectorHits",
-    "SequentialTrace",
-    "TracedRay",
-    "TraceStatus",
     "ConjugateSolution",
     "ParaxialModel",
     "differential_conjugates",

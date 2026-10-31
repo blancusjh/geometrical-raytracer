@@ -57,7 +57,7 @@ def _solve_chief_ray(
             )
         except RuntimeError:
             continue
-        if trace_from_object(tracer, (field.x, field.y), slopes).ok:
+        if trace_from_object(tracer, (field.x, field.y), slopes).detected[0]:
             return slopes
     return None
 
@@ -112,9 +112,7 @@ def chief_ray_distortion(
             )
         previous = slopes
         ideal = height * magnification
-        actual = float(
-            trace_from_object(tracer, (0.0, field.y), slopes).end[1]
-        )
+        actual = float(trace_from_object(tracer, (0.0, field.y), slopes).position[0, 1])
         rows.append(
             {
                 "field": float(value),
@@ -244,9 +242,7 @@ def distortion_grid(
             )
             if slopes is None:
                 continue
-            actual_points[i, j] = trace_from_object(
-                tracer, (field.x, field.y), slopes
-            ).end[:2]
+            actual_points[i, j] = trace_from_object(tracer, (field.x, field.y), slopes).position[0, :2]
             valid[i, j] = True
             guesses[(i, j)] = slopes
 

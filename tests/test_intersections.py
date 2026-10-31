@@ -17,6 +17,7 @@ from raytracer.geometry.intersections import newton_graph
 from raytracer.geometry.surfaces import CartesianSurface, EvenAsphere, Plane, Sphere, ToroidalSurface
 from raytracer.geometry.surfaces.cartesian import cartesian_oval_implicit
 from raytracer.materials import ConstantIndex
+from raytracer.rays import Rays
 from raytracer.system import OpticalSystem
 from raytracer.tracing import SequentialTracer
 
@@ -161,9 +162,9 @@ def test_placed_hit_agrees_with_the_bare_solver():
     tracer = SequentialTracer(OpticalSystem([lens, sensor]))
     origin = pose.to_world([0.0, 0.5, -20.0])
     direction = pose.direction_to_world([0.0, 0.0, 1.0])
-    result = tracer.trace_ray(origin, direction)
-    assert result.ok
-    world_hit = result.path[1]
+    result = tracer.trace(Rays(origin, direction))
+    assert result.detected[0]
+    world_hit = result.trajectory[0, 1]
 
     o_local, d_local = pose.to_local(origin[None, :]), pose.direction_to_local(direction[None, :])
     hits = lens.front.surface.intersect(o_local, d_local)

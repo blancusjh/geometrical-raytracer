@@ -229,16 +229,16 @@ def aplanatism_report(
     heights = np.full((samples, train.n_surfaces), np.nan)
     for i, sine in enumerate(sines):
         slope = sine / np.sqrt(1.0 - sine * sine)
-        result = trace_from_object(tracer, (0.0, 0.0), (0.0, slope))
-        if not result.ok:
+        ray = trace_from_object(tracer, (0.0, 0.0), (0.0, slope))
+        if not ray.detected[0]:
             continue
-        direction = result.direction / np.linalg.norm(result.direction)
+        direction = ray.direction[0] / np.linalg.norm(ray.direction[0])
         if abs(direction[1]) < 1e-15:
             continue
         valid[i] = True
         sine_ratio[i] = sine / direction[1]
-        # path rows: start, one per surface, image point
-        heights[i] = np.abs(result.path[1:-1, 1])
+        # trajectory points: the start, one per surface, the image point
+        heights[i] = np.abs(ray.trajectory[0, 1:-1, 1])
 
     map_values[valid] = aplanatism_map(train, heights[valid], from_heights=True)
 
@@ -338,11 +338,10 @@ def aplanatic_image_surface(
             sampling=sampling,
             chief_slope=chief_slope,
         )
-        if pupil.ok.sum() < 3:
+        arrived = pupil.arrived
+        if len(arrived) < 3:
             continue
-        points[i], blur_mm = _closest_point_to_rays(
-            pupil.end, pupil.direction
-        )
+        points[i], blur_mm = _closest_point_to_rays(arrived.position, arrived.direction)
         blur[i] = blur_mm * 1e3
         valid[i] = True
 

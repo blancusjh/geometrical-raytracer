@@ -12,15 +12,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raytracer import AIR, OpticalSystem, Pose, Rotation, TableRow
+from raytracer import AIR, OpticalSystem, Pose, Rays, Rotation, TableRow
 from raytracer.elements import BeamSplitter, Lens, Mirror, Sensor, Stop
 from raytracer.geometry.apertures import Circle
 from raytracer.geometry.surfaces import Plane, Sphere
 from raytracer.io import read_prescription
 from raytracer.materials import ConstantIndex
-from raytracer.sources import Rays
 from raytracer.system import Assembly, Gap
-from raytracer.tracing import NonSequentialTracer, ParaxialModel, SequentialTracer, TraceStatus
+from raytracer.rays import Status
+from raytracer.tracing import NonSequentialTracer, ParaxialModel, SequentialTracer
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "optical_systems"
 COOKE = DATA / "photographic/cooke_triplet_prescription.csv"
@@ -117,10 +117,10 @@ def test_double_pass_lens_from_a_prescription_table():
         TableRow(Sphere(-R1), s, AIR, 15.0),
     ])
     o, dirs = meridional_rays()
-    a = SequentialTracer(folded, restart_offset=0.0).trace(o, dirs)
-    b = SequentialTracer(unfolded, restart_offset=0.0).trace(o, dirs)
-    assert a.ok.all() and b.ok.all()
-    np.testing.assert_allclose(a.end[:, :2], b.end[:, :2], atol=1e-12)
+    a = SequentialTracer(folded, restart_offset=0.0).trace(Rays(o, dirs))
+    b = SequentialTracer(unfolded, restart_offset=0.0).trace(Rays(o, dirs))
+    assert a.detected.all() and b.detected.all()
+    np.testing.assert_allclose(a.position[:, :2], b.position[:, :2], atol=1e-12)
     np.testing.assert_allclose(a.opl, b.opl, atol=1e-10)
     assert ParaxialModel(SequentialTracer(folded)).effective_focal_length() == pytest.approx(
         ParaxialModel(SequentialTracer(unfolded)).effective_focal_length(), rel=1e-12
@@ -158,21 +158,22 @@ def test_virtual_stop_inside_a_lens():
     assert system.pose_of("STO").position[2] == pytest.approx(6.0)
 
     rays = Rays([[0.0, 1.0, -20.0], [0.0, 8.0, -20.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], np.nan, 1.0)
-    trace = SequentialTracer(system).trace(rays.origin, rays.direction)
-    assert trace.status.tolist() == [TraceStatus.OK, TraceStatus.VIGNETTED]
-    assert trace.failed_step[1] == 2
-    tree = NonSequentialTracer(system, split=False).trace(rays)
-    assert "STO" not in tree.face
-    assert len(tree.hits("IMG")) == 2
+    trace = SequentialTracer(system).trace(rays)
+    assert trace.status.tolist() == [Status.DETECTED, Status.VIGNETTED]
+    assert trace.boundary[1] == system.path[1].name  # clipped at the stop, step 2
+    passed = NonSequentialTracer(system, split=False).trace(rays)
+    assert np.isnan(passed.at("STO").position).all()  # light passes a virtual stop untouched
+    assert (passed.detected & (passed.boundary == "IMG")).sum() == 2
 
 
 def test_a_real_stop_blocks_light_non_sequentially():
     system = OpticalSystem.compose(Stop("S", aperture=2.0), Gap(10.0), Sensor("IMG"))
     rays = Rays([[0.0, 1.0, -5.0], [0.0, 3.0, -5.0], [0.0, 5.0, -5.0]], [[0, 0, 1]] * 3, np.nan, 1.0)
-    tree = NonSequentialTracer(system).trace(rays)
-    assert tree.face == ["IMG", "S", "IMG"]  # through the opening, on the blade, around it
-    assert len(tree) == 3  # the blade absorbs: no children
-    assert tree.hits("IMG").point[:, 1].tolist() == [1.0, 5.0]
+    rays = NonSequentialTracer(system).trace(rays)
+    assert rays.boundary.tolist() == ["IMG", "S", "IMG"]  # through the opening, on the blade, around it
+    assert rays.status.tolist() == [Status.DETECTED, Status.ABSORBED, Status.DETECTED]
+    assert len(rays) == 3  # nothing splits off a blade
+    assert rays.position[rays.detected, 1].tolist() == [1.0, 5.0]
 
 
 # -- the path ---------------------------------------------------------------------
@@ -223,18 +224,22 @@ def test_stated_paths_choose_the_beam_splitter_branch():
     assert [s.event for s in reflect.path] == ["reflect", "detect"]
     o = np.array([[0.0, 1.0, 0.0], [2.0, -1.0, 0.0]])
     d = np.tile([0.0, 0.0, 1.0], (2, 1))
-    r = SequentialTracer(reflect).trace(o, d)
-    t = SequentialTracer(transmit).trace(o, d)
-    assert r.ok.all() and t.ok.all()
+    r = SequentialTracer(reflect).trace(Rays(o, d))
+    t = SequentialTracer(transmit).trace(Rays(o, d))
+    assert r.detected.all() and t.detected.all()
     # Reflection about the 45-degree plane swaps the roles of y and z.
-    np.testing.assert_allclose(r.end, [[0.0, -40.0, 19.0], [2.0, -40.0, 21.0]], atol=1e-12)
-    np.testing.assert_allclose(t.end, [[0.0, 1.0, 60.0], [2.0, -1.0, 60.0]], atol=1e-12)
+    np.testing.assert_allclose(r.position, [[0.0, -40.0, 19.0], [2.0, -40.0, 21.0]], atol=1e-12)
+    np.testing.assert_allclose(t.position, [[0.0, 1.0, 60.0], [2.0, -1.0, 60.0]], atol=1e-12)
     np.testing.assert_allclose(r.direction, np.tile([0.0, -1.0, 0.0], (2, 1)), atol=1e-12)
     # The non-sequential tracer finds both branches at once, half the power each.
-    tree = NonSequentialTracer(OpticalSystem(parts)).trace(Rays(o, d, np.nan, 0.5))
-    np.testing.assert_allclose(tree.hits("CAM_R").point, r.end, atol=1e-6)
-    np.testing.assert_allclose(tree.hits("CAM_T").point, t.end, atol=1e-6)
-    assert tree.hits("CAM_R").power.sum() == pytest.approx(0.5)
+    rays = NonSequentialTracer(OpticalSystem(parts)).trace(Rays(o, d, np.nan, 0.5))
+
+    def on(camera):
+        return rays[rays.detected & (rays.boundary == camera)]
+
+    np.testing.assert_allclose(on("CAM_R").position, r.position, atol=1e-6)
+    np.testing.assert_allclose(on("CAM_T").position, t.position, atol=1e-6)
+    assert on("CAM_R").power.sum() == pytest.approx(0.5)
 
 
 def test_stated_path_errors():
@@ -261,13 +266,13 @@ def test_folding_mirror_with_a_stated_path():
     sensor = Sensor("IMG", pos=(0.0, 30.0 - 105.0, 30.0), normal=(0.0, -1.0, 0.0))
     folded = OpticalSystem([lens, fold, sensor], path=["L.front", "L.back", "FOLD:reflect", "IMG"])
     o, d = meridional_rays()
-    a = SequentialTracer(straight, restart_offset=0.0).trace(o, d)
-    b = SequentialTracer(folded, restart_offset=0.0).trace(o, d)
-    assert a.ok.all() and b.ok.all()
+    a = SequentialTracer(straight, restart_offset=0.0).trace(Rays(o, d))
+    b = SequentialTracer(folded, restart_offset=0.0).trace(Rays(o, d))
+    assert a.detected.all() and b.detected.all()
     # Unfold: the mirror maps (x, y, z) to (x, 30 - z, 30 - y).
-    np.testing.assert_allclose(b.end[:, 0], a.end[:, 0], atol=1e-11)
-    np.testing.assert_allclose(30.0 - b.end[:, 2], a.end[:, 1], atol=1e-11)
-    np.testing.assert_allclose(30.0 - b.end[:, 1], a.end[:, 2], atol=1e-11)
+    np.testing.assert_allclose(b.position[:, 0], a.position[:, 0], atol=1e-11)
+    np.testing.assert_allclose(30.0 - b.position[:, 2], a.position[:, 1], atol=1e-11)
+    np.testing.assert_allclose(30.0 - b.position[:, 1], a.position[:, 2], atol=1e-11)
     np.testing.assert_allclose(b.opl, a.opl, atol=1e-10)
 
 
@@ -321,12 +326,12 @@ def test_a_moved_system_traces_identically_after_moving_the_rays():
         assert moved.pose_of(element.name).isclose(motion @ system.pose_of(element.name), atol=1e-12)
 
     o, d = meridional_rays()
-    a = prescription.tracer().trace(o, d)
-    b = SequentialTracer(moved, wavelength_um=prescription.wavelength_um).trace(
+    a = prescription.tracer().trace(Rays(o, d))
+    b = SequentialTracer(moved, wavelength_um=prescription.wavelength_um).trace(Rays(
         motion.to_world(o), motion.direction_to_world(d)
-    )
-    assert a.ok.all() and b.ok.all()
-    np.testing.assert_allclose(b.end, motion.to_world(a.end), atol=1e-11)
+    ))
+    assert a.detected.all() and b.detected.all()
+    np.testing.assert_allclose(b.position, motion.to_world(a.position), atol=1e-11)
     np.testing.assert_allclose(b.direction, motion.direction_to_world(a.direction), atol=1e-13)
     np.testing.assert_allclose(b.opl, a.opl, atol=1e-10)
 
@@ -338,9 +343,9 @@ def test_an_assembly_moves_its_elements_together():
     for element in system.elements:
         assert grouped.pose_of(element.name).isclose(pose @ system.pose_of(element.name), atol=1e-12)
     o, d = meridional_rays()
-    a = SequentialTracer(system, wavelength_um=0.5876).trace(o, d)
-    b = SequentialTracer(grouped, wavelength_um=0.5876).trace(pose.to_world(o), pose.direction_to_world(d))
-    np.testing.assert_allclose(b.end, pose.to_world(a.end), atol=1e-11)
+    a = SequentialTracer(system, wavelength_um=0.5876).trace(Rays(o, d))
+    b = SequentialTracer(grouped, wavelength_um=0.5876).trace(Rays(pose.to_world(o), pose.direction_to_world(d)))
+    np.testing.assert_allclose(b.position, pose.to_world(a.position), atol=1e-11)
 
 
 def test_systems_are_values():

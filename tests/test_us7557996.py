@@ -81,8 +81,8 @@ def test_field_traces_match_reference_image_heights(tracer):
     for y_obj, y_img in expected.items():
         _, slope = chief_ray_slopes(tracer, FieldPoint(y=y_obj))
         result = trace_from_object(tracer, (0.0, y_obj), (0.0, slope))
-        assert result.ok
-        assert result.end[1] == pytest.approx(y_img, abs=5e-6)
+        assert result.detected[0]
+        assert result.position[0, 1] == pytest.approx(y_img, abs=5e-6)
 
 
 @pytest.mark.slow
@@ -94,8 +94,8 @@ def test_pupil_na_and_ray_count(tracer):
         sampling=PupilSampling(kind="rings", radial=12, azimuth=72),
     )
     n_image = tracer.n_image
-    na = n_image * np.hypot(pupil.direction[:, 0], pupil.direction[:, 1])
-    assert pupil.ok.sum() == 754  # reference: unvignetted rays
+    na = n_image * np.hypot(pupil.arrived.direction[:, 0], pupil.arrived.direction[:, 1])
+    assert len(pupil.arrived) == 754  # reference: unvignetted rays
     assert na.max() == pytest.approx(1.197703, abs=1e-4)
 
 
@@ -156,7 +156,7 @@ def test_rms_spot_radius_in_reference_band(tracer):
             na_object_sine=NA_IMAGE / REDUCTION,
             sampling=PupilSampling(kind="rings", radial=10, azimuth=48),
         )
-        points = pupil.end[:, :2]
+        points = pupil.arrived.position[:, :2]
         weights = pupil.weight
         centroid = np.sum(points * weights[:, None], axis=0)
         relative_um = (points - centroid) * 1e3

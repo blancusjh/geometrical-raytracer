@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer import Gap, OpticalSystem
+from raytracer import Gap, OpticalSystem, Rays
 from raytracer.elements import Lens, Sensor
 from raytracer.geometry.surfaces import Sphere
 from raytracer.materials import ConstantIndex
@@ -88,7 +88,7 @@ def angular_magnification(system: OpticalSystem, theta_in: float = 0.01) -> tupl
     tracer = SequentialTracer(system, restart_offset=0.0)
     d = np.array([0.0, np.sin(theta_in), np.cos(theta_in)])
     origins = np.array([[0.0, -5.0, -20.0], [0.0, 5.0, -20.0]])
-    trace = tracer.trace(origins, np.tile(d, (2, 1)))
+    trace = tracer.trace(Rays(origins, np.tile(d, (2, 1))))
     theta_out = np.arctan2(trace.direction[:, 1], trace.direction[:, 2])
     return float(np.mean(theta_out) / theta_in), float(np.ptp(theta_out))
 
@@ -110,7 +110,7 @@ def build_drawing(lenses: OpticalSystem, sources, *, x_lims, y_lims=(-30.0, 30.0
     tracer = NonSequentialTracer(lenses, max_interactions=8, split=False)
     drawing = Drawing(x_lims=x_lims, y_lims=y_lims).add_system(lenses)
     for source, color in zip(sources, (ON_AXIS_COLOR, OFF_AXIS_COLOR)):
-        drawing.add_tree(tracer.trace(source), default_color=color, intensities=1.0)
+        drawing.add_rays(tracer.trace(source), default_color=color, intensities=1.0)
     return drawing
 
 

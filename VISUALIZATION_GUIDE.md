@@ -36,15 +36,18 @@ sistema y sus rayos como tubos gaussianos acumulados en HDR:
   plano del dibujo es `(z, y)`: el corte meridional del modelo 3-D.
 - `draw(drawing)` — dibuja un `raytracer.viz.drawing.Drawing` completo: el
   mismo dibujo neutral que consume el backend de matplotlib.
-- `draw_system(system, wavelength_um=None, tree=None)` — todos los
-  elementos de un `OpticalSystem`, con lo que registró cada sensor en `tree`.
+- `draw_system(system, wavelength_um=None, rays=None)` — todos los
+  elementos de un `OpticalSystem`, con dónde detectó cada sensor los `rays`.
 - `draw_elements(elements)` — elementos sueltos, en su pose o como pares
   `(elemento, pose)`.
-- `draw_rays(tree, colors=None, intensities=None, select=None, markers=False)`
-  — un `RayTree` del trazador no secuencial. `colors` e `intensities` son
-  arreglos (uno por segmento) o funciones del árbol; las intensidades valen
-  por defecto `default_intensity × tree.power`. Los rayos que escapan se
-  extienden hasta el borde de la vista (se recalculan al hacer pan/zoom).
+- `draw_rays(rays, colors=None, intensities=None, select=None, markers=False)`
+  — los tramos rectos de unos `Rays` trazados por cualquiera de los dos
+  motores (`Rays.segments()`). `colors`, `intensities` y `select` son
+  arreglos por tramo, o funciones `(ray, j)` de los tramos: el rayo al que
+  pertenece cada uno y el punto del que parte. Las intensidades valen por
+  defecto `default_intensity ×` la potencia de cada tramo. Los rayos que
+  escapan se extienden hasta el borde de la vista (se recalculan al hacer
+  pan/zoom).
 - `draw_ray_segments(segments, colors=None, intensities=None)` — segmentos
   `(N, 2, 2)` ya en el plano del dibujo; los haces se acumulan hasta
   `clear_rays()`.
@@ -62,14 +65,15 @@ sistema y sus rayos como tubos gaussianos acumulados en HDR:
 ## Colorimetría
 
 `raytracer.viz.color.wavelength_to_rgb(λ_nm)` convierte longitudes de onda a
-sRGB lineal (ajustes CIE 1931). Colores espectrales, uno por segmento:
+sRGB lineal (ajustes CIE 1931). Colores espectrales, cada tramo con la
+longitud de onda de su rayo:
 
 ```python
 import numpy as np
 from raytracer.viz.color import wavelength_to_rgb
 
-colors = np.array([(*wavelength_to_rgb(wl * 1e3), 1.0) for wl in tree.wavelength_um])
-viewer.draw_rays(tree, colors=colors)
+spectral = lambda ray, j: np.array([(*wavelength_to_rgb(wl * 1e3), 1.0) for wl in rays.wavelength_um[ray]])
+viewer.draw_rays(rays, colors=spectral)
 ```
 
 Como la acumulación es lineal en RGB, las fuentes de distintas longitudes de

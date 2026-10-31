@@ -15,6 +15,7 @@ warnings.filterwarnings("ignore")
 import numpy as np
 print = functools.partial(print, flush=True)
 
+from raytracer import Rays
 from raytracer.analysis import aplanatic_image_surface, aplanatism_map
 from raytracer.families import StigmaticTrain
 from raytracer.materials import AIR, sellmeier_glass
@@ -202,10 +203,10 @@ class VirtualObjectAplanatism(Constraint):
             t = sine / np.sqrt(1.0 - sine * sine)
             origin = np.array([0.0, (a - self.launch_z) * t, self.launch_z])
             direction = np.array([0.0, -t, 1.0]) / np.sqrt(1.0 + t * t)
-            r = tracer.trace_ray(origin, direction)
-            if not r.ok:
+            r = tracer.trace(Rays(origin, direction))
+            if not r.detected[0]:
                 continue
-            heights.append(np.abs(r.path[1:-1, 1]))
+            heights.append(np.abs(r.trajectory[0, 1:-1, 1]))
             kept.append(i)
         if kept:
             m = aplanatism_map(train, np.array(heights), from_heights=True)
@@ -268,8 +269,8 @@ def ultrawide():
         t = np.tan(np.deg2rad(deg))
         origin = np.array([0.0, (8.0 - (-25.0)) * t, -25.0])
         direction = np.array([0.0, -t, 1.0]) / np.sqrt(1 + t * t)
-        r = tracer.trace_ray(origin, direction)
-        spread.append(abs(r.end[1]) if r.ok else np.nan)
+        r = tracer.trace(Rays(origin, direction))
+        spread.append(abs(r.position[0, 1]) if r.detected[0] else np.nan)
     print(f"  d* = {tuple(round(v, 3) for v in fit.result.x)}   [{time.time()-t0:.0f}s]")
     print(f"  aplanatism |M-1| rms over 5-55 deg: {s:.3e}   "
           f"(worst {np.max(np.abs(res)):.3e})")

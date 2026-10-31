@@ -21,7 +21,8 @@ from ..geometry.surfaces import Plane
 from ..materials import Material
 from ..system import OpticalSystem
 from ..system.faces import TRANSMIT
-from ..tracing import FieldPoint, SequentialTracer, TraceStatus, chief_ray_slopes, trace_from_object
+from ..rays import Rays, Status
+from ..tracing import FieldPoint, SequentialTracer, chief_ray_slopes, trace_from_object
 from .section import (
     beam_foci_from_paths,
     crossing_height,
@@ -282,10 +283,10 @@ def draw_system(
         else:
             reference = object_z if object_z is not None else 0.0
             fan = [
-                tracer.trace_ray(np.array([0.0, (reference - launch) * t, launch]), np.array([0.0, -t, 1.0]) / np.hypot(t, 1.0))
+                tracer.trace(Rays([0.0, (reference - launch) * t, launch], np.array([0.0, -t, 1.0]) / np.hypot(t, 1.0)))
                 for t in np.tan(np.arcsin(h)) + np.linspace(-0.04, 0.04, rays)
             ]
-        beams.append((color, fan))
+        beams.append((color, Rays.concatenate(fan)))
 
     paths = draw_traced(ax, tracer, beams, xlim=xlim, ray_style=dict(lw=0.55, alpha=0.65, zorder=2),
                         material_colors=material_colors, sensors=image_plane)
@@ -305,28 +306,29 @@ def draw_system(
 
 
 def draw_traced(ax, tracer, beams, *, ray_style: dict, draw_failed: bool = False, xlim=None, **element_options):
-    """Draw *tracer*'s system, then each beam ``(color, traced rays)``: its rays and where it focuses.
+    """Draw *tracer*'s system, then each beam ``(color, traced Rays)``: its rays and where it focuses.
 
     Mirrors follow the hits of the rays that got through; failed rays are drawn up to where they stopped when
-    ``draw_failed``. Returns those rays' paths stacked, or None.
+    ``draw_failed``. Returns the trajectories of the rays that got through, stacked, or None.
     """
 
-    good = [[r.path for r in fan if r.ok] for _, fan in beams]
-    paths = np.stack([p for bundle in good for p in bundle]) if any(good) else None
+    good = [fan.trajectory[fan.detected] for _, fan in beams]
+    paths = np.concatenate(good) if any(len(g) for g in good) else None
     drawn = draw_elements(ax, tracer.system, wavelength_um=tracer.wavelength_um, paths=paths, **element_options)
-    behind = [r.failed_step for _, fan in beams for r in fan if r.status is TraceStatus.BEHIND]
+    # A ray stopped behind a boundary ends on the point before it: the step it failed is its last point's number.
+    behind = [int(np.isfinite(t[:, 0]).sum()) - 1 for _, fan in beams for t in fan.trajectory[fan.status == Status.BEHIND]]
     warn_outside_glass(tracer.system, paths, drawn, behind=behind, stacklevel=4)
 
     for color, fan in beams:
-        for r in fan:
-            if r.ok or draw_failed:
-                finite = r.path[np.isfinite(r.path).all(axis=1)]
+        for trajectory, detected in zip(fan.trajectory, fan.detected):
+            if detected or draw_failed:
+                finite = trajectory[np.isfinite(trajectory).all(axis=1)]
                 ax.plot(finite[:, 2], finite[:, 1], color=color, **ray_style)
     beyond = False
     for (color, _), bundle in zip(beams, good):
-        if not bundle:
+        if not len(bundle):
             continue
-        for z, y, _, _, is_final in beam_foci_from_paths(np.stack(bundle)):
+        for z, y, _, _, is_final in beam_foci_from_paths(bundle):
             if xlim is not None and not xlim[0] <= z <= xlim[1]:
                 beyond |= is_final
                 continue

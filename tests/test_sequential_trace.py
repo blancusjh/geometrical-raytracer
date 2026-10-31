@@ -3,12 +3,13 @@
 import numpy as np
 import pytest
 
-from raytracer import AIR, OpticalSystem, TableRow
+from raytracer import AIR, OpticalSystem, Rays, TableRow
 from raytracer.elements import Lens, Mirror, Sensor, Stop
 from raytracer.geometry.surfaces import Ellipsoid, Paraboloid, Plane, Sphere
 from raytracer.materials import ConstantIndex
+from raytracer.rays import Status
 from raytracer.system import Gap
-from raytracer.tracing import SequentialTracer, TraceStatus
+from raytracer.tracing import SequentialTracer
 
 
 def test_parabola_focuses_collimated_beam_to_machine_precision():
@@ -22,12 +23,12 @@ def test_parabola_focuses_collimated_beam_to_machine_precision():
     ys = np.linspace(-300.0, 300.0, 13)
     origins = np.column_stack([np.zeros_like(ys), ys, np.full_like(ys, -3000.0)])
     directions = np.tile([0.0, 0.0, 1.0], (len(ys), 1))
-    trace = tracer.trace(origins, directions)
+    rays = tracer.trace(Rays(origins, directions))
 
-    assert np.all(trace.status == TraceStatus.OK)
-    assert np.ptp(trace.end[:, 1]) < 1e-10
-    assert np.ptp(trace.end[:, 0]) < 1e-12
-    assert trace.end[:, 1] == pytest.approx(0.0, abs=1e-10)
+    assert rays.detected.all()
+    assert np.ptp(rays.position[:, 1]) < 1e-10
+    assert np.ptp(rays.position[:, 0]) < 1e-12
+    assert rays.position[:, 1] == pytest.approx(0.0, abs=1e-10)
 
 
 def test_ellipsoid_images_focus_onto_focus():
@@ -50,11 +51,11 @@ def test_ellipsoid_images_focus_onto_focus():
     thetas = np.linspace(-0.25, 0.25, 15)
     origins = np.tile([0.0, 0.0, near_focus], (len(thetas), 1))
     directions = np.column_stack([np.zeros_like(thetas), np.sin(thetas), np.cos(thetas)])
-    trace = tracer.trace(origins, directions)
+    rays = tracer.trace(Rays(origins, directions))
 
-    assert np.all(trace.status == TraceStatus.OK)
-    assert np.ptp(trace.end[:, 1]) < 1e-9
-    assert trace.end[:, 1] == pytest.approx(0.0, abs=1e-9)
+    assert rays.detected.all()
+    assert np.ptp(rays.position[:, 1]) < 1e-9
+    assert rays.position[:, 1] == pytest.approx(0.0, abs=1e-9)
 
 
 def test_sphere_intersection_matches_closed_form():
@@ -66,9 +67,9 @@ def test_sphere_intersection_matches_closed_form():
     tracer = SequentialTracer(system)
 
     y0 = 40.0
-    result = tracer.trace_ray([0.0, y0, -100.0], [0.0, 0.0, 1.0])
-    assert result.ok
-    hit = result.path[1]
+    ray = tracer.trace(Rays([0.0, y0, -100.0], [0.0, 0.0, 1.0]))
+    assert ray.detected[0]
+    hit = ray.trajectory[0, 1]
     # Closed form: intersection of the line x=0, y=y0 with the sphere centred
     # at (0, 0, R): z = R - sqrt(R^2 - y0^2).
     z_exact = R - np.sqrt(R * R - y0 * y0)
@@ -76,19 +77,16 @@ def test_sphere_intersection_matches_closed_form():
     assert hit[1] == pytest.approx(y0, abs=1e-12)
 
 
-def test_vignetting_status_and_step():
+def test_vignetting_status_and_where_the_ray_ends():
     # A real diaphragm clips: a prescription row of air on both sides changes
     # nothing and is not an element, so it cannot.
     system = OpticalSystem.compose(Stop("S", aperture=5.0), Gap(10.0), Sensor("IMG"))
     tracer = SequentialTracer(system)
-    trace = tracer.trace(
-        np.array([[0.0, 2.0, -10.0], [0.0, 8.0, -10.0]]),
-        np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
-    )
-    assert trace.status[0] == TraceStatus.OK
-    assert trace.status[1] == TraceStatus.VIGNETTED
-    assert trace.failed_step[1] == 0
-    assert np.isnan(trace.end[1]).all()
+    rays = tracer.trace(Rays([[0.0, 2.0, -10.0], [0.0, 8.0, -10.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]))
+    assert rays.status.tolist() == [Status.DETECTED, Status.VIGNETTED]
+    # The clipped ray never passed a boundary: its trajectory is its start alone.
+    assert rays.boundary.tolist() == ["IMG", None]
+    assert np.isfinite(rays.trajectory[1, :, 0]).sum() == 1
 
 
 def test_lens_rim_vignettes_at_its_face():
@@ -98,12 +96,9 @@ def test_lens_rim_vignettes_at_its_face():
         Gap(10.0),
         Sensor("IMG"),
     )
-    trace = SequentialTracer(system).trace(
-        np.array([[0.0, 2.0, -10.0], [0.0, 8.0, -10.0]]),
-        np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
-    )
-    assert trace.status[1] == TraceStatus.VIGNETTED
-    assert trace.failed_step[1] == system.step_index("W.front")
+    rays = SequentialTracer(system).trace(Rays([[0.0, 2.0, -10.0], [0.0, 8.0, -10.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]))
+    assert system.step_index("W.front") == 0
+    assert rays.status[1] == Status.VIGNETTED and rays.boundary[1] is None
 
 
 def test_tir_status():
@@ -117,9 +112,9 @@ def test_tir_status():
     tracer = SequentialTracer(system)
     theta = np.arcsin(1.0 / 1.5) + 0.05  # beyond critical inside the glass
     direction = [0.0, np.sin(theta), np.cos(theta)]
-    result = tracer.trace_ray([0.0, 0.0, -1.0], direction)
-    assert result.status == TraceStatus.TIR
-    assert result.failed_step == 0
+    ray = tracer.trace(Rays([0.0, 0.0, -1.0], direction))
+    assert ray.status[0] == Status.TIR
+    assert ray.boundary[0] == system.path[0].name  # it ends where it reflected totally
 
 
 def test_opl_through_flat_glass_slab():
@@ -131,10 +126,10 @@ def test_opl_through_flat_glass_slab():
     ]
     system = OpticalSystem.from_table(rows)
     tracer = SequentialTracer(system, restart_offset=0.0)
-    result = tracer.trace_ray([0.0, 0.0, -10.0], [0.0, 0.0, 1.0])
-    assert result.ok
+    ray = tracer.trace(Rays([0.0, 0.0, -10.0], [0.0, 0.0, 1.0]))
+    assert ray.detected[0]
     expected = 1.0 * 10.0 + 1.5 * thickness + 1.0 * 30.0
-    assert result.opl == pytest.approx(expected, abs=1e-9)
+    assert ray.opl[0] == pytest.approx(expected, abs=1e-9)
 
 
 def test_opl_is_signed_behind_a_virtual_stop():
@@ -149,10 +144,10 @@ def test_opl_is_signed_behind_a_virtual_stop():
     ]
     system = OpticalSystem.from_table(rows)
     tracer = SequentialTracer(system, restart_offset=0.0)
-    result = tracer.trace_ray([0.0, 0.0, -10.0], [0.0, 0.0, 1.0])
-    assert result.ok
+    ray = tracer.trace(Rays([0.0, 0.0, -10.0], [0.0, 0.0, 1.0]))
+    assert ray.detected[0]
     assert tracer.image_z == pytest.approx(50.0)
-    assert result.opl == pytest.approx(10.0 + 1.5 * 20.0 + 30.0, abs=1e-9)
+    assert ray.opl[0] == pytest.approx(10.0 + 1.5 * 20.0 + 30.0, abs=1e-9)
 
 
 def test_a_path_back_to_a_passed_boundary_stops_the_ray():
@@ -168,10 +163,9 @@ def test_a_path_back_to_a_passed_boundary_stops_the_ray():
         Sensor("IMG"),
     )
     tracer = SequentialTracer(system)
-    on_axis = tracer.trace_ray([0.0, 0.0, -5.0], [0.0, 0.0, 1.0])
-    beyond = tracer.trace_ray([0.0, 4.5, -5.0], [0.0, 0.0, 1.0])
-    assert on_axis.ok
-    assert beyond.status is TraceStatus.BEHIND and beyond.failed_step == 2
+    rays = tracer.trace(Rays([[0.0, 0.0, -5.0], [0.0, 4.5, -5.0]], [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]))
+    assert rays.status.tolist() == [Status.DETECTED, Status.BEHIND]
+    assert rays.boundary[1] == system.path[1].name  # it stops on the boundary before step 2
 
 
 def test_a_stop_may_sit_behind_the_ray():
@@ -185,8 +179,8 @@ def test_a_stop_may_sit_behind_the_ray():
             TableRow(Plane(), 30.0, AIR, 6.0, kind="stop"),
         ]
     )
-    result = SequentialTracer(system).trace_ray([0.0, 5.0, -5.0], [0.0, 0.0, 1.0])
-    assert result.ok
+    ray = SequentialTracer(system).trace(Rays([0.0, 5.0, -5.0], [0.0, 0.0, 1.0]))
+    assert ray.detected[0]
 
 
 def test_tracer_replace_keeps_the_settings_it_is_not_given():
@@ -196,3 +190,18 @@ def test_tracer_replace_keeps_the_settings_it_is_not_given():
     moved = tracer.replace(object_z=-200.0)
     assert (moved.wavelength_um, moved.object_z, moved.clip_apertures) == (0.55, -200.0, False)
     assert tracer.at_wavelength(0.65).object_z == -100.0
+
+
+def test_each_ray_is_traced_at_its_own_wavelength():
+    """The wavelength belongs to the ray: rays that state one are traced there, the rest at the tracer's."""
+
+    from raytracer.materials import sellmeier_glass
+
+    lens = Lens("L", front=Sphere(30.0), back=Plane(), thickness=4.0, material=sellmeier_glass("N-BK7"), semi_diameter=8.0)
+    tracer = SequentialTracer(OpticalSystem.compose(lens, Gap(50.0), Sensor("IMG")), wavelength_um=0.5876)
+    start, along = [0.0, 5.0, -5.0], [0.0, 0.0, 1.0]
+    mixed = tracer.trace(Rays([start, start], [along, along], wavelength_um=[np.nan, 0.48613]))
+    alone = [tracer.trace(Rays(start, along)), tracer.at_wavelength(0.48613).trace(Rays(start, along))]
+    assert mixed.wavelength_um.tolist() == [0.5876, 0.48613]
+    np.testing.assert_allclose(mixed.position, np.vstack([r.position for r in alone]), rtol=0, atol=1e-13)
+    assert mixed.position[1, 1] < mixed.position[0, 1]  # blue bends more

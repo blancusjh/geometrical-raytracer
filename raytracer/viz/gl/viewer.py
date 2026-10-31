@@ -1,7 +1,7 @@
 """Interactive OpenGL viewer of the drawing plane ``(z, y)``, with HDR ray accumulation.
 
 It draws a neutral :class:`~raytracer.viz.drawing.Drawing` (:meth:`OpenGLViewer.draw`), or builds one from a
-system, loose elements or a non-sequential :class:`~raytracer.tracing.RayTree`. Each frame:
+system, loose elements or traced :class:`~raytracer.rays.Rays`. Each frame:
 
 1. ray quads blend additively (ONE, ONE) into a float32 framebuffer in linear radiometric units, so overlap
    never saturates;
@@ -96,23 +96,23 @@ class OpenGLViewer(app.Canvas):
             elif isinstance(item, MarkerItem):
                 self.draw_markers(item.points, color=item.color, size=item.size)
 
-    def draw_system(self, system, *, wavelength_um=None, material_colors=None, tree=None) -> None:
-        """Every element of an :class:`~raytracer.system.OpticalSystem`, with what each sensor recorded in *tree*."""
+    def draw_system(self, system, *, wavelength_um=None, material_colors=None, rays=None) -> None:
+        """Every element of an :class:`~raytracer.system.OpticalSystem`, with where each sensor detected *rays*."""
 
-        self.draw(Drawing().add_system(system, wavelength_um=wavelength_um, material_colors=material_colors, tree=tree))
+        self.draw(Drawing().add_system(system, wavelength_um=wavelength_um, material_colors=material_colors, rays=rays))
 
     def draw_elements(self, elements, *, wavelength_um=None) -> None:
         """Loose elements at their own poses, or ``(element, pose)`` pairs."""
 
         self.draw(Drawing().add_elements(elements, wavelength_um=wavelength_um))
 
-    def draw_rays(self, tree, *, intensities=None, **options) -> None:
-        """A non-sequential :class:`~raytracer.tracing.RayTree`, with the options of :meth:`Drawing.add_tree`;
-        intensities default to ``config.default_intensity`` times each segment's power."""
+    def draw_rays(self, rays, *, intensities=None, **options) -> None:
+        """Traced :class:`~raytracer.rays.Rays`, with the options of :meth:`Drawing.add_rays`;
+        intensities default to ``config.default_intensity`` times the power each piece carries."""
 
         if intensities is None:
-            intensities = self.config.default_intensity * np.asarray(tree.power, dtype=float)
-        self.draw(Drawing().add_tree(tree, intensities=intensities, **options))
+            intensities = self.config.default_intensity * rays.segments()[1]
+        self.draw(Drawing().add_rays(rays, intensities=intensities, **options))
 
     def draw_ray_segments(self, segments, *, colors=None, intensities=None, escaping=None, directions=None) -> None:
         """Add a bundle of ``(N, 2, 2)`` drawing-plane segments; bundles accumulate until :meth:`clear_rays`.

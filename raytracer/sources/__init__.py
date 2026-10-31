@@ -1,8 +1,8 @@
-"""Sources: emitters that start light for non-sequential tracing.
+"""Sources: emitters that start light.
 
 A source is a description of emission — where light starts, in which
-directions, at which wavelength and with how much power. It produces a
-batch of :class:`Rays`; carrying them through a system is the tracer's job.
+directions, at which wavelength and with how much power. It produces
+:class:`~raytracer.rays.Rays`; carrying them through a system is a tracer's job.
 
 Every source can emit a full 3-D bundle or, with ``fan="y"`` (or ``"x"``),
 a flat fan in the plane containing its direction and that axis — the
@@ -13,43 +13,13 @@ Angles are in degrees.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import ArrayLike
 
 from ..geometry.transforms import Rotation
 from ..geometry.vectors import as_vector, normalize
-
-
-@dataclass
-class Rays:
-    """A batch of rays, a row each: origin and unit direction ``(N, 3)``, wavelength (µm) and power ``(N,)``."""
-
-    origin: np.ndarray
-    direction: np.ndarray
-    wavelength_um: np.ndarray
-    power: np.ndarray
-
-    def __post_init__(self) -> None:
-        self.origin = np.atleast_2d(np.asarray(self.origin, dtype=float))
-        d = np.atleast_2d(np.asarray(self.direction, dtype=float))
-        self.direction = d / np.linalg.norm(d, axis=1, keepdims=True)
-        n = self.origin.shape[0]
-        self.wavelength_um = np.broadcast_to(np.asarray(self.wavelength_um, dtype=float), (n,)).copy()
-        self.power = np.broadcast_to(np.asarray(self.power, dtype=float), (n,)).copy()
-
-    def __len__(self) -> int:
-        return self.origin.shape[0]
-
-    @staticmethod
-    def concatenate(batches: "list[Rays]") -> "Rays":
-        return Rays(
-            np.vstack([b.origin for b in batches]),
-            np.vstack([b.direction for b in batches]),
-            np.concatenate([b.wavelength_um for b in batches]),
-            np.concatenate([b.power for b in batches]),
-        )
+from ..rays import Rays
 
 
 def _wavelength(value: float | None) -> float:
@@ -233,4 +203,4 @@ class ImageSource(Source):
         return Rays(np.vstack(origins), np.vstack(directions), _wavelength(self.wavelength_um), np.concatenate(power))
 
 
-__all__ = ["Rays", "Source", "PointSource", "CollimatedSource", "ImageSource"]
+__all__ = ["Source", "PointSource", "CollimatedSource", "ImageSource"]

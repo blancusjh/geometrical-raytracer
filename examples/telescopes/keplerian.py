@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from raytracer import Gap, OpticalSystem
+from raytracer import Gap, OpticalSystem, Rays
 from raytracer.elements import Sensor
 from raytracer.tracing import SequentialTracer
 from raytracer.viz import MarkerItem
@@ -66,8 +66,8 @@ def objective_focus_z() -> float:
     """
 
     tracer = SequentialTracer(OpticalSystem.compose(OBJECTIVE, Gap(300.0), Sensor("image")), restart_offset=0.0)
-    ray = tracer.trace_ray(np.array([0.0, 1.0, -10.0]), np.array([0.0, 0.0, 1.0]))
-    point, direction = ray.end, ray.direction
+    ray = tracer.trace(Rays([0.0, 1.0, -10.0], [0.0, 0.0, 1.0]))
+    point, direction = ray.position[0], ray.direction[0]
     return float(point[2] - point[1] / direction[1] * direction[2])
 
 

@@ -8,7 +8,7 @@ systems render as built; the optical axis is z and the turntable camera keeps +y
   the cuts between neighbours are not applied). ``section="half"`` cuts every element away below ``y = 0``.
 - Mirrors, beam splitters, diaphragm blades and sensors are their faces over their apertures; prisms their facets.
 - Rays come from sequential pupil bundles (:meth:`Viewer3D.add_field_bundles`), polylines
-  (:meth:`Viewer3D.add_paths`) or a non-sequential :class:`~raytracer.tracing.RayTree` (:meth:`Viewer3D.add_tree`).
+  (:meth:`Viewer3D.add_paths`) or any traced :class:`~raytracer.rays.Rays` (:meth:`Viewer3D.add_rays`).
 
 The light is a headlight that follows the camera, so no side stays dark while orbiting. Keys: **w** wireframe,
 **m** next ray layer, **a** axes. The mesh generators :func:`lathe` and :func:`lathe_solid` are pure numpy.
@@ -186,10 +186,10 @@ class Viewer3D:
             pupil = trace_pupil(tracer, FieldPoint(y=float(field_y)), na_object_sine=na_object_sine,
                                 sampling=PupilSampling(kind="rings", radial=radial, azimuth=azimuth),
                                 stop_index=stop_index)
-            paths = pupil.trace.path[pupil.ok]
+            paths = pupil.arrived.trajectory
             if mode in ("beam", "spectrum"):
                 wl = wavelength_nm if mode == "beam" else float(wavelengths_nm[k % len(wavelengths_nm)])
-                rgb = spectral_rgb(wl) * (beam_energy / max(int(pupil.ok.sum()), 1))
+                rgb = spectral_rgb(wl) * (beam_energy / max(len(paths), 1))
                 self.add_paths(paths, color=(*rgb.tolist(), 1.0), width=1.0, group=mode, additive=True)
             else:
                 self.add_paths(paths, color=RAY_COLORS[k % len(RAY_COLORS)], group="lines")
@@ -209,32 +209,29 @@ class Viewer3D:
             self._add_rays(np.vstack(positions).astype(np.float32), np.vstack(connections).astype(np.uint32),
                            RAY_COLORS[0] if color is None else color, width, group, additive)
 
-    def add_tree(self, tree, *, color=None, width: float = 1.0, group: str = "lines", additive: bool = False,
-                 select: np.ndarray | None = None, escape_length: float | None = None) -> None:
-        """The segments of a non-sequential :class:`~raytracer.tracing.RayTree`.
+    def add_rays(self, rays, *, color=None, width: float = 1.0, group: str = "lines", additive: bool = False,
+                 escape_length: float = 1e3) -> None:
+        """The straight pieces of traced :class:`~raytracer.rays.Rays`; rays that left the system run ``escape_length`` mm on.
 
-        ``color`` is one RGBA, an ``(M, 4)`` array, or None for the first ray colour with alpha scaled by power.
-        Rays that left the system end ``escape_length`` mm from their start when given; ``select`` masks segments.
+        ``color`` is one RGBA, an ``(M, 4)`` array (one per piece), or None for the first ray colour with alpha
+        scaled by the power each piece carries.
         """
 
-        n = len(tree)
+        points, power, ray, _ = rays.segments()
+        n = len(ray)
         if n == 0:
             return
-        start, end = np.asarray(tree.start, dtype=float), np.asarray(tree.end, dtype=float)
-        if escape_length is not None:
-            end = np.where(np.asarray(tree.escaped, dtype=bool)[:, None], start + float(escape_length) * tree.direction, end)
+        start, end = points[:, 0], points[:, 1]
+        end = np.where(np.isnan(end), start + float(escape_length) * rays.direction[ray], end)
         if color is None:
-            power = np.asarray(tree.power, dtype=float)
-            peak = power.max() if power.size and power.max() > 0 else 1.0
+            peak = power.max() if power.max() > 0 else 1.0
             rgba = np.tile(np.asarray(RAY_COLORS[0], dtype=float), (n, 1))
             rgba[:, 3] = np.clip(RAY_COLORS[0][3] * power / peak, 0.03, 1.0)
         else:
             rgba = np.asarray(color, dtype=float)
             rgba = np.tile(rgba, (n, 1)) if rgba.ndim == 1 else rgba
-        keep = np.ones(n, dtype=bool) if select is None else np.asarray(select, dtype=bool)
-        positions = np.stack([start[keep], end[keep]], axis=1).reshape(-1, 3).astype(np.float32)
-        if positions.shape[0]:
-            self._add_rays(positions, "segments", np.repeat(rgba[keep], 2, axis=0).astype(np.float32), width, group, additive)
+        positions = np.stack([start, end], axis=1).reshape(-1, 3).astype(np.float32)
+        self._add_rays(positions, "segments", np.repeat(rgba, 2, axis=0).astype(np.float32), width, group, additive)
 
     def _add_rays(self, positions, connect, color, width, group, additive) -> None:
         line = self._scene.visuals.Line(pos=positions, connect=connect, color=color, width=width, parent=self.view.scene,

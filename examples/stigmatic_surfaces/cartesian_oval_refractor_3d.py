@@ -97,11 +97,11 @@ def main() -> None:
     viewer.add_system(system)
 
     lines = bundle(tracer, LINES_SAMPLING)
-    viewer.add_paths(lines.trace.path[lines.ok], color=(0.45, 0.80, 1.0, 0.55), group="lines")
+    viewer.add_paths(lines.arrived.trajectory, color=(0.45, 0.80, 1.0, 0.55), group="lines")
 
     beam = bundle(tracer, BEAM_SAMPLING)
-    rgb = spectral_rgb(WAVELENGTH_NM) * (BEAM_ENERGY / max(int(beam.ok.sum()), 1))
-    viewer.add_paths(beam.trace.path[beam.ok], color=(*rgb.tolist(), 1.0), width=1.0, group="beam", additive=True)
+    rgb = spectral_rgb(WAVELENGTH_NM) * (BEAM_ENERGY / max(len(beam.arrived), 1))
+    viewer.add_paths(beam.arrived.trajectory, color=(*rgb.tolist(), 1.0), width=1.0, group="beam", additive=True)
 
     viewer.add_marker([0.0, 0.0, ZI])  # design image point (pixel-sized at any zoom)
     viewer.add_axes()

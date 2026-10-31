@@ -82,18 +82,18 @@ def trace(rays_per_strip: int = 10):
     return NonSequentialTracer(build_telescope(), max_interactions=4, split=False).trace(strips)
 
 
-def build_drawing(tree) -> Drawing:
+def build_drawing(rays) -> Drawing:
     drawing = Drawing(x_lims=(-11.0, 23.0), y_lims=(-6.5, 8.5)).add_system(build_telescope())
     for item in drawing.items:
         if isinstance(item, SurfaceItem):  # light mirrors on the black background
             item.color = MIRROR_COLORS[item.name]
-    drawing.add_tree(tree, default_color=BEAM_COLOR, intensities=1.0)
+    drawing.add_rays(rays, default_color=BEAM_COLOR, intensities=1.0)
     return drawing.add(MarkerItem(np.array([[FOLDED_FOCUS[2], FOLDED_FOCUS[1]]]), color=(0.3, 1.0, 0.4, 1.0), size=7.0))
 
 
 def main(rays_per_strip: int = 10) -> None:
-    tree = trace(rays_per_strip)
-    origins, directions = rays_by_generation(tree, generation=3)  # source -> primary -> secondary -> focus
+    rays = trace(rays_per_strip)
+    origins, directions = rays_by_generation(rays, generation=3)  # source -> primary -> secondary -> focus
     distances = point_line_distances(origins, directions, FOLDED_FOCUS)
     rms = float(np.sqrt(np.mean(distances**2))) if len(distances) else float("nan")
 
@@ -107,7 +107,7 @@ def main(rays_per_strip: int = 10) -> None:
 
     save = Path(sys.argv[sys.argv.index("--save") + 1]) if "--save" in sys.argv else None
     backend = show(
-        build_drawing(tree), backend="gl", interactive=save is None,
+        build_drawing(rays), backend="gl", interactive=save is None,
         size=(1400, 640), bgcolor="black", title="Newtonian telescope — raytracer",
         render_config=RenderConfig(ray_width=0.035, min_pixels=1.0, use_solid_rays=True),
     )

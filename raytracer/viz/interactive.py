@@ -100,7 +100,7 @@ class InteractiveSession:
             editables += [editable_for(e.name, self) for e in system.elements if isinstance(e, (Lens, Mirror, Sensor))]
         self.editables = list(editables)
         self.drawing: Drawing | None = None
-        self.tree = None
+        self.rays = None
         self._selection = 0  # index over every (editable, parameter) pair
 
     def replace_element(self, name: str, element, *, world: Pose | None = None) -> None:
@@ -121,13 +121,13 @@ class InteractiveSession:
         return NonSequentialTracer(self.system, wavelength_um=wavelength, split=self.split, max_interactions=self.max_interactions)
 
     def hits(self, sensor: str):
-        """What *sensor* recorded in the last trace (None when nothing reached it)."""
+        """The rays *sensor* detected in the last trace (None before the first)."""
 
-        return None if self.tree is None else self.tree.detectors.get(sensor)
+        return None if self.rays is None else self.rays[self.rays.detected & (self.rays.boundary == sensor)]
 
     def retrace(self) -> Drawing:
-        self.tree = self.tracer().trace(self.sources)
-        self.drawing = Drawing().add_system(self.system, wavelength_um=self.wavelength_um, tree=self.tree).add_tree(self.tree)
+        self.rays = self.tracer().trace(self.sources)
+        self.drawing = Drawing().add_system(self.system, wavelength_um=self.wavelength_um, rays=self.rays).add_rays(self.rays)
         if self.on_update is not None:
             self.on_update(self.drawing)
         return self.drawing

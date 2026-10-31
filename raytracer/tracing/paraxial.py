@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..geometry.vectors import direction_from_slopes
+from ..rays import Rays
 from ..system import DETECT, REFLECT, TRANSMIT
 from .sequential import SequentialTracer
 
@@ -37,12 +38,12 @@ def differential_conjugates(tracer: SequentialTracer, *, eps: float = 1e-4, star
     """
 
     base = np.array([0.0, 0.0, tracer.step_z(0) + start_z])
-    height = tracer.trace_ray(base + [0.0, eps, 0.0], direction_from_slopes(0.0, 0.0))
-    angle = tracer.trace_ray(base, direction_from_slopes(0.0, eps))
-    if not (height.ok and angle.ok):
+    height = tracer.trace(Rays(base + [0.0, eps, 0.0], direction_from_slopes(0.0, 0.0)))
+    angle = tracer.trace(Rays(base, direction_from_slopes(0.0, eps)))
+    if not (height.detected[0] and angle.detected[0]):
         raise RuntimeError("Differential rays did not survive the system")
-    a = height.end[1] / eps
-    b = angle.end[1] / eps
+    a = height.position[0, 1] / eps
+    b = angle.position[0, 1] / eps
     distance = -b / a
     return ConjugateSolution(object_z=float(base[2] - distance), magnification=float(a))
 

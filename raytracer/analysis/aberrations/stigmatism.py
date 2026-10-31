@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ...rays import Rays
 from ...tracing.fields import PupilTrace
 from ..imaging.spots import SpotData, spot_data
 from .wavefront import WavefrontSamples, exit_pupil_wavefront
@@ -63,11 +64,12 @@ def point_line_distances(origins: np.ndarray, directions: np.ndarray, target: np
     return np.linalg.norm(to_target - along[:, None] * directions, axis=1)
 
 
-def rays_by_generation(tree, generation: int) -> tuple[np.ndarray, np.ndarray]:
-    """Starts and directions of every segment of *generation* in a non-sequential :class:`RayTree`."""
+def rays_by_generation(rays: Rays, generation: int) -> tuple[np.ndarray, np.ndarray]:
+    """Starts and directions of the light after ``generation - 1`` interactions: every ray's piece from that point."""
 
-    keep = tree.generation == generation
-    return tree.start[keep], tree.direction[keep]
+    there = rays.at(generation - 1)
+    keep = np.isfinite(there.position[:, 0])
+    return there.position[keep], there.direction[keep]
 
 
 def stigmatism_report(

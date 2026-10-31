@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from raytracer import OpticalSystem
-from raytracer.analysis import BinaryMask, abbe_image, pupil_function, spot_data_from_points
+from raytracer.analysis import BinaryMask, abbe_image, detected_on, pupil_function, spot_data_from_points
 from raytracer.elements import Lens, Sensor
 from raytracer.geometry.apertures import Rectangle
 from raytracer.geometry.surfaces import Sphere
@@ -50,13 +50,14 @@ def geometric_relay():
     sensor = Sensor("IMG", aperture=Rectangle(36.0, 36.0), z=171.4)
     source = ImageSource(profile, p0=(0.0, -6.0, -90.0), p1=(0.0, 6.0, -90.0), half_angle_deg=5.0, rays_per_point=31)
 
-    hits = NonSequentialTracer(OpticalSystem([lens, sensor]), max_interactions=4, split=False).trace(source).hits("IMG")
-    values, edges = hits.histogram(axis=1, bins=180, range=(-18.0, 18.0))
+    system = OpticalSystem([lens, sensor])
+    points, power = detected_on(system, NonSequentialTracer(system, max_interactions=4, split=False).trace(source), "IMG")
+    values, edges = np.histogram(points[:, 1], bins=180, range=(-18.0, 18.0), weights=power)
     centers = 0.5 * (edges[:-1] + edges[1:])
 
     # RMS spot size for rays landing near the object's mid-height bar (the
     # dimmer one), as a proxy for the relay's on-axis aberration.
-    near_center = hits.local_point[np.abs(hits.local_point[:, 1]) < 2.0, :2]
+    near_center = points[np.abs(points[:, 1]) < 2.0, :2]
     rms_um = spot_data_from_points(near_center).rms_radius_um if len(near_center) > 1 else float("nan")
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
@@ -65,7 +66,7 @@ def geometric_relay():
     axes[0].set(title="Object intensity profile", xlabel="y (mm)", ylabel="I")
     axes[1].plot(centers, values / values.max(), color="#b3421b")
     axes[1].set(
-        title=f"Sensor irradiance ({len(hits)} rays) — inverted, magnified\n"
+        title=f"Sensor irradiance ({len(points)} rays) — inverted, magnified\n"
               f"RMS spot near center: {rms_um:.3g} um",
         xlabel="y (mm)",
     )

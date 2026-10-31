@@ -304,19 +304,21 @@ is stored on the system. **‹law 3›**
 *Planned.*
 
 ```python
-trace = rt.trace(triplet, field="all", pupil=rt.pupil.hexapolar(rings=6), wavelength="all")
-trace.shape                      # (fields, wavelengths, pupil samples): a row per ray
-trace.end                        # (..., 3) mm: where each ray met the detector
-trace.direction, trace.opl, trace.status          # status: OK, VIGNETTED, TIR, MISSED, BEHIND, …
-trace.ok                         # the rays that reached the detector
+bundle = rt.trace(triplet, field="all", pupil=rt.pupil.hexapolar(rings=6), wavelength="all")
+bundle.field, bundle.pupil       # what each ray samples, a row per ray
+rays = bundle.rays               # Rays: a row per ray, whole, however it was traced
+rays.position                    # (N, 3) mm: where each ray is now — on the detector, or where it stopped
+rays.direction, rays.opl, rays.wavelength_um, rays.status   # status: DETECTED, VIGNETTED, TIR, MISSED, BEHIND, …
+rays.detected                    # the rays that reached the detector
+rays.at("STO")                   # the same rays where they crossed the stop
+rays.trajectory                  # (N, V, 3): every point each ray passed
+rt.analysis.angles_of_incidence(triplet, rays)   # (N, V): how each ray met each boundary
 
-ray = rt.trace_ray(triplet, field=rt.Field.normalized(hy=1.0), pupil=rt.Pupil(py=1.0))
-ray.path                         # the same columns, for one ray: its hit at every step
-print(ray.table())               # per step: point, normal, angle of incidence, OPL, medium
-
-trace = rt.trace(triplet, field=0, pupil=rt.pupil.hexapolar(8), polarization=True)
-trace.jones                      # a column of polarisation ray-tracing matrices
+rays = rt.trace(triplet, field=0, pupil=rt.pupil.hexapolar(8), polarization=True).rays
+rays.jones                       # a column of polarisation ray-tracing matrices
 ```
+
+One ray is one row: there is no separate single-ray type.
 
 `rt.trace` is the sequential engine. It is chosen by the subject (a
 `Configuration`) and never constructed by hand for ordinary work.
@@ -556,21 +558,28 @@ same `OpticalSystem`: the same faces, the same media on each side, the
 same coatings. Only the order is dropped.
 
 ```python
+from raytracer.analysis import detected_on
 from raytracer.sources import CollimatedSource
 from raytracer.tracing import NonSequentialTracer
 
 source = CollimatedSource((0, 0, -40), direction=(0, 0, 1), beam_radius=2.0,
                           rays=2000, wavelength_um=0.55)
-tree = NonSequentialTracer(system, max_interactions=12, split=True).trace(source)
-tree.hits("D1").power.sum()                      # power reaching a sensor
-tree.hits("D1").histogram(axis=1, bins=200)      # irradiance profile
-tree.segments()                                  # every segment, with generation/parent/kind
+rays = NonSequentialTracer(system, max_interactions=12, split=True).trace(source)
+points, power = detected_on(system, rays, "D1")             # where sensor D1 met rays, and what each brought
+np.histogram(points[:, 1], bins=200, weights=power)          # irradiance profile
+rays[rays.parent >= 0]                                       # the rays split off others: ghosts, stray light
+rays.segments()                                              # every straight piece, for drawing
 ```
 
-* `split=True` divides power between reflected and transmitted children,
-  per coating (Fresnel for bare surfaces).
-* `split=False` follows the branch a sequential trace would take, which
-  gives the clean picture for drawing.
+The result is `Rays`, the same type the sequential tracer returns: a ray
+is one thing, however it is traced.
+
+* `split=True` divides the light between reflection and transmission per
+  coating (Fresnel for bare surfaces): the ray goes on along the branch a
+  sequential trace would take, and the other part is a new ray split off
+  it, with its `parent`.
+* `split=False` splits nothing off (except at a beam splitter): row for row
+  the rays a sequential trace gives, which is the clean picture for drawing.
 * `fan="y"` on a source gives the meridional fan of a 2-D figure.
 * Planned: irradiance maps in W/mm², ghost-path queries, Monte Carlo
   splitting with `seed=`.

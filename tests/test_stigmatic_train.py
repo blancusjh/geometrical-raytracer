@@ -71,8 +71,8 @@ def test_collimating_surface_emits_parallel_rays():
     for sine in (0.05, 0.2, 0.35):
         slope = sine / np.sqrt(1.0 - sine * sine)
         result = trace_from_object(tracer, (0.0, 0.0), (0.0, slope))
-        assert result.ok
-        d = result.direction / np.linalg.norm(result.direction)
+        assert result.detected[0]
+        d = result.direction[0] / np.linalg.norm(result.direction[0])
         assert abs(d[1]) < 1e-12
 
 
@@ -151,7 +151,7 @@ def _rms_spot_um(train: StigmaticTrain, *, na: float) -> float:
         sampling=PupilSampling(kind="rings", radial=8, azimuth=32),
         chief_slope=0.0,
     )
-    assert pupil.ok.sum() > 0.8 * pupil.ok.size
+    assert len(pupil.arrived) > 0.8 * len(pupil.rays)
     return spot_data(pupil).rms_radius_um
 
 

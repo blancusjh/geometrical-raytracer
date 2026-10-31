@@ -232,13 +232,12 @@ class AxialColor(Constraint):
         slope = sine / np.sqrt(1.0 - sine * sine)
         shifts = np.full(len(self.wavelengths), PENALTY)
         for i, wavelength in enumerate(self.wavelengths):
-            result = trace_from_object(train.tracer(wavelength), (0.0, 0.0), (0.0, slope))
-            direction = result.direction / np.linalg.norm(result.direction)
-            if not result.ok or abs(direction[1]) < 1e-15:
+            ray = trace_from_object(train.tracer(wavelength), (0.0, 0.0), (0.0, slope))
+            direction = ray.direction[0] / np.linalg.norm(ray.direction[0])
+            if not ray.detected[0] or abs(direction[1]) < 1e-15:
                 continue
-            crossing = result.end[2] - result.end[1] * (
-                direction[2] / direction[1]
-            )
+            end = ray.position[0]
+            crossing = end[2] - end[1] * (direction[2] / direction[1])
             shifts[i] = crossing - train.conjugates[-1]
         return self.weight * shifts
 

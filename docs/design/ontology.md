@@ -16,8 +16,8 @@ Each package answers one question. Every module-level import goes to a
 package earlier in the chain, and `tests/test_architecture.py` checks it:
 
 ```
-geometry → materials → coatings → interfaces → elements → system → sources
-         → tracing → families → io → analysis → optimize → viz
+geometry → materials → coatings → interfaces → elements → system → rays
+         → sources → tracing → families → io → analysis → optimize → viz
 ```
 
 | Package | Question | Nature |
@@ -28,6 +28,7 @@ geometry → materials → coatings → interfaces → elements → system → s
 | `interfaces` | What is a surface as an optical boundary, and which laws act there? | physics of boundaries (direction) |
 | `elements` | What physical things is an instrument made of? | description |
 | `system` | How are they arranged, and what follows from the arrangement? | description and derived facts |
+| `rays` | What is light? | rays: each the whole broken line it follows, however it is traced |
 | `sources` | Where does light start? | description of emission |
 | `tracing` | How does light get from here to there? | algorithms |
 | `families` | Which systems does a design family generate? | generators of descriptions |
@@ -58,8 +59,9 @@ stored as authoritative state. **‹law 3›**
 | `OpticalSystem` | components in an ambient medium, optionally a stated path and stop | system | stated |
 | `PhysicalFace` | one physical boundary, with the medium on each side | system | **derived** (coincident faces merge: contact) |
 | `Step`, `path` | the sequential route: boundary + event | system | stated, or **derived** for a coaxial system |
-| `Rays`, `Source` | a batch of rays; an emitter | sources | stated |
-| `SequentialTracer`, `NonSequentialTracer` | the engines; the tracer holds the facts of use it needs (wavelength, object plane) | tracing | — |
+| `Rays` | light, a ray per row: the whole broken line it follows from its birth (at a source, or split off its `parent`), its wavelength, power, optical path, `trajectory` and `status` | rays | born at a source; carried on by a tracer |
+| `Source` | an emitter of rays | sources | stated |
+| `SequentialTracer`, `NonSequentialTracer` | the engines: both take `Rays` and return the same rays carried further, differing only in how each ray's next boundary is chosen and whether light divides; the tracer holds the facts of use it needs (the object plane; the wavelength of rays that state none) | tracing | — |
 | `StigmaticTrain` | a family of stigmatic systems; `.system()` is a member | families | stated |
 
 ### Surface hierarchy

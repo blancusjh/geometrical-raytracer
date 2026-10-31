@@ -35,14 +35,17 @@ class Drawing:
         self.items.append(item)
         return self
 
-    def add_system(self, system, *, wavelength_um=None, material_colors=None, tree=None, sensors=True) -> "Drawing":
+    def add_system(self, system, *, wavelength_um=None, material_colors=None, rays=None, sensors=True) -> "Drawing":
         """Every element of *system* at its world pose.
 
         Bodies come from :func:`~raytracer.viz.bodies.body_outlines` (neighbours cut apart, filled by index);
-        a traced *tree* adds what each sensor recorded.
+        traced *rays* add where each sensor detected them.
         """
 
-        hits = {} if tree is None else {name: d.point for name, d in tree.detectors.items()}
+        hits = {}
+        if rays is not None:
+            for name in set(rays.boundary[rays.detected]):
+                hits[name] = rays.position[rays.detected & (rays.boundary == name)]
         bodies = body_outlines(system, wavelength_um=wavelength_um)
         return self._add_placed(list(system.walk()), bodies, material_colors, hits, sensors)
 
@@ -71,18 +74,17 @@ class Drawing:
         return self
 
     def add_sensor(self, sensor, pose=None, *, hits=None, fallback: float = DEFAULT_SEMIDIAMETER) -> "Drawing":
-        """A sensor's section; *hits* are its recorded points (world ``(K, 3)``, or a ``DetectorHits``)."""
+        """A sensor's section; *hits* are the world points ``(K, 3)`` where it detected rays."""
 
-        hits = getattr(hits, "points", hits)
         hits = None if hits is None or len(hits) == 0 else to_drawing(hits)
         for curve in element_sections(sensor, sensor.pose if pose is None else pose, fallback=fallback):
             self.add(SensorItem(curve, hits=hits, name=sensor.name))
             hits = None  # one overlay per sensor
         return self
 
-    def add_tree(
+    def add_rays(
         self,
-        tree,
+        rays,
         *,
         colors=None,
         intensities=None,
@@ -90,32 +92,40 @@ class Drawing:
         markers=False,
         marker_size: float = 6.0,
         default_color: tuple = (1.0, 1.0, 1.0, 1.0),
-        select: np.ndarray | None = None,
+        select=None,
         escape_length: float | None = None,
     ) -> "Drawing":
-        """The segments of a non-sequential :class:`~raytracer.tracing.RayTree`, projected on the drawing plane.
+        """The straight pieces of :class:`~raytracer.rays.Rays` (:meth:`~raytracer.rays.Rays.segments`), on the drawing plane.
 
-        ``colors`` is ``(M, 4)`` or a callable ``tree -> (M, 4)``; ``intensities`` likewise ``(M,)`` (default:
-        each segment's power). Rays that left the system run to the edge of the view, or end ``escape_length``
-        mm from their start, or are dropped with ``show_misses=False``. ``markers`` (True, or a colour) marks
-        where segments end on a boundary; ``select`` is a boolean mask of the segments to draw.
+        ``colors`` (``(M, 4)``), ``intensities`` (``(M,)``; default: the power
+        each piece carries) and ``select`` (a mask) are per piece, or a function
+        of the pieces' ``(ray, j)`` — the ray each belongs to and the point it
+        starts from. Rays that left the system run to the edge of the view, or
+        end ``escape_length`` mm from their last point, or are dropped with
+        ``show_misses=False``. ``markers`` (True, or a colour) marks where
+        pieces end on a boundary.
         """
 
-        n = len(tree)
+        points, power, ray, j = rays.segments()
+        n = len(ray)
         if n == 0:
             return self
-        segments = to_drawing(tree.segments())
-        direction = to_drawing(tree.direction)
+
+        def per_piece(option):
+            return option(ray, j) if callable(option) else option
+
+        segments = to_drawing(points)
+        direction = to_drawing(rays.direction[ray])
         norms = np.linalg.norm(direction, axis=1, keepdims=True)
         direction = direction / np.where(norms == 0.0, 1.0, norms)
-        escaped = np.asarray(tree.escaped, dtype=bool)
+        escaped = np.isnan(points[:, 1, 0])
 
-        rgba = colors(tree) if callable(colors) else colors
+        rgba = per_piece(colors)
         rgba = np.tile(np.asarray(default_color, dtype=float), (n, 1)) if rgba is None else np.asarray(rgba, dtype=float)
-        weight = intensities(tree) if callable(intensities) else intensities
-        weight = np.broadcast_to(np.asarray(tree.power if weight is None else weight, dtype=float), (n,))
+        weight = per_piece(intensities)
+        weight = np.broadcast_to(np.asarray(power if weight is None else weight, dtype=float), (n,))
 
-        keep = np.ones(n, dtype=bool) if select is None else np.asarray(select, dtype=bool).copy()
+        keep = np.ones(n, dtype=bool) if select is None else np.asarray(per_piece(select), dtype=bool).copy()
         if not show_misses:
             keep &= ~escaped
         if not keep.any():

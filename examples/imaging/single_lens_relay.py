@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from raytracer import OpticalSystem
-from raytracer.analysis import spot_data_from_points
+from raytracer.analysis import detected_on, spot_data_from_points
 from raytracer.elements import Lens, Sensor
 from raytracer.geometry.apertures import Rectangle
 from raytracer.geometry.surfaces import Sphere
@@ -53,12 +53,12 @@ def trace(system: OpticalSystem, rays: int):
 
 def render(rays: int, backend: str, save_dir: Path | None, name: str):
     system = build_relay()
-    tree = trace(system, rays)
-    b = show(Drawing().add_system(system, tree=tree).add_tree(tree), backend=backend, interactive=save_dir is None)
+    traced = trace(system, rays)
+    b = show(Drawing().add_system(system, rays=traced).add_rays(traced), backend=backend, interactive=save_dir is None)
     if save_dir:
         b.save(save_dir / name)
         print(f"wrote {save_dir / name}")
-    return tree
+    return system, traced
 
 
 def main() -> None:
@@ -70,10 +70,10 @@ def main() -> None:
         save_dir.mkdir(parents=True, exist_ok=True)
 
     if backend in ("mpl", "both"):
-        hits = render(41, "mpl", save_dir, "singlet_mpl.png").hits("IMG")  # few rays: readable diagram
-        values, edges = hits.histogram(axis=1, bins=100, range=(-SENSOR_HALF, SENSOR_HALF))
-        spot = spot_data_from_points(hits.local_point[:, :2])
-        print(f"sensor: {len(hits)} hits, irradiance peak at y={edges[np.argmax(values)]:.2f} mm")
+        points, power = detected_on(*render(41, "mpl", save_dir, "singlet_mpl.png"), "IMG")  # few rays: readable
+        values, edges = np.histogram(points[:, 1], bins=100, range=(-SENSOR_HALF, SENSOR_HALF), weights=power)
+        spot = spot_data_from_points(points[:, :2])
+        print(f"sensor: {len(points)} hits, irradiance peak at y={edges[np.argmax(values)]:.2f} mm")
         print(f"RMS spot radius: {spot.rms_radius_um:.4g} um "
               "(nonzero: a spherical singlet is not stigmatic)")
 

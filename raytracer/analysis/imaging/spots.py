@@ -58,7 +58,7 @@ def _spot_from_arrays(field_y: float, points: np.ndarray, weights: np.ndarray) -
 def spot_data(pupil: PupilTrace) -> SpotData:
     """Compute area-weighted spot statistics from a pupil trace."""
 
-    return _spot_from_arrays(pupil.field.y, pupil.end[:, :2], pupil.weight)
+    return _spot_from_arrays(pupil.field.y, pupil.arrived.position[:, :2], pupil.weight)
 
 
 def spot_data_from_points(
@@ -66,8 +66,9 @@ def spot_data_from_points(
 ) -> SpotData:
     """Spot statistics from raw ``(N, 2)`` image-plane points (mm), equal-weighted
     by default: the same convergence metric (RMS radius from the centroid, in
-    um) for points with no :class:`PupilTrace` behind them, such as a sensor's
-    hits in a non-sequential trace.
+    um) for points with no :class:`PupilTrace` behind them, such as where a
+    detector met the rays of a non-sequential trace
+    (:func:`~raytracer.analysis.footprints.detected_on`).
     """
 
     points = np.asarray(points, dtype=float)

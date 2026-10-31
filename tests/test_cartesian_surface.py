@@ -15,7 +15,8 @@ from raytracer.geometry.surfaces.cartesian import (
 from raytracer.materials import ConstantIndex
 from raytracer.sources import PointSource
 from raytracer.system import OpticalSystem
-from raytracer.tracing import NonSequentialTracer, SequentialTracer, TraceStatus
+from raytracer.rays import Rays, Status
+from raytracer.tracing import NonSequentialTracer, SequentialTracer
 
 
 N0, Z0, NI, ZI = 1.0, -30.0, 1.7, 10.0
@@ -111,13 +112,13 @@ def oval_lens(semi_diameter: float, *, extra: float = 0.0) -> OpticalSystem:
 
 def test_semidiameter_clips_rays_beyond_the_aperture():
     tracer = SequentialTracer(oval_lens(2.0, extra=5.0))
-    trace = tracer.trace(
+    trace = tracer.trace(Rays(
         np.array([[0.0, 1.0, Z0], [0.0, 3.0, Z0]]),
         np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
-    )
-    assert trace.status[0] == TraceStatus.OK
-    assert trace.status[1] == TraceStatus.VIGNETTED
-    assert trace.failed_step[1] == 0
+    ))
+    assert trace.status[0] == Status.DETECTED
+    assert trace.status[1] == Status.VIGNETTED
+    assert trace.boundary[1] is None  # clipped at the first face
 
 
 def test_drawn_curve_matches_the_traced_surface():
@@ -144,9 +145,9 @@ def test_axial_object_point_images_stigmatically():
     directions = np.column_stack(
         [np.sin(angles) * np.cos(phi), np.sin(angles) * np.sin(phi), np.cos(angles)]
     )
-    trace = tracer.trace(origins, directions)
-    assert trace.ok.all()
-    assert np.max(np.abs(trace.end[:, :2])) < 1e-9
+    trace = tracer.trace(Rays(origins, directions))
+    assert trace.detected.all()
+    assert np.max(np.abs(trace.position[:, :2])) < 1e-9
     # Fermat: every path from the object to the image has the same optical length.
     expected = N0 * abs(Z0) + NI * ZI
     assert np.max(np.abs(trace.opl - expected)) < 1e-9
@@ -157,8 +158,7 @@ def test_non_sequential_trace_finds_the_same_focus():
     system = oval_lens(0.8 * surface.max_radius)
     half_angle = np.degrees(np.arctan(0.7 * surface.max_radius / -Z0))
     source = PointSource((0.0, 0.0, Z0), half_angle_deg=half_angle, rays=61)
-    tree = NonSequentialTracer(system, split=False).trace(source)
-    hits = tree.hits("IMG")
-    assert len(hits) == 61
-    assert np.max(np.abs(hits.point[:, :2])) < 1e-9
-    assert hits.opl == pytest.approx(N0 * abs(Z0) + NI * ZI, abs=1e-9)
+    rays = NonSequentialTracer(system, split=False).trace(source)
+    assert rays.detected.sum() == 61 and (rays.boundary == "IMG").all()
+    assert np.max(np.abs(rays.position[:, :2])) < 1e-9
+    assert rays.opl == pytest.approx(N0 * abs(Z0) + NI * ZI, abs=1e-9)

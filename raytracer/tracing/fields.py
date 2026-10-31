@@ -8,7 +8,8 @@ from typing import Literal
 import numpy as np
 
 from ..geometry.vectors import direction_from_slopes
-from .sequential import SequentialTrace, SequentialTracer, TracedRay
+from ..rays import Rays
+from .sequential import SequentialTracer
 
 
 @dataclass(frozen=True)
@@ -33,11 +34,11 @@ def trace_from_object(
     tracer: SequentialTracer,
     xy: tuple[float, float],
     slopes: tuple[float, float],
-) -> TracedRay:
+) -> Rays:
     """Trace a single ray from the object plane given transverse slopes."""
 
     origin = np.array([xy[0], xy[1], _object_z(tracer)])
-    return tracer.trace_ray(origin, direction_from_slopes(slopes[0], slopes[1]))
+    return tracer.trace(Rays(origin, direction_from_slopes(slopes[0], slopes[1])))
 
 
 class _RayVignetted(RuntimeError):
@@ -89,12 +90,12 @@ def chief_ray_slopes(
         initial_guess = (-field.x / denom, -field.y / denom)
 
     def stop_position(slopes: np.ndarray) -> np.ndarray:
-        origin = np.array([[field.x, field.y, object_z]])
-        direction = direction_from_slopes(float(slopes[0]), float(slopes[1]))[None, :]
-        ray = tracer.trace(origin, direction)[0]
-        ok = ray.ok or ray.failed_step > stop_index
-        position = ray.path[stop_index + 1, :2]
-        if not ok or not np.all(np.isfinite(position)):
+        """Where the ray of *slopes* crosses the stop (its point after step ``stop_index``)."""
+
+        direction = direction_from_slopes(float(slopes[0]), float(slopes[1]))
+        ray = tracer.trace(Rays([field.x, field.y, object_z], direction))
+        position = ray.trajectory[0, stop_index + 1, :2]
+        if not np.all(np.isfinite(position)):
             raise _RayVignetted
         return position
 
@@ -208,37 +209,30 @@ class PupilSampling:
 
 @dataclass
 class PupilTrace:
-    """A pupil-filling bundle for one field point: the trace, and the pupil it samples.
+    """A pupil-filling bundle for one field point: its rays, the pupil point each samples, and the chief ray.
 
-    ``pupil`` and ``trace`` have a row per sampled ray; ``weight`` has one per
-    *surviving* ray, and so do :attr:`end`, :attr:`direction` and :attr:`opl`.
+    Each ray carries as its power the share of the pupil it samples.
     """
 
     field: FieldPoint
-    pupil: np.ndarray  # (N, 2): normalized pupil coordinates
-    weight: np.ndarray  # (M,): pupil-area weights of the surviving rays, summing to 1
-    trace: SequentialTrace
-    chief: TracedRay
+    pupil: np.ndarray  # (N, 2): normalized pupil coordinates, a row per ray
+    rays: Rays
+    chief: Rays  # the chief ray, alone
     na_object_sine: float
     sampling: PupilSampling = dataclass_field(default_factory=PupilSampling)
 
     @property
-    def ok(self) -> np.ndarray:
-        return self.trace.ok
+    def arrived(self) -> Rays:
+        """The rays that reached the detector."""
+
+        return self.rays[self.rays.detected]
 
     @property
-    def end(self) -> np.ndarray:
-        """``(M, 3)``: where the surviving rays meet the detector."""
+    def weight(self) -> np.ndarray:
+        """The share of the light reaching the detector each arrived ray carries; they sum to 1."""
 
-        return self.trace.end[self.ok]
-
-    @property
-    def direction(self) -> np.ndarray:
-        return self.trace.direction[self.ok]
-
-    @property
-    def opl(self) -> np.ndarray:
-        return self.trace.opl[self.ok]
+        power = self.arrived.power
+        return power / power.sum() if power.sum() > 0.0 else power
 
 
 def trace_pupil(
@@ -301,18 +295,13 @@ def trace_pupil(
     else:
         raise ValueError(f"Unknown slope model {slope_model!r}")
 
-    trace = tracer.trace(origins, directions)
+    rays = tracer.trace(Rays(origins, directions, power=sampling.area_weights(points)))
     chief = trace_from_object(tracer, (field.x, field.y), (chief_sx, chief_sy))
-
-    weight = sampling.area_weights(points)[trace.ok]
-    if weight.sum() > 0.0:
-        weight = weight / weight.sum()
 
     return PupilTrace(
         field=field,
         pupil=points,
-        weight=weight,
-        trace=trace,
+        rays=rays,
         chief=chief,
         na_object_sine=na_object_sine,
         sampling=sampling,

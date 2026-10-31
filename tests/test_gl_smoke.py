@@ -33,33 +33,23 @@ def _draw(viewer):
     viewer.on_draw(None)
 
 
-def _tree(starts_zy, ends_zy):
-    """A RayTree of primary segments in the drawing plane (z, y), all ending on a face."""
+def _rays(starts_zy, ends_zy):
+    """Rays of unit power in the drawing plane (z, y), each from its start to a sensor at its end (one z for all)."""
 
-    from raytracer.tracing import RayTree
+    from raytracer import OpticalSystem, Rays
+    from raytracer.elements import Sensor
+    from raytracer.tracing import NonSequentialTracer
 
     starts = np.array([[0.0, y, z] for z, y in starts_zy], dtype=float)
     ends = np.array([[0.0, y, z] for z, y in ends_zy], dtype=float)
-    n = starts.shape[0]
-    d = ends - starts
-    return RayTree(
-        start=starts,
-        end=ends,
-        direction=d / np.linalg.norm(d, axis=1, keepdims=True),
-        power=np.ones(n),
-        wavelength_um=np.full(n, np.nan),
-        generation=np.ones(n, dtype=int),
-        parent=np.full(n, -1),
-        kind=np.zeros(n, dtype=int),
-        face=["s"] * n,
-        opl=np.zeros(n),
-    )
+    sensor = Sensor("s", z=float(ends[0, 2]))
+    return NonSequentialTracer(OpticalSystem([sensor])).trace(Rays(starts, ends - starts))
 
 
 def test_accumulation_is_linear_additive():
     viewer = _make_canvas()
-    one = _tree([(-3.0, 0.0)], [(3.0, 0.0)])
-    two = _tree([(-3.0, 0.0)] * 2, [(3.0, 0.0)] * 2)
+    one = _rays([(-3.0, 0.0)], [(3.0, 0.0)])
+    two = _rays([(-3.0, 0.0)] * 2, [(3.0, 0.0)] * 2)
 
     viewer.draw_rays(one)
     _draw(viewer)
@@ -80,7 +70,7 @@ def test_display_never_saturates_with_many_overlapping_rays():
     viewer = _make_canvas()
     viewer.config.auto_exposure = True
     viewer._exposure_dirty = True
-    viewer.draw_rays(_tree([(-3.0, 0.001 * k) for k in range(200)], [(3.0, 0.001 * k) for k in range(200)]))
+    viewer.draw_rays(_rays([(-3.0, 0.001 * k) for k in range(200)], [(3.0, 0.001 * k) for k in range(200)]))
     _draw(viewer)
 
     accum = viewer.read_accumulation()[..., :3].max()

@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from raytracer.analysis import detected_on
 from raytracer.elements import Lens, Sensor
 from raytracer.geometry.apertures import Rectangle
 from raytracer.geometry.surfaces import Sphere
@@ -28,18 +29,17 @@ def _relay(profile, *, object_height=6.0, rays_per_point=41):
         half_angle_deg=4.0,
         rays_per_point=rays_per_point,
     )
-    tree = NonSequentialTracer(OpticalSystem([lens, sensor]), split=False).trace(source)
-    return tree.hits("IMG")
+    system = OpticalSystem([lens, sensor])
+    return detected_on(system, NonSequentialTracer(system, split=False).trace(source), "IMG")
 
 
 def test_two_point_object_images_inverted_and_magnified():
     profile = np.zeros(101)
     profile[20] = 1.0  # object point at y = -3.6 mm
     profile[80] = 1.0  # object point at y = +3.6 mm
-    hits = _relay(profile)
+    points, weights = _relay(profile)
 
-    positions = hits.local_point[:, 1]
-    weights = hits.power
+    positions = points[:, 1]
     # Split arrivals by sign and locate both image points.
     y_up = np.average(positions[positions > 0], weights=weights[positions > 0])
     y_lo = np.average(positions[positions < 0], weights=weights[positions < 0])
@@ -55,10 +55,10 @@ def test_image_intensity_scales_with_pixel_value():
     profile = np.zeros(101)
     profile[30] = 1.0
     profile[70] = 0.4
-    hits = _relay(profile)
-    positions = hits.local_point[:, 1]
-    bright = hits.power[positions > 0].sum()  # pixel 30 (lower object) -> upper image
-    dim = hits.power[positions < 0].sum()
+    points, power = _relay(profile)
+    positions = points[:, 1]
+    bright = power[positions > 0].sum()  # pixel 30 (lower object) -> upper image
+    dim = power[positions < 0].sum()
     assert dim / bright == pytest.approx(0.4, abs=0.03)
 
 

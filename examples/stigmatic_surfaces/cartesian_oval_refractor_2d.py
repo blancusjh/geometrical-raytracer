@@ -78,27 +78,28 @@ def build_block() -> OpticalSystem:
 
 def trace(system: OpticalSystem, rays: int = 300):
     source = PointSource((0.0, 0.0, Z0), half_angle_deg=rim_half_angle_deg(OVAL, SEMIDIAMETER), rays=rays, fan="y")
-    # Generation 1 runs in air to the oval, generation 2 in the glass to the back face.
+    # Each ray runs in air to the oval (its first piece), then in the glass to the back face (its second).
     return NonSequentialTracer(system, split=False).trace(source)
 
 
 def main() -> None:
     system = build_block()
-    tree = trace(system)
+    rays = trace(system)
 
-    origins, directions = rays_by_generation(tree, generation=2)
+    origins, directions = rays_by_generation(rays, generation=2)
     distances_um = point_line_distances(origins, directions, IMAGE_POINT) * 1e3
     rms_um = float(np.sqrt(np.mean(distances_um**2))) if len(origins) else float("nan")
     print("Cartesian oval refractor: stigmatic imaging")
     print(f"  object: z0={Z0} (air, n={AMBIENT_N}); image: zi={ZI} (glass, n={GLASS_N})")
     print(f"  clear aperture (semidiameter): {SEMIDIAMETER}")
-    print(f"  refracted rays within the aperture: {len(origins)}/{int((tree.generation == 1).sum())}")
+    print(f"  refracted rays within the aperture: {len(origins)}/{len(rays)}")
     print(f"  RMS distance from the image point to each refracted ray: {rms_um:.4g} um")
 
     drawing = Drawing(x_lims=(-32.0, 14.0), y_lims=(-8.0, 8.0)).add_system(system)
-    in_glass = tree.generation == 2
-    colors = np.where(in_glass[:, None], (0.5, 0.9, 1.0, 0.85), (1.0, 1.0, 1.0, 0.45))
-    drawing.add_tree(tree, colors=colors, intensities=1.0, select=tree.generation <= 2,
+    def colors(ray, j):  # the piece from each ray's first point runs in the glass
+        return np.where((j == 1)[:, None], (0.5, 0.9, 1.0, 0.85), (1.0, 1.0, 1.0, 0.45))
+
+    drawing.add_rays(rays, colors=colors, intensities=1.0, select=lambda ray, j: j <= 1,
                      markers="crimson", marker_size=6.0)
     drawing.add(MarkerItem(np.array([[ZI, 0.0]]), color=(1.0, 0.84, 0.0, 1.0), size=8.0))
 

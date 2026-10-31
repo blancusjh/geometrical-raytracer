@@ -50,12 +50,13 @@ def fan_segments(tracer, field_y: float) -> tuple[np.ndarray, np.ndarray]:
     chief = chief_ray_slopes(tracer, FieldPoint(y=field_y))[1]
     segments, landings = [], []
     for delta in np.linspace(-FAN_HALF_SLOPE, FAN_HALF_SLOPE, RAYS_PER_FIELD):
-        result = trace_from_object(tracer, (0.0, field_y), (0.0, chief + delta))
-        path = result.path[np.isfinite(result.path).all(axis=1)]  # a vignetted ray is drawn up to where it stopped
+        ray = trace_from_object(tracer, (0.0, field_y), (0.0, chief + delta))
+        trajectory = ray.trajectory[0]
+        path = trajectory[np.isfinite(trajectory).all(axis=1)]  # a vignetted ray is drawn up to where it stopped
         zy = path[:, [2, 1]]
         segments.append(np.stack([zy[:-1], zy[1:]], axis=1))
-        if result.ok:
-            landings.append(result.end)
+        if ray.detected[0]:
+            landings.append(ray.position[0])
     return np.concatenate(segments), np.array(landings)
 
 

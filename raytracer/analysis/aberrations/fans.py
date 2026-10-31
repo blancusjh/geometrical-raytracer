@@ -44,11 +44,11 @@ def ray_fans(
         sampling=PupilSampling(kind="fan_t", n=n),
         chief_slope=chief_slope,
     )
-    keep = tangential_trace.ok
+    keep = tangential_trace.rays.detected
     tangential = np.column_stack(
         [
             tangential_trace.pupil[keep, 1],
-            (tangential_trace.end[:, 1] - ideal_y) * 1e3,
+            (tangential_trace.arrived.position[:, 1] - ideal_y) * 1e3,
         ]
     )
 
@@ -59,11 +59,11 @@ def ray_fans(
         sampling=PupilSampling(kind="fan_s", n=n),
         chief_slope=chief_slope if chief_slope is not None else None,
     )
-    keep = sagittal_trace.ok
+    keep = sagittal_trace.rays.detected
     sagittal = np.column_stack(
         [
             sagittal_trace.pupil[keep, 0],
-            sagittal_trace.end[:, 0] * 1e3,
+            sagittal_trace.arrived.position[:, 0] * 1e3,
         ]
     )
 

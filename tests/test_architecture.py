@@ -30,6 +30,7 @@ LAYERS = [
     "interfaces",
     "elements",
     "system",
+    "rays",
     "sources",
     "tracing",
     "families",
@@ -124,6 +125,13 @@ def test_elements_know_nothing_of_systems_or_engines():
 
     for path in _modules_in("elements"):
         assert _imported_layers(path).isdisjoint({"system", "tracing", "sources"})
+
+
+def test_rays_are_light_alone():
+    """A ray is light: what it meets, and how it is traced, are no part of it."""
+
+    for path in _modules_in("rays"):
+        assert not _imported_layers(path)
 
 
 def test_system_reaches_io_and_tracing_only_lazily():

@@ -66,7 +66,7 @@ def chief_distortion_ppm(tracer, object_z, stop_index, magnification, angle_deg)
     _, slope = chief_ray_slopes(tracer, FieldPoint(y=y), stop_index=stop_index, initial_guess=(0.0, estimate))
     result = trace_from_object(tracer, (0.0, y), (0.0, slope))
     ideal_y = y * magnification
-    return float((result.end[1] / ideal_y - 1) * 1e6)
+    return float((result.position[0, 1] / ideal_y - 1) * 1e6)
 
 
 def test_chief_ray_distortion_grows_with_field(tracer):

@@ -8,97 +8,32 @@ boundary itself — the side it arrives from — so a lens crossed twice in a
 catadioptric, or a boundary between two cemented glasses, needs no
 special case.
 
-Rays that fail are not raised on: each carries a :class:`TraceStatus` and
-the step where it stopped, so pupil-filling bundles can simply be
-filtered afterwards.
+Rays that fail are not raised on: each ends with a
+:class:`~raytracer.rays.Status` saying why, its trajectory ending where it
+stopped, so pupil-filling bundles can simply be filtered afterwards. Rays
+that reach the detector end ``DETECTED``.
 
 The tracer also holds the two facts of *use* a sequential trace needs and
-the hardware does not: the wavelength, and the object plane.
+the hardware does not: the object plane, and the wavelength of rays that
+state none.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, make_dataclass
-from enum import IntEnum
-
 import numpy as np
-from numpy.typing import ArrayLike
 
 from ..interfaces import reflect, refract
+from ..rays import Rays, Status
 from ..system import DETECT, REFLECT, STOP, TRANSMIT, OpticalSystem
-
-
-class TraceStatus(IntEnum):
-    """Why a ray stopped. ``BEHIND``: the path sends it back to a boundary it has
-    already passed — allowed only at a stop, which prescriptions may place
-    behind the previous vertex as a reference plane."""
-
-    OK = 0
-    VIGNETTED = 1
-    TIR = 2
-    DIVERGED = 3
-    PARALLEL = 4
-    MISSED = 5
-    BEHIND = 6
-
-
-class _PerRay:
-    """Quantities derived the same way for a whole trace and for one of its rays."""
-
-    path: np.ndarray
-    status: np.ndarray
-
-    @property
-    def ok(self):
-        """Whether the ray reached the detector."""
-
-        return self.status == TraceStatus.OK
-
-    @property
-    def end(self) -> np.ndarray:
-        """Where the ray ended: its hit on the detector (NaN if it never got there)."""
-
-        return self.path[..., -1, :]
-
-
-@dataclass
-class SequentialTrace(_PerRay):
-    """N rays traced along a path: one row per ray, one column per quantity.
-
-    ``trace[i]`` is the row of ray *i*, a :class:`TracedRay` with the same columns.
-    """
-
-    path: np.ndarray  # (N, steps + 1, 3): the start, then the hit at every step (NaN after a failure)
-    direction: np.ndarray  # (N, 3): the last direction
-    opl: np.ndarray  # (N,): optical path length to the detector
-    status: np.ndarray  # (N,): TraceStatus values
-    failed_step: np.ndarray  # (N,): the step where the ray stopped, -1 if it did not
-    aoi_deg: np.ndarray  # (N, steps): angle of incidence at every step
-
-    def __len__(self) -> int:
-        return self.path.shape[0]
-
-    def __getitem__(self, i: int) -> "TracedRay":
-        row = {f.name: getattr(self, f.name)[i] for f in fields(self)}
-        row["status"] = TraceStatus(int(row["status"]))
-        return TracedRay(**row)
-
-
-#: One row of a :class:`SequentialTrace`: the same columns, for one ray.
-TracedRay = make_dataclass(
-    "TracedRay",
-    [(f.name, f.type) for f in fields(SequentialTrace)],
-    bases=(_PerRay,),
-    frozen=True,
-    namespace={"__doc__": "One row of a SequentialTrace: the same columns, for one ray."},
-)
+from .arrival import arrive, indices
 
 
 class SequentialTracer:
     """Exact sequential tracer along an :class:`OpticalSystem`'s path.
 
-    ``wavelength_um`` is where the media are evaluated (it may be omitted
-    when every medium has a constant index). ``object_z`` is the axial
+    ``wavelength_um`` is where the media are evaluated for rays that state
+    no wavelength of their own (it may be omitted when every medium has a
+    constant index). ``object_z`` is the axial
     position of the object plane, used by the field and pupil helpers;
     :func:`~raytracer.tracing.paraxial.solve_object_plane` finds it for a
     prescription that leaves it out.
@@ -190,36 +125,29 @@ class SequentialTracer:
 
     # -- tracing -------------------------------------------------------------
 
-    def trace_ray(self, origin: ArrayLike, direction: ArrayLike) -> "TracedRay":
-        """Trace one ray: the single row of a one-ray :meth:`trace`."""
+    def _media(self, wavelength_um: np.ndarray) -> list:
+        """The indices on the two sides of every step, for each ray's wavelength."""
 
-        return self.trace(np.asarray(origin, dtype=float)[None, :], np.asarray(direction, dtype=float)[None, :])[0]
+        if np.all(wavelength_um == self.wavelength_um) or (self.wavelength_um is None and np.isnan(wavelength_um).all()):
+            return self._n
+        return [(indices(s.face.medium_minus, wavelength_um), indices(s.face.medium_plus, wavelength_um)) for s in self.steps]
 
-    def trace(self, origins: ArrayLike, directions: ArrayLike) -> SequentialTrace:
-        """Trace N rays given by their ``(N, 3)`` starts and directions."""
+    def trace(self, rays: Rays) -> Rays:
+        """Carry *rays* along the path: each ray in flight meets every step in turn, and ends detected or failed."""
 
-        p = np.array(origins, dtype=float, copy=True)
-        d = np.array(directions, dtype=float, copy=True)
-        if p.ndim != 2 or p.shape[1] != 3:
-            raise ValueError("origins must have shape (N, 3)")
-        if d.shape != p.shape:
-            raise ValueError("directions must match origins in shape")
-        d /= np.linalg.norm(d, axis=1, keepdims=True)
+        rays = rays.stated(self.wavelength_um)
+        n, n_steps = len(rays), len(self.steps)
+        first = rays._last + 1  # where each ray's next point goes
+        record = rays._record(points=int(first.max(initial=1)) + n_steps)
+        status, last, rows = record["status"], record["_last"], np.arange(n)
+        alive = status == Status.IN_FLIGHT
+        p, d, opl = rays.position, rays.direction, rays.opl
+        media = self._media(record["wavelength_um"])
 
-        n_rays, n_steps = p.shape[0], len(self.steps)
-        status = np.zeros(n_rays, dtype=np.int64)
-        failed = np.full(n_rays, -1, dtype=np.int64)
-        opl = np.zeros(n_rays)
-        alive = np.ones(n_rays, dtype=bool)
-        path = np.full((n_rays, n_steps + 1, 3), np.nan)
-        path[:, 0, :] = p
-        aoi = np.full((n_rays, n_steps), np.nan)
-
-        def fail(mask: np.ndarray, code: TraceStatus, step: int) -> None:
+        def fail(mask: np.ndarray, code: Status) -> None:
             nonlocal alive
             mask = mask & alive
             status[mask] = code
-            failed[mask] = step
             alive &= ~mask
 
         for i, step in enumerate(self.steps):
@@ -230,46 +158,45 @@ class SequentialTracer:
             pl = pose.to_local(p)
             dl = pose.direction_to_local(d)
             hits = face.surface.intersect(pl, dl, alive)
-            fail(hits.parallel, TraceStatus.PARALLEL, i)
-            fail(hits.diverged, TraceStatus.DIVERGED, i)
-            fail(hits.missed, TraceStatus.MISSED, i)
+            fail(hits.parallel, Status.PARALLEL)
+            fail(hits.diverged, Status.DIVERGED)
+            fail(hits.missed, Status.MISSED)
             if step.event != STOP:
-                fail(hits.t < -1e-6, TraceStatus.BEHIND, i)
+                fail(hits.t < -1e-6, Status.BEHIND)
             t = np.where(alive, hits.t, 0.0)
             ql = pl + t[:, None] * dl
+            normal_local, n1, n2 = arrive(face, ql, dl, *media[i])
 
             region = face.interface.clear_aperture if step.event == STOP else face.clear_aperture
             if self.clip_apertures and region is not None:
-                fail(~region.contains(ql[:, 0], ql[:, 1], slack=self.aperture_slack), TraceStatus.VIGNETTED, i)
+                fail(~region.contains(ql[:, 0], ql[:, 1], slack=self.aperture_slack), Status.VIGNETTED)
 
-            # The normal on the surface's +z side tells which side each ray arrives from.
-            normal_local = face.surface.normal(ql)
-            going_plus = np.einsum("ij,ij->i", dl, normal_local) > 0.0
-            n_minus, n_plus = self._n[i]
-            n1 = np.where(going_plus, n_minus, n_plus)
             q = pose.to_world(ql)
             opl = np.where(alive, opl + n1 * t, opl)
-            path[alive, i + 1, :] = q[alive]
+            here, j = rows[alive], first[alive] + i
+            record["trajectory"][here, j] = q[here]
+            record["_opl"][here, j] = opl[here]
+            record["_power"][here, j] = record["_power"][here, last[here]]
+            record["_boundary"][here, j] = step.name
+            record["_event"][here, j] = step.event
+            last[here] = j
 
             normal = pose.direction_to_world(normal_local)
-            normal = np.where(going_plus[:, None], -normal, normal)  # face the incoming ray
-            cos_i = -np.einsum("ij,ij->i", d, normal)
-            aoi[alive, i] = np.degrees(np.arccos(np.clip(np.abs(cos_i[alive]), 0.0, 1.0)))
-
-            if step.event == DETECT:
-                break
             if step.event == REFLECT:
                 d_new = reflect(d, normal)
-            elif step.event == TRANSMIT and n_minus != n_plus:
-                n2 = np.where(going_plus, n_plus, n_minus)
+            elif step.event == TRANSMIT:
+                differ = n1 != n2
                 d_new, tir = refract(d, normal, n1, n2)
-                fail(tir, TraceStatus.TIR, i)
-            else:  # a stop, or a boundary between equal indices
+                d_new = np.where(differ[:, None], d_new, d)
+                fail(tir & differ, Status.TIR)
+            else:  # a stop, or the detector
                 d_new = d
             d = np.where(alive[:, None], d_new, d)
+            record["_direction"][here, j] = d[here]
             p = np.where(alive[:, None], q + d * self.restart_offset, p)
 
-        return SequentialTrace(path=path, direction=d, opl=opl, status=status, failed_step=failed, aoi_deg=aoi)
+        status[alive] = Status.DETECTED
+        return Rays._of(**record)
 
 
-__all__ = ["TraceStatus", "SequentialTrace", "TracedRay", "SequentialTracer"]
+__all__ = ["SequentialTracer"]
