@@ -3,6 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
+license = { file = "LICENSE" }
 name = "raytracer"
 version = "0.3.0"
 description = "Optical ray-tracing toolkit: vectorized sequential 3-D propagation with prescription import and analysis, plus a branching 2-D propagation with OpenGL/matplotlib visualization"

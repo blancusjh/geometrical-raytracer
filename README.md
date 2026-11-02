@@ -529,3 +529,9 @@ docs/          imágenes del README, el script que las regenera y las búsquedas
 reference/     notebooks y módulo de referencia originales
 tests/         verdades analíticas + regresiones de sistema completo
 ```
+
+## License
+
+Original project code and documentation are licensed under the [Apache License 2.0](LICENSE).
+Third-party code, publications, datasets, fonts, and other assets retain their
+respective licenses and copyright notices; this license does not replace them.
