@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Sequence
 
 from ..elements import Element, Stop
 from ..geometry.transforms import Pose
 from ..materials import AIR, Material
 from .assembly import Assembly, Component
 from .faces import PhysicalFace, Step, infer_path, parse_path, resolve_faces
+
+if TYPE_CHECKING:
+    from ..conditions import Configuration
 
 
 class OpticalSystem:
@@ -72,6 +75,13 @@ class OpticalSystem:
         from .table import from_table
 
         return from_table(cls, rows, **kwargs)
+
+    def under(self, conditions) -> "Configuration":
+        """This system under *conditions* of use: a :class:`~raytracer.conditions.Configuration`."""
+
+        from ..conditions import Configuration
+
+        return Configuration(self, conditions)
 
     def table(self) -> list:
         """The prescription rows of a coaxial path (see :func:`.table.to_table`)."""

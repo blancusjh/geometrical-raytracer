@@ -1,5 +1,7 @@
 """Optical analysis, split by what is being measured.
 
+- :mod:`raytracer.analysis.gaussian` — first-order optics: focal lengths,
+  pupils, NAs, magnification; what the paraxial rays say.
 - :mod:`raytracer.analysis.imaging` — what the image looks like: spot
   diagrams, PSF, aerial image, contrast.
 - :mod:`raytracer.analysis.aberrations` — what the ray/wavefront error
@@ -15,9 +17,10 @@ subpackages' own ``__all__`` rather than hand-listed, so they cannot
 drift apart.
 """
 
-from . import aberrations, footprints, imaging
+from . import aberrations, footprints, gaussian, imaging
 from .aberrations import *  # noqa: F401,F403
+from .gaussian import *  # noqa: F401,F403
 from .footprints import *  # noqa: F401,F403
 from .imaging import *  # noqa: F401,F403
 
-__all__ = [*aberrations.__all__, *imaging.__all__, *footprints.__all__]
+__all__ = [*gaussian.__all__, *aberrations.__all__, *imaging.__all__, *footprints.__all__]

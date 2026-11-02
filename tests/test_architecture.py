@@ -30,6 +30,7 @@ LAYERS = [
     "interfaces",
     "elements",
     "system",
+    "conditions",
     "rays",
     "sources",
     "tracing",

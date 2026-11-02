@@ -15,6 +15,8 @@ it in this list:
 - :mod:`~raytracer.system` — :class:`OpticalSystem` and :class:`Assembly`;
   the media on each side of each boundary and the sequential path follow
   from the placed elements.
+- :mod:`~raytracer.conditions` — how a system is used: object, aperture,
+  fields, spectrum; a system under conditions is a :class:`Configuration`.
 - :mod:`~raytracer.rays` — light: :class:`Rays`, each the whole broken line
   it follows, however it is traced.
 - :mod:`~raytracer.sources` — emitters of rays.
@@ -30,7 +32,20 @@ The namespaces are the API (``from raytracer import elements as el``);
 the top level holds only the system and the most used names.
 """
 
-from . import coatings, elements, geometry, interfaces, materials, rays, system
+from . import coatings, conditions, elements, geometry, interfaces, materials, rays, system
+from .conditions import (
+    Aiming,
+    Conditions,
+    Configuration,
+    Field,
+    Fields,
+    Object,
+    Polarization,
+    Pupil,
+    Spectrum,
+    SystemAperture,
+    pupil,
+)
 from .geometry import Pose, Rotation
 from .interfaces import Interface
 from .materials import AIR, VACUUM
@@ -43,6 +58,17 @@ __all__ = [
     "OpticalSystem",
     "Assembly",
     "Rays",
+    "Conditions",
+    "Object",
+    "SystemAperture",
+    "Fields",
+    "Spectrum",
+    "Polarization",
+    "Aiming",
+    "Configuration",
+    "Field",
+    "Pupil",
+    "pupil",
     "Gap",
     "TableRow",
     "Interface",
@@ -56,5 +82,6 @@ __all__ = [
     "interfaces",
     "elements",
     "system",
+    "conditions",
     "rays",
 ]
