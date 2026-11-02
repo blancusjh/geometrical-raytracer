@@ -21,7 +21,8 @@ it in this list:
   it follows, however it is traced.
 - :mod:`~raytracer.sources` — emitters of rays.
 - :mod:`~raytracer.tracing` — the engines: sequential (along the path) and
-  non-sequential (wherever light goes), plus paraxial optics and pupils.
+  non-sequential (wherever light goes), paraxial optics, and :func:`trace`,
+  which aims and traces the rays of a configuration.
 - :mod:`~raytracer.families` — generators of systems (stigmatic trains).
 - :mod:`~raytracer.io` — reading and writing designs and catalogues.
 - :mod:`~raytracer.analysis` — what is measured on a traced system.
@@ -32,7 +33,7 @@ The namespaces are the API (``from raytracer import elements as el``);
 the top level holds only the system and the most used names.
 """
 
-from . import coatings, conditions, elements, geometry, interfaces, materials, rays, system
+from . import analysis, coatings, conditions, elements, geometry, interfaces, io, materials, rays, sources, system, tracing
 from .conditions import (
     Aiming,
     Conditions,
@@ -51,6 +52,7 @@ from .interfaces import Interface
 from .materials import AIR, VACUUM
 from .rays import Rays
 from .system import Assembly, Gap, OpticalSystem, TableRow
+from .tracing import paraxial, trace
 
 __version__ = "0.4.0"
 
@@ -69,6 +71,8 @@ __all__ = [
     "Field",
     "Pupil",
     "pupil",
+    "trace",
+    "paraxial",
     "Gap",
     "TableRow",
     "Interface",
@@ -84,4 +88,8 @@ __all__ = [
     "system",
     "conditions",
     "rays",
+    "sources",
+    "tracing",
+    "io",
+    "analysis",
 ]

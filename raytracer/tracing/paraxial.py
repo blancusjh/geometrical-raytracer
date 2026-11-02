@@ -287,8 +287,8 @@ class Paraxial:
     # -- the stop and its images ---------------------------------------------------------
 
     @cached_property
-    def _to_stop(self) -> tuple[float, float]:
-        """Heights at the stop of the two basis rays from the first vertex: ``(A, B)``."""
+    def stop_heights(self) -> tuple[float, float]:
+        """``(A, B)``: heights at the stop of the rays ``(y, w) = (1, 0)`` and ``(0, 1)`` from the first vertex."""
 
         ya, _ = self.trace(1.0, 0.0, self.z[0], upto=self.stop)
         yb, _ = self.trace(0.0, 1.0, self.z[0], upto=self.stop)
@@ -313,7 +313,7 @@ class Paraxial:
         at_stop = abs(ys[self.stop])
         if aperture.kind in ("epd", "f_number"):
             epd = aperture.value if aperture.kind == "epd" else self.efl / aperture.value
-            magnification = self._to_stop[0]
+            magnification = self.stop_heights[0]
             if abs(magnification) < 1e-12:
                 raise ValueError("the entrance pupil is at infinity (telecentric in object space): "
                                  "state the aperture as an NA, or by the stop")
@@ -341,7 +341,7 @@ class Paraxial:
     def entrance_pupil(self) -> ParaxialPupil:
         """The stop as seen from object space."""
 
-        A, B = self._to_stop
+        A, B = self.stop_heights
         if abs(A) < 1e-12:  # telecentric in object space
             return ParaxialPupil(np.inf, np.inf)
         return ParaxialPupil(float(self.z[0] + self.n_in[0] * B / A), 2.0 * self.stop_radius / abs(A))
@@ -371,8 +371,8 @@ class Paraxial:
         scale = self.stop_radius / ys[self.stop]
         return self._ray(ys * scale, ws * scale)
 
-    def _object_side(self, field: tuple[float, float]) -> tuple[np.ndarray, np.ndarray]:
-        """The paraxial chief ray (meridional component) of an object-side field: an angle, or an object height."""
+    def chief_of(self, field: tuple[float, float]) -> tuple[np.ndarray, np.ndarray]:
+        """The paraxial chief ray ``(y, w)`` of an object-side field (its meridional size): an angle, or an object height."""
 
         conditions = self.configuration.conditions
         kind = conditions.fields.kind
@@ -381,7 +381,7 @@ class Paraxial:
                                  "ray is parallel to the axis there: field angles mean nothing; state object heights")
         if conditions.object.infinite:
             w0 = self.n_in[0] * np.tan(np.radians(value))
-            A, B = self._to_stop
+            A, B = self.stop_heights
             if abs(A) < 1e-12:
                 raise telecentric
             return self.trace(-B * w0 / A, w0, self.z[0])
@@ -401,9 +401,9 @@ class Paraxial:
         fields = self.configuration.conditions.fields
         largest = max(fields.points, key=lambda p: np.hypot(*p))
         if fields.kind != "image_height":
-            return self._ray(*self._object_side(largest))
+            return self._ray(*self.chief_of(largest))
         # Image heights: paraxially, the chief ray is linear in them. Unit object field: tan = 1, or 1 mm.
-        ys, ws = self._object_side((0.0, 45.0) if self.configuration.conditions.object.infinite else (0.0, 1.0))
+        ys, ws = self.chief_of((0.0, 45.0) if self.configuration.conditions.object.infinite else (0.0, 1.0))
         height = self._at_image(ys, ws)
         scale = float(np.hypot(*largest)) / height
         return self._ray(ys * scale, ws * scale)

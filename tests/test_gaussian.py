@@ -11,7 +11,6 @@ from raytracer.elements import Lens, Mirror, Sensor, Stop
 from raytracer.geometry.surfaces import Sphere
 from raytracer.io import read_prescription
 from raytracer.materials import ConstantIndex
-from raytracer.system import Gap
 from raytracer.tracing import SequentialTracer
 from raytracer.tracing.paraxial import Paraxial
 

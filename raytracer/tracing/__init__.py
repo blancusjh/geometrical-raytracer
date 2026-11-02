@@ -7,10 +7,14 @@ chosen, and in whether light divides.
 - :mod:`.sequential` — every ray along the system's path, vectorized.
 - :mod:`.nonsequential` — every ray wherever the physics sends it.
 - :mod:`.arrival` — what both do where rays meet a boundary.
+- :mod:`.aiming` — tracing a configuration: rays aimed from field, pupil
+  and wavelength (:func:`trace`).
 - :mod:`.paraxial` — conjugates and ABCD matrices of a coaxial path.
 - :mod:`.fields` — field points, chief rays, pupil sampling.
 """
 
+from . import paraxial
+from .aiming import Bundle, aim, object_field, trace
 from .fields import (
     FieldPoint,
     PupilSampling,
@@ -24,6 +28,11 @@ from .paraxial import ConjugateSolution, ParaxialModel, differential_conjugates,
 from .sequential import SequentialTracer
 
 __all__ = [
+    "trace",
+    "Bundle",
+    "aim",
+    "object_field",
+    "paraxial",
     "SequentialTracer",
     "NonSequentialTracer",
     "ConjugateSolution",
