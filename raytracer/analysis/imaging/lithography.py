@@ -69,10 +69,10 @@ class BinaryMask:
     ) -> "BinaryMask":
         """Load an image, convert to grayscale, resample to *size*, binarize."""
 
-        import matplotlib.image as mpimg
+        from PIL import Image
         from scipy import ndimage
 
-        raw = mpimg.imread(path)
+        raw = np.asarray(Image.open(path), dtype=float)
         if raw.ndim == 3:
             raw = raw[..., :3].mean(axis=2)
         raw = np.asarray(raw, dtype=float)

@@ -169,9 +169,9 @@ class ImageSource(Source):
     def from_image(cls, path, *, column: int | None = None, pixels: int | None = None, **kwargs) -> "ImageSource":
         """The profile from an image file: the mean over rows (or one *column*), top row last."""
 
-        import matplotlib.image as mpimg
+        from PIL import Image
 
-        raw = np.asarray(mpimg.imread(path), dtype=float)
+        raw = np.asarray(Image.open(path), dtype=float)
         if raw.ndim == 3:
             raw = raw[..., :3].mean(axis=2)
         if raw.max() > 1.0:

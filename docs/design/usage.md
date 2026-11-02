@@ -1,8 +1,15 @@
 # The library as if it existed
 
-**Status.** §2 (describing a system) and the core of §12 (non-sequential
-tracing) are implemented; every other section is marked *Planned* and is
+**Status.** Implemented: §2 (describing a system), §3–§6 (conditions,
+coordinates, first-order optics, tracing a configuration — all but reading
+and writing lens files, and polarisation) and the core of §12
+(non-sequential tracing). Every other section is marked *Planned* and is
 the specification of what comes next.
+
+This document runs. Its code blocks are executed in order by
+`tests/test_usage.py`; a block marked `<!-- planned: … -->` is expected to
+fail until its feature lands, and the test fails the moment one starts to
+pass while still marked.
 
 One continuous session. The subject is a Cooke triplet, later a zoom, a
 folded telescope and a laser line. Every planned feature appears at least
@@ -29,6 +36,7 @@ A material is a *medium*: what fills space between surfaces. Catalogues are
 data files. They are read by `io` and collected in a library that resolves
 names.
 
+<!-- planned: glass catalogues -->
 ```python
 schott = rt.io.read_agf("data/materials/catalogs/SCHOTT.AGF")
 ohara  = rt.io.read_agf("data/materials/catalogs/OHARA.AGF")
@@ -113,8 +121,12 @@ cooke_same = rt.OpticalSystem.compose(
     el.Lens("L1", surfaces=[sf.Sphere(21.25), sf.Sphere(-158.65)], thicknesses=[2.0],
             materials=[glass["N-SK16"]], semi_diameter=6.5),
     rt.Gap(6.0),
-    el.Lens("L2", ...), rt.Gap(1.5), el.Stop("STO", aperture=4.2), rt.Gap(4.5),
-    el.Lens("L3", ...), rt.Gap(43.0), el.Sensor("IMG"),
+    el.Lens("L2", surfaces=[sf.Sphere(-20.25), sf.Sphere(19.30)], thicknesses=[1.0],
+            materials=[glass["F4"]], semi_diameter=5.0),
+    rt.Gap(1.5), el.Stop("STO", aperture=4.2), rt.Gap(4.5),
+    el.Lens("L3", surfaces=[sf.Sphere(141.25), sf.Sphere(-17.285)], thicknesses=[2.0],
+            materials=[glass["N-SK16"]], semi_diameter=6.5),
+    rt.Gap(43.0), el.Sensor("IMG"),
 )
 
 duv = rt.io.read_prescription("data/optical_systems/lithography/US7557996_Fig3_Table3_prescription.csv")
@@ -193,17 +205,20 @@ A folded or split system states its path, with `":reflect"` where a
 beam splitter would otherwise be ambiguous:
 
 ```python
-arm = system.replace(path=["BS:reflect", "M1", "L2.1", "L2.2", "D2"])
+folded = rt.OpticalSystem([
+    el.BeamSplitter("BS", aperture=10.0, z=20.0, normal=(0, 1, 1)),
+    el.Sensor("D1", z=60.0),
+    el.Sensor("D2", pos=(0, -40, 20), normal=(0, -1, 0)),
+], path=["BS:transmit", "D1"])
+reflected = folded.replace(path=["BS:reflect", "D2"])   # the other arm
 ```
 
 ## 3. Stating how it is *used*: conditions
 
-*Planned.*
-
 ```python
 day = rt.Conditions(
     object=rt.Object.at_infinity(),
-    aperture=rt.Aperture.f_number(4.5),             # or .epd(…), .object_na(…), .image_na(…), .from_stop()
+    aperture=rt.SystemAperture.f_number(4.5),       # or .epd(…), .object_na(…), .image_na(…), .from_stop()
     fields=rt.Fields.angles([0.0, 10.0, 14.0, 20.0], weights=[1, 1, 1, 0.5]),
     spectrum=rt.Spectrum.fdc(),                      # F, d, C; primary = d
     polarization=rt.Polarization.unpolarized(),
@@ -216,16 +231,16 @@ A **Configuration** is a system *under* conditions. It is the subject of
 every analysis. Inconsistent combinations are rejected here, at
 construction, and not halfway through an analysis. Examples are
 `Fields.object_heights` with an object at infinity, or a stop with no
-aperture when `Aperture.from_stop()` is asked for. **‹law 4›**
+aperture when `SystemAperture.from_stop()` is asked for. **‹law 4›**
 
 ```python
 rt.Object.at_infinity()
 rt.Object.finite(distance=250.0)          # 250 mm in front of the first vertex
 rt.Object.finite(distance=-8.0)           # virtual object, 8 mm behind it
 
-rt.Fields.angles([...])                   # degrees
-rt.Fields.object_heights([...])           # mm
-rt.Fields.image_heights([...], real=True) # mm; solved by real (or paraxial) chief rays
+rt.Fields.angles([0.0, 10.0, (5.0, 14.0)])          # degrees; a point is y, or (x, y)
+rt.Fields.object_heights([0.0, 30.0])               # mm
+rt.Fields.image_heights([0.0, 12.0, 17.0], real=True)  # mm; solved by real (or paraxial) chief rays
 
 rt.Spectrum([0.4861, 0.5876, 0.6563], weights=[1, 2, 1], primary=0.5876)
 rt.Spectrum.single(0.193)
@@ -244,6 +259,7 @@ Configurations are values too: `triplet.replace(conditions=…)`,
 Reading a lens file gives you whatever the file describes, and the function
 name says which:
 
+<!-- planned: lens files -->
 ```python
 system  = rt.io.read_system("data/optical_systems/photographic/cooke_triplet_prescription.csv")
 config  = rt.io.read_configuration("data/optical_systems/photographic/double_gauss.zmx")
@@ -260,8 +276,6 @@ error lists every such feature. Nothing is dropped silently. **‹law 9›**
 
 ## 4. Where in field, pupil and spectrum: coordinates
 
-*Planned.*
-
 Every sequential quantity is a function of three things: a field point, a
 pupil point and a wavelength.
 
@@ -272,7 +286,7 @@ rt.Field.normalized(hy=1.0)         # relative to the largest declared field
 
 rt.Pupil(px=0.0, py=1.0)            # normalized pupil coordinates; |p| ≤ 1 fills the stop image
 
-rt.pupil.hexapolar(rings=8)         # samplings: hexapolar, rings, square grid, fan, random(seed=…)
+rt.pupil.hexapolar(rings=8)         # samplings: hexapolar, polar, grid, fan, random(n, seed=…)
 rt.pupil.fan("tangential", n=41)
 ```
 
@@ -284,16 +298,14 @@ index into the declared list, or `"all"` (the default). `wavelength=
 
 ## 5. First-order optics
 
-*Planned.*
-
 ```python
 fo = rt.analysis.first_order(triplet)
-fo.efl_mm, fo.bfl_mm, fo.ffl_mm                  # 50.0, 42.95, -37.2
-fo.f_number, fo.working_f_number, fo.image_na
-fo.entrance_pupil.position_mm, fo.entrance_pupil.diameter_mm
-fo.exit_pupil.position_mm,     fo.exit_pupil.diameter_mm
-fo.principal_planes, fo.nodal_points
-fo.lagrange_invariant
+fo.efl_mm, fo.bfl_mm, fo.ffl_mm                  # 50.06, 43.14, -36.62
+fo.f_number, fo.working_f_number, fo.image_na    # 4.5, 4.5, 0.111
+fo.entrance_pupil.z_mm, fo.entrance_pupil.diameter_mm
+fo.exit_pupil.z_mm,     fo.exit_pupil.diameter_mm
+fo.principal_planes_z_mm, fo.nodal_points_z_mm, fo.focal_points_z_mm
+fo.lagrange_invariant_mm
 fo.paraxial_image_height_mm, fo.magnification
 print(fo)                                        # the "system data" report
 
@@ -302,13 +314,14 @@ ynu.marginal.y, ynu.marginal.u, ynu.chief.y, ynu.chief.u
 ```
 
 Each quantity is computed by the paraxial engine (y-nu trace). None of them
-is stored on the system. **‹law 3›**
+is stored on the system. **‹law 3›** Positions `*_z_mm` are world z; BFL
+and FFL run along the light from the last and first surfaces that bend it.
+The aperture is stated paraxially, as lens-design programs do: it fixes the
+paraxial marginal ray, and real rays fill the stop out to that ray's height.
 
 ---
 
 ## 6. Tracing, when you want rays and not a measurement
-
-*Planned.*
 
 ```python
 bundle = rt.trace(triplet, field="all", pupil=rt.pupil.hexapolar(rings=6), wavelength="all")
@@ -320,7 +333,10 @@ rays.detected                    # the rays that reached the detector
 rays.at("STO")                   # the same rays where they crossed the stop
 rays.trajectory                  # (N, V, 3): every point each ray passed
 rt.analysis.angles_of_incidence(triplet, rays)   # (N, V): how each ray met each boundary
+```
 
+<!-- planned: polarisation ray tracing -->
+```python
 rays = rt.trace(triplet, field=0, pupil=rt.pupil.hexapolar(8), polarization=True).rays
 rays.jones                       # a column of polarisation ray-tracing matrices
 ```
@@ -329,7 +345,10 @@ One ray is one row: there is no separate single-ray type.
 
 `rt.trace` is the sequential engine. It is chosen by the subject (a
 `Configuration`) and never constructed by hand for ordinary work.
-`rt.SequentialTracer` stays public for those who want the engine itself.
+`raytracer.tracing.SequentialTracer` stays public for those who want the
+engine itself. Every ray of a configuration crosses the stop at the point
+its pupil coordinates name: real aiming (the default) solves for it exactly;
+paraxial aiming takes the ray paraxial optics sends there.
 
 ---
 
@@ -348,6 +367,7 @@ A = rt.analysis
 
 ### 7.1 Rays
 
+<!-- planned: ray analyses -->
 ```python
 spots = A.spot_diagram(triplet, pupil=rt.pupil.hexapolar(8))
 spots[2].rms_radius_um, spots[2].geo_radius_um, spots[2].centroid_mm, spots.airy_radius_um
@@ -367,6 +387,7 @@ A.relative_illumination(triplet)
 
 ### 7.2 Third order: theory and measurement are named apart
 
+<!-- planned: Seidel aberrations -->
 ```python
 s = A.seidel(triplet)                      # third-order theory, from the paraxial rays
 s.by_surface                               # table: SI SII SIII SIV SV CL CT per surface
@@ -381,6 +402,7 @@ they have two names.
 
 ### 7.3 Wavefront and diffraction
 
+<!-- planned: wavefront and diffraction -->
 ```python
 wf = A.wavefront(triplet, field=3, wavelength="primary")
 wf.rms_waves, wf.pv_waves
@@ -405,6 +427,7 @@ mtf.at(frequency_cyc_per_mm=50)
 analyses. They are one analysis evaluated along an axis. The axis is a
 field, a wavelength, a configuration, or a `Parameter` of the system (§9).
 
+<!-- planned: sweeps -->
 ```python
 through_focus = rt.sweep(A.mtf, triplet,
                          over=rt.param.Defocus(), values=np.linspace(-0.1, 0.1, 21),
@@ -420,6 +443,7 @@ The familiar named views are one-line definitions over `sweep`:
 
 ### 7.5 Focus is explicit
 
+<!-- planned: focus -->
 ```python
 best = rt.focus.best(triplet, metric=rt.metrics.RmsWavefront(field="all"))
 best.defocus_mm                            # how far the image surface moved
@@ -430,6 +454,7 @@ A.mtf(triplet, focus="best")               # allowed, and the result reports .de
 
 ### 7.6 Polarisation, transmission, ghosts, images
 
+<!-- planned: polarisation and transmission -->
 ```python
 A.transmission(triplet)                                   # Fresnel + coatings + bulk absorption
 A.polarization_pupil(triplet, field=0)                    # diattenuation and retardance maps
@@ -444,6 +469,7 @@ A.simulate_image(triplet, scene_image, field_of_view_deg=40.0, psf_grid=(5, 5))
 
 ### 7.7 Exact optics (already the library's speciality)
 
+<!-- planned: families under conditions -->
 ```python
 train = rt.families.StigmaticTrain(media=(rt.AIR, glass["N-BK7"], rt.AIR), ...)
 A.stigmatism_report(train.under(conditions))
@@ -460,6 +486,7 @@ is not a system. `train.system()` gives the member, and `train.under(c)` is
 
 *Planned.*
 
+<!-- planned: plotting results -->
 ```python
 rt.viz.plot(mtf)                     # one entry point, dispatched on the result type
 mtf.plot()                           # the same; a deferred convenience, not a dependency
@@ -480,6 +507,7 @@ One noun serves sweeps, multi-configuration, tolerancing and (later)
 optimisation. A parameter reads a value from a configuration and returns a
 *new* configuration with the value changed.
 
+<!-- planned: parameters -->
 ```python
 p = rt.param.Radius("L3.2")
 p.get(triplet)                       # -17.285
@@ -500,6 +528,7 @@ rt.param.ObjectDistance(); rt.param.FieldScale()      # parameters of the condit
 
 *Planned.*
 
+<!-- planned: multi-configuration -->
 ```python
 zoom = rt.MultiConfiguration.vary(
     base=zoom_lens.under(day),
@@ -525,6 +554,7 @@ A tolerance is a *physical* error (fabrication or assembly), stated in the
 units an optical shop uses. It maps onto parameters. It is not a raw field
 of the data model.
 
+<!-- planned: tolerancing -->
 ```python
 tolerances = [
     rt.tol.Power("L1.1", fringes=3, test_wavelength_um=0.6328),
@@ -571,8 +601,8 @@ from raytracer.tracing import NonSequentialTracer
 
 source = CollimatedSource((0, 0, -40), direction=(0, 0, 1), beam_radius=2.0,
                           rays=2000, wavelength_um=0.55)
-rays = NonSequentialTracer(system, max_interactions=12, split=True).trace(source)
-points, power = detected_on(system, rays, "D1")             # where sensor D1 met rays, and what each brought
+rays = NonSequentialTracer(folded, max_interactions=12, split=True).trace(source)
+points, power = detected_on(folded, rays, "D1")             # where sensor D1 met rays, and what each brought
 np.histogram(points[:, 1], bins=200, weights=power)          # irradiance profile
 rays[rays.parent >= 0]                                       # the rays split off others: ghosts, stray light
 rays.segments()                                              # every straight piece, for drawing
@@ -600,6 +630,7 @@ is one thing, however it is traced.
 A Gaussian beam is a different *kind of light*, like a ray, and it has its
 own engine.
 
+<!-- planned: beams -->
 ```python
 beam = rt.GaussianBeam(waist_um=500.0, wavelength_um=1.064, m2=1.1, waist_at_mm=-100.0)
 bt = rt.beams.trace(laser_line.system, beam)       # complex q through every surface

@@ -128,6 +128,31 @@ def test_elements_know_nothing_of_systems_or_engines():
         assert _imported_layers(path).isdisjoint({"system", "tracing", "sources"})
 
 
+#: Presentation libraries: only ``viz`` may import them, at any depth (law 7).
+PRESENTATION = {"matplotlib", "vispy", "PySide6", "PyQt5", "PyQt6", "OpenGL", "ipywidgets", "IPython"}
+
+
+def _imported_modules(path: Path) -> set[str]:
+    """Every top-level module *path* imports, wherever in it the import stands."""
+
+    names = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names.add(node.module.split(".")[0])
+    return names
+
+
+@pytest.mark.parametrize("layer", [layer for layer in LAYERS if layer != "viz"])
+def test_measurement_is_not_presentation(layer: str):
+    """Nothing below ``viz`` imports a plotting or windowing library, even inside a function."""
+
+    for path in _modules_in(layer):
+        found = _imported_modules(path) & PRESENTATION
+        assert not found, f"{path.relative_to(PACKAGE.parent)} imports {sorted(found)}, which only viz may"
+
+
 def test_rays_are_light_alone():
     """A ray is light: what it meets, and how it is traced, are no part of it."""
 

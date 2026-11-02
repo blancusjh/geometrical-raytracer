@@ -118,6 +118,34 @@ la patente queda así:
 - el líquido de inmersión y la última lente comparten una superficie: son
   una lente de dos medios, y el sensor está al fondo del líquido.
 
+## Cómo se usa: condiciones
+
+El sistema es hardware: no sabe de objetos, aperturas, campos ni longitudes
+de onda. Eso son las *condiciones de uso*, valores aparte; un sistema bajo
+condiciones es una `Configuration`, el sujeto de todo análisis, y lo que se
+contradice se rechaza al construirla, nombrando ambos lados.
+
+```python
+day = rt.Conditions(
+    object=rt.Object.at_infinity(),
+    aperture=rt.SystemAperture.f_number(4.5),        # o .epd(…), .object_na(…), .image_na(…), .from_stop()
+    fields=rt.Fields.angles([0.0, 10.0, 14.0, 20.0]),
+    spectrum=rt.Spectrum.fdc(),                       # F, d, C; primaria d
+)
+triplet = cooke.under(day)
+
+print(rt.analysis.first_order(triplet))              # EFL 50.06, BFL 43.14, pupilas, NA, planos principales…
+bundle = rt.trace(triplet, pupil=rt.pupil.hexapolar(6))   # rayos apuntados desde cada campo y longitud de onda
+bundle.rays, bundle.field, bundle.pupil
+```
+
+Cada rayo cruza el diafragma en el punto que nombran sus coordenadas de
+pupila: el apuntado real (por omisión) lo resuelve exactamente, por Newton
+sobre todos los rayos a la vez; el paraxial toma el rayo que la óptica
+paraxial manda allí. La apertura se declara paraxialmente, como en los
+programas de diseño: fija el rayo marginal paraxial, y los rayos reales
+llenan el diafragma hasta su altura.
+
 ## Los dos motores
 
 Un rayo es una sola cosa, lo trace quien lo trace. `Rays` es una tabla
@@ -404,8 +432,8 @@ estrictamente descendente: todo import a nivel de módulo apunta a un paquete
 anterior.
 
 ```
-geometry → materials → coatings → interfaces → elements → system → rays
-         → sources → tracing → families → io → analysis → optimize → viz
+geometry → materials → coatings → interfaces → elements → system → conditions
+         → rays → sources → tracing → families → io → analysis → optimize → viz
 ```
 
 | paquete | pregunta | líneas |
@@ -415,21 +443,27 @@ geometry → materials → coatings → interfaces → elements → system → r
 | **`coatings`** | ¿cuánta luz refleja y transmite una frontera? | 155 |
 | **`interfaces`** | una superficie como frontera óptica, y las leyes de reflexión y refracción | 96 |
 | **`elements`** | ¿de qué cosas físicas está hecho un instrumento? — `Lens`, `Mirror`, `BeamSplitter`, `Prism`, `Stop`, `Sensor` | 380 |
-| **`system`** | ¿cómo están dispuestas y qué se sigue de ello? — `OpticalSystem`, `Assembly`, fronteras con sus medios, camino secuencial, tablas | 918 |
+| **`system`** | ¿cómo están dispuestas y qué se sigue de ello? — `OpticalSystem`, `Assembly`, fronteras con sus medios, camino secuencial, tablas | 928 |
+| **`conditions`** | ¿cómo se usa? — objeto, apertura, campos, espectro, apuntado; un sistema bajo condiciones es una `Configuration` | 566 |
 | **`rays`** | ¿qué es la luz? — `Rays`: cada rayo, la línea quebrada entera que sigue, lo trace quien lo trace | 251 |
 | **`sources`** | ¿dónde empieza la luz? | 206 |
-| **`tracing`** | ¿cómo llega la luz de aquí a allá? — secuencial, no secuencial, paraxial, pupilas | 935 |
+| **`tracing`** | ¿cómo llega la luz de aquí a allá? — secuencial, no secuencial, paraxial, pupilas | 1536 |
 | **`families`** | ¿qué sistemas genera una familia de diseño? — `StigmaticTrain` | 363 |
 | **`io`** | ¿cómo se guarda un diseño? | 430 |
-| **`analysis`** | ¿qué se mide? — `imaging` mira la imagen, `aberrations` el error de rayo y de frente de onda, `footprints` dónde y cómo dio la luz en el instrumento | 2313 |
+| **`analysis`** | ¿qué se mide? — `imaging` mira la imagen, `aberrations` el error de rayo y de frente de onda, `footprints` dónde y cómo dio la luz en el instrumento | 2439 |
 | **`optimize`** | ¿qué es mejor? — restricciones enchufables sobre familias exactas | 551 |
 | **`viz`** | ¿cómo se muestra? — matplotlib y OpenGL HDR, 2-D como corte meridional del modelo 3-D | 3536 |
 
 `tests/test_architecture.py` lee el AST de cada módulo y comprueba la
-cadena en cada `pytest`. Comprueba además tres reglas más finas: un elemento
-no importa nunca el sistema ni los motores; el sistema no importa nunca un
-motor ni un formato de archivo; y un rayo no importa nada: es luz, no lo
-que encuentra ni quién lo traza.
+cadena en cada `pytest`. Comprueba además cuatro reglas más finas: un
+elemento no importa nunca el sistema ni los motores; el sistema no importa
+nunca un motor ni un formato de archivo; un rayo no importa nada: es luz, no
+lo que encuentra ni quién lo traza; y nada por debajo de `viz` importa una
+biblioteca de gráficos o de ventanas. Otras dos pruebas protegen el diseño:
+cada nombre público está definido una sola vez en
+[`docs/design/glossary.md`](docs/design/glossary.md), y los bloques de
+[`docs/design/usage.md`](docs/design/usage.md) se ejecutan en orden, los
+planeados como fallos esperados hasta que su función exista.
 
 ### Cuatro decisiones que explican el resto
 

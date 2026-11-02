@@ -5,8 +5,8 @@ off that usage, gives each one a single nature and a single home, and
 states the laws that keep the natures apart. **‹law n›** in `usage.md`
 cites §6 here.
 
-Sections 1–3 describe the architecture as implemented. Sections 4–5 and
-the laws cover the rest of the plan as well.
+Sections 1–4 describe the architecture as implemented, conditions of use
+included. Section 5 and the laws cover the rest of the plan as well.
 
 ---
 
@@ -16,8 +16,8 @@ Each package answers one question. Every module-level import goes to a
 package earlier in the chain, and `tests/test_architecture.py` checks it:
 
 ```
-geometry → materials → coatings → interfaces → elements → system → rays
-         → sources → tracing → families → io → analysis → optimize → viz
+geometry → materials → coatings → interfaces → elements → system → conditions
+         → rays → sources → tracing → families → io → analysis → optimize → viz
 ```
 
 | Package | Question | Nature |
@@ -28,6 +28,7 @@ geometry → materials → coatings → interfaces → elements → system → r
 | `interfaces` | What is a surface as an optical boundary, and which laws act there? | physics of boundaries (direction) |
 | `elements` | What physical things is an instrument made of? | description |
 | `system` | How are they arranged, and what follows from the arrangement? | description and derived facts |
+| `conditions` | How is it used? | description of use: object, aperture, fields, spectrum, aiming |
 | `rays` | What is light? | rays: each the whole broken line it follows, however it is traced |
 | `sources` | Where does light start? | description of emission |
 | `tracing` | How does light get from here to there? | algorithms |
@@ -59,10 +60,16 @@ stored as authoritative state. **‹law 3›**
 | `OpticalSystem` | components in an ambient medium, optionally a stated path and stop | system | stated |
 | `PhysicalFace` | one physical boundary, with the medium on each side | system | **derived** (coincident faces merge: contact) |
 | `Step`, `path` | the sequential route: boundary + event | system | stated, or **derived** for a coaxial system |
+| `Object`, `SystemAperture`, `Fields`, `Spectrum`, `Polarization`, `Aiming` | the conditions of use, each a value; the aperture is stated paraxially | conditions | stated |
+| `Conditions` | how a system is used: all of the above | conditions | stated |
+| `Configuration` | a system under conditions, `system.under(conditions)`: the subject of every analysis | conditions | stated (contradictions rejected at construction) |
+| `Field`, `Pupil`, `pupil.Sampling` | coordinates of the condition space, and samplings of the pupil | conditions | stated |
 | `Rays` | light, a ray per row: the whole broken line it follows from its birth (at a source, or split off its `parent`), its wavelength, power, optical path, `trajectory` and `status` | rays | born at a source; carried on by a tracer |
 | `Source` | an emitter of rays | sources | stated |
 | `SequentialTracer`, `NonSequentialTracer` | the engines: both take `Rays` and return the same rays carried further, differing only in how each ray's next boundary is chosen and whether light divides; the tracer holds the facts of use it needs (the object plane; the wavelength of rays that state none) | tracing | — |
 | `StigmaticTrain` | a family of stigmatic systems; `.system()` is a member | families | stated |
+| `Paraxial`, `FirstOrder` | the paraxial optics of a configuration, and its first-order data | tracing, analysis | **derived** |
+| `Bundle` | rays traced through a configuration, with the field and pupil point each samples | tracing | **derived** |
 
 ### Surface hierarchy
 
@@ -229,38 +236,32 @@ seeds are equal.
 
 ## 7. How the design is protected
 
-Three checks turn this document into something `pytest` fails on.
+Three checks turn this document into something `pytest` fails on. All three
+are in place.
 
 1. **Layers.** `tests/test_architecture.py` enforces the chain of §1, plus
-   two rules: elements never import the system or the engines, and the
-   system never imports an engine or a file format. Still to add: a
-   third-party rule (below `viz`, no `matplotlib`, `vispy` or `PySide6`;
-   law 7).
-2. **Glossary.** `docs/design/glossary.md`, to be written once D1–D7 (§8)
-   are settled, defines every public name, once,
-   with its nature and package. A test collects `raytracer.__all__`
-   recursively and fails on any name missing from the glossary, and on any
-   glossary entry that no longer exists. A new concept cannot enter the API
-   without a definition. A renamed one cannot leave a stale definition
-   behind.
-3. **Executable usage.** Each fenced block of `usage.md` becomes a test
-   case, run in order like a notebook. Each case is marked
-   `xfail(strict=True, reason="<feature>")` until its feature lands. When
-   the feature lands, the case passes, strict mode fails the run, and the
-   marker must be removed by hand. The usage contract and the
-   implementation cannot drift apart without a red test.
+   finer rules: elements never import the system or the engines; the system
+   never imports an engine or a file format; a ray imports nothing; and
+   nothing below `viz` imports a plotting or windowing library, even inside
+   a function (law 7).
+2. **Glossary.** `docs/design/glossary.md` defines every public name, once,
+   with its nature. `tests/test_glossary.py` follows the packages'
+   `__all__` from the top level and each layer, and fails on any name
+   missing from the glossary, and on any glossary entry that no longer
+   exists. A new concept cannot enter the API without a definition. A
+   renamed one cannot leave a stale definition behind.
+3. **Executable usage.** `tests/test_usage.py` runs the fenced blocks of
+   `usage.md` in order, like a notebook. A block preceded by
+   `<!-- planned: <feature> -->` is an expected failure, strictly: when the
+   feature lands, the block passes, the run fails, and the marker must be
+   removed by hand. The usage contract and the implementation cannot drift
+   apart without a red test.
 
 Laws 2, 5, 6, 8 and 10 each get the dedicated tests listed in §6.
 
 ---
 
 ## 8. Open decisions
-
-**D1 — Name of "a system under conditions".** `Configuration`, `Setup`, or
-`Imaging`. *Recommended: `Configuration`.*
-
-**D4 — Default ray aiming** once conditions exist: real or paraxial.
-*Recommended: real.*
 
 **D5 — `result.plot()`.** Allow it as a deferred convenience, or allow
 only `rt.viz.plot(result)`. *Recommended: allow both.*
@@ -271,7 +272,16 @@ the README is in Spanish.
 **D7 — Glass data shipped with the package.** *Recommended:* ship
 refractiveindex.info data (CC0); read vendor `.agf` files from a user path.
 
-Settled: surfaces live in `geometry.surfaces`. Prescription tables keep the
-standard signed convention, while placed elements have absolute poses.
+**D8 — One name, two things.** `AxialColor` names both an analysis result
+(focus against wavelength) and an optimisation constraint (that the
+wavelengths focus together). The glossary tells them apart by namespace,
+but law 1 wants one name per concept: rename one when the analyses are
+rebuilt on configurations (Tier 1).
+
+Settled: a system under conditions is a `Configuration` (D1); rays are aimed
+for real by default, paraxially on request (D4); the aperture condition is a
+`SystemAperture`, apart from the `Aperture` regions of a surface. Surfaces
+live in `geometry.surfaces`. Prescription tables keep the standard signed
+convention, while placed elements have absolute poses.
 Verbs that change a value are past participles and return a new value
 (`rotated`, `translated`, `placed`).

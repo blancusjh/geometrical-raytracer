@@ -4,23 +4,35 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..conditions import Configuration
 from ..rays import Rays
 from ..system import OpticalSystem
 
-
-def detected_on(system: OpticalSystem, rays: Rays, detector: str) -> tuple[np.ndarray, np.ndarray]:
-    """The rays *detector* detected: where each landed, in the detector's own frame ``(K, 3)``, and the power it brought."""
-
-    here = rays.detected & (rays.boundary == detector)
-    return system.face(detector).pose.to_local(rays.position[here]), rays.power[here]
+Subject = OpticalSystem | Configuration
 
 
-def angles_of_incidence(system: OpticalSystem, rays: Rays) -> np.ndarray:
-    """``(N, V)``: the angle (degrees) between each ray and the normal of the boundary at each of its points.
+def _system(subject: Subject) -> OpticalSystem:
+    return subject.system if isinstance(subject, Configuration) else subject
 
-    NaN where a ray has no point, at its birth, and on a lens rim.
+
+def detected_on(subject: Subject, rays: Rays, detector: str) -> tuple[np.ndarray, np.ndarray]:
+    """The rays *detector* detected: where each landed, in the detector's own frame ``(K, 3)``, and the power it brought.
+
+    *subject* is the system the rays were traced through, or a configuration of it.
     """
 
+    here = rays.detected & (rays.boundary == detector)
+    return _system(subject).face(detector).pose.to_local(rays.position[here]), rays.power[here]
+
+
+def angles_of_incidence(subject: Subject, rays: Rays) -> np.ndarray:
+    """``(N, V)``: the angle (degrees) between each ray and the normal of the boundary at each of its points.
+
+    *subject* is the system the rays were traced through, or a configuration of it. NaN where a ray has no
+    point, at its birth, and on a lens rim.
+    """
+
+    system = _system(subject)
     out = np.full(rays.trajectory.shape[:2], np.nan)
     for j in range(1, rays.trajectory.shape[1]):
         here, before = rays.at(j), rays.at(j - 1)

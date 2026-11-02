@@ -450,7 +450,6 @@ __all__ = [
     "ParaxialPupil",
     "ParaxialTrace",
     "trace",
-    "direction_from_slopes",
     "ConjugateSolution",
     "differential_conjugates",
     "solve_object_plane",

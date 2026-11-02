@@ -1,9 +1,11 @@
 # Design: usage first, then ontology
 
-**Status.** The physical model is implemented: placed elements in an
+**Status.** Implemented: the physical model — placed elements in an
 ambient medium, and light as `Rays` that both a sequential and a
-non-sequential tracer carry through it (`usage.md` §2 and §12,
-`ontology.md` §1–3). Everything else here is the
+non-sequential tracer carry through it — and Tier 0, how a system is used:
+conditions, configurations, first-order optics, ray aiming and tracing a
+configuration (`usage.md` §2–§6 and §12, `ontology.md` §1–4). The three
+safeguards below are in force. Everything else here is the
 plan, and its usage is fixed before any code is written for it.
 
 > The purpose of abstraction is not to be vague, but to create a new
@@ -25,6 +27,7 @@ comes last, and it is written against this text, not the other way round.
 2. [`ontology.md`](ontology.md) — what each noun *is*: its nature, its
    package, whether it is stated or derived. The laws that keep the
    ontology sound, how each law is enforced, and the decisions still open.
+3. [`glossary.md`](glossary.md) — every public name, defined once.
 
 ## Scope
 
@@ -43,10 +46,12 @@ one more kind of `Parameter` plus temperature in `Conditions`).
 A design that lives only in prose erodes. Three mechanisms, described in
 `ontology.md` §7, turn it into something `pytest` checks:
 
-- the **layer test** (`tests/test_architecture.py`, already in place),
-  extended to the new layers and to third-party imports;
-- a **glossary test**: every public name must be defined once in the
-  glossary, so a new concept cannot enter the API without a definition;
-- an **executable usage specification**: the snippets of `usage.md` run as
-  tests, each marked `xfail(strict=True)` until its feature lands, so the
-  usage contract cannot silently drift from the implementation.
+- the **layer test** (`tests/test_architecture.py`): the chain of packages,
+  and no plotting or windowing library below `viz`;
+- the **glossary test** (`tests/test_glossary.py`): every public name is
+  defined once in `glossary.md`, so a new concept cannot enter the API
+  without a definition;
+- the **executable usage specification** (`tests/test_usage.py`): the
+  blocks of `usage.md` run in order; a planned one is an expected failure,
+  strictly, until its feature lands, so the usage contract cannot silently
+  drift from the implementation.
