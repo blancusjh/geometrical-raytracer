@@ -1,4 +1,4 @@
-# raytracer
+# Geometrical Raytracer
 
 Trazador de rayos óptico en Python. Propaga luz **exactamente** —resolviendo
 la ecuación de cada superficie, sin aproximación paraxial— a través de
